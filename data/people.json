@@ -1,0 +1,18 @@
+[
+  {
+    "id": "22222222-0000-0000-0000-000000000001",
+    "firstName": "Doug",
+    "lastName": "Holloway",
+    "displayNumber": "NZ-0001",
+    "organisationId": "c2910e24-5585-4c2a-b7a2-7e51f502329b",
+    "role": "instructor"
+  },
+  {
+    "id": "22222222-0000-0000-0000-000000000003",
+    "firstName": "Tane",
+    "lastName": "Walker",
+    "displayNumber": "NZ-0288",
+    "organisationId": "74030f4d-eb20-4a8c-a368-37a4e21ea2ae",
+    "role": "instructor"
+  }
+]

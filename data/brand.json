@@ -1,0 +1,23 @@
+[
+  {
+    "organisationId": "11111111-1111-1111-1111-111111111111",
+    "tokens": {
+      "ink": "#161617",
+      "muted": "#6F6F72",
+      "accent": "#F0CE41",
+      "canvas": "#F5F5F5",
+      "inkSoft": "#252527",
+      "neutral": "#BDBDBF",
+      "primary": "#CE372C",
+      "canvasAlt": "#E3E3E3",
+      "primaryText": "#CE372C",
+      "primaryHover": "#AC2E25",
+      "primaryTextStrong": "#9A2A1F"
+    },
+    "theme": "classic",
+    "fonts": {
+      "body": "Zen Kaku Gothic New",
+      "display": "Shippori Mincho"
+    }
+  }
+]

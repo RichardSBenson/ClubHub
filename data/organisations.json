@@ -1,0 +1,200 @@
+[
+  {
+    "id": "11111111-1111-1111-1111-111111111111",
+    "parentId": null,
+    "type": "country",
+    "name": "Mas Oyama Karate New Zealand",
+    "slug": "moknz",
+    "countryCode": "NZ",
+    "timezone": "Pacific/Auckland",
+    "founded": "1965-01-01T00:00:00.000Z",
+    "status": "active"
+  },
+  {
+    "id": "50e5dcfc-c305-406a-b42e-897e11092e9d",
+    "parentId": "11111111-1111-1111-1111-111111111111",
+    "type": "dojo",
+    "name": "Auckland",
+    "slug": "auckland",
+    "countryCode": "NZ",
+    "timezone": "Pacific/Auckland",
+    "founded": null,
+    "status": "active"
+  },
+  {
+    "id": "347fff6e-50d7-4f7e-b962-84bdafc64b52",
+    "parentId": "11111111-1111-1111-1111-111111111111",
+    "type": "dojo",
+    "name": "Carterton",
+    "slug": "carterton",
+    "countryCode": "NZ",
+    "timezone": "Pacific/Auckland",
+    "founded": null,
+    "status": "active"
+  },
+  {
+    "id": "1d15eb70-d919-47d1-a3a5-54336cbec8c5",
+    "parentId": "11111111-1111-1111-1111-111111111111",
+    "type": "dojo",
+    "name": "Christchurch",
+    "slug": "christchurch",
+    "countryCode": "NZ",
+    "timezone": "Pacific/Auckland",
+    "founded": null,
+    "status": "active"
+  },
+  {
+    "id": "854176a8-17f5-4cc5-8820-42649b58abe5",
+    "parentId": "11111111-1111-1111-1111-111111111111",
+    "type": "dojo",
+    "name": "Dunedin",
+    "slug": "dunedin",
+    "countryCode": "NZ",
+    "timezone": "Pacific/Auckland",
+    "founded": null,
+    "status": "active"
+  },
+  {
+    "id": "9a7ee928-364c-4da3-ab1a-8d177e4b829e",
+    "parentId": "11111111-1111-1111-1111-111111111111",
+    "type": "dojo",
+    "name": "Far North",
+    "slug": "far-north",
+    "countryCode": "NZ",
+    "timezone": "Pacific/Auckland",
+    "founded": null,
+    "status": "active"
+  },
+  {
+    "id": "2271e4b6-8394-4eb7-b5b3-0a8621da9f2d",
+    "parentId": "11111111-1111-1111-1111-111111111111",
+    "type": "dojo",
+    "name": "Gisborne",
+    "slug": "gisborne",
+    "countryCode": "NZ",
+    "timezone": "Pacific/Auckland",
+    "founded": null,
+    "status": "active"
+  },
+  {
+    "id": "c99c0a50-f708-4cf0-9095-b595e74c3b19",
+    "parentId": "11111111-1111-1111-1111-111111111111",
+    "type": "dojo",
+    "name": "Hawera",
+    "slug": "hawera",
+    "countryCode": "NZ",
+    "timezone": "Pacific/Auckland",
+    "founded": null,
+    "status": "active"
+  },
+  {
+    "id": "a417a860-e980-45b3-a2c5-624bac22e01b",
+    "parentId": "11111111-1111-1111-1111-111111111111",
+    "type": "dojo",
+    "name": "Japan Branch",
+    "slug": "japan",
+    "countryCode": "JP",
+    "timezone": "Asia/Tokyo",
+    "founded": null,
+    "status": "active"
+  },
+  {
+    "id": "82d053cf-fa58-47a9-bfea-5916513cdc15",
+    "parentId": "11111111-1111-1111-1111-111111111111",
+    "type": "dojo",
+    "name": "Milton",
+    "slug": "milton",
+    "countryCode": "NZ",
+    "timezone": "Pacific/Auckland",
+    "founded": null,
+    "status": "active"
+  },
+  {
+    "id": "0e29eb60-3552-48f7-84a1-f586170f1cf8",
+    "parentId": "11111111-1111-1111-1111-111111111111",
+    "type": "dojo",
+    "name": "Napier",
+    "slug": "napier",
+    "countryCode": "NZ",
+    "timezone": "Pacific/Auckland",
+    "founded": null,
+    "status": "active"
+  },
+  {
+    "id": "e3c58416-b67e-4de4-8432-8bcc92f0d0c7",
+    "parentId": "11111111-1111-1111-1111-111111111111",
+    "type": "dojo",
+    "name": "New Plymouth",
+    "slug": "new-plymouth",
+    "countryCode": "NZ",
+    "timezone": "Pacific/Auckland",
+    "founded": null,
+    "status": "active"
+  },
+  {
+    "id": "98bf155a-75c0-449b-8870-b5453e50617b",
+    "parentId": "11111111-1111-1111-1111-111111111111",
+    "type": "dojo",
+    "name": "Stratford",
+    "slug": "stratford",
+    "countryCode": "NZ",
+    "timezone": "Pacific/Auckland",
+    "founded": null,
+    "status": "active"
+  },
+  {
+    "id": "b7b58f5a-0493-48ec-93e7-484a6047da7b",
+    "parentId": "11111111-1111-1111-1111-111111111111",
+    "type": "dojo",
+    "name": "Inglewood",
+    "slug": "taranaki",
+    "countryCode": "NZ",
+    "timezone": "Pacific/Auckland",
+    "founded": null,
+    "status": "active"
+  },
+  {
+    "id": "82a16a64-7613-48af-a952-d9682b0ad544",
+    "parentId": "11111111-1111-1111-1111-111111111111",
+    "type": "dojo",
+    "name": "Taumarunui",
+    "slug": "taumarunui",
+    "countryCode": "NZ",
+    "timezone": "Pacific/Auckland",
+    "founded": null,
+    "status": "active"
+  },
+  {
+    "id": "2e3df61c-3030-44f4-9e28-67e54772e233",
+    "parentId": "11111111-1111-1111-1111-111111111111",
+    "type": "dojo",
+    "name": "Waikouaiti",
+    "slug": "waikouaiti",
+    "countryCode": "NZ",
+    "timezone": "Pacific/Auckland",
+    "founded": null,
+    "status": "active"
+  },
+  {
+    "id": "74030f4d-eb20-4a8c-a368-37a4e21ea2ae",
+    "parentId": "11111111-1111-1111-1111-111111111111",
+    "type": "dojo",
+    "name": "Wellington",
+    "slug": "wellington",
+    "countryCode": "NZ",
+    "timezone": "Pacific/Auckland",
+    "founded": null,
+    "status": "active"
+  },
+  {
+    "id": "c2910e24-5585-4c2a-b7a2-7e51f502329b",
+    "parentId": "11111111-1111-1111-1111-111111111111",
+    "type": "dojo",
+    "name": "Whanganui",
+    "slug": "whanganui",
+    "countryCode": "NZ",
+    "timezone": "Pacific/Auckland",
+    "founded": null,
+    "status": "active"
+  }
+]

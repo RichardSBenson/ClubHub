@@ -1,0 +1,20 @@
+[
+  {
+    "slug": "about",
+    "title": "About us",
+    "metaTitle": "About Mas Oyama Karate New Zealand",
+    "metaDescription": "Kyokushin karate in New Zealand since 1965, with a direct lineage through Sosai Mas Oyama.",
+    "body": {
+      "blocks": [
+        {
+          "text": "Hanshi Doug Holloway, 8th dan, set up the first Kyokushin karate dojo in New Zealand in 1965, after returning from Japan as a student of Sosai Mas Oyama.",
+          "type": "paragraph"
+        },
+        {
+          "text": "Kyokushin means the ultimate truth. It is taught here by people who learned it from the source.",
+          "type": "paragraph"
+        }
+      ]
+    }
+  }
+]

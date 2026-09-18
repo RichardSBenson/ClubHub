@@ -1,0 +1,47 @@
+[
+  {
+    "organisationId": "c2910e24-5585-4c2a-b7a2-7e51f502329b",
+    "label": "Juniors, 6-12 years",
+    "weekday": 2,
+    "starts": "17:30:00",
+    "ends": "18:30:00",
+    "minAge": 6,
+    "maxAge": 12
+  },
+  {
+    "organisationId": "c2910e24-5585-4c2a-b7a2-7e51f502329b",
+    "label": "Juniors, 6-12 years",
+    "weekday": 4,
+    "starts": "17:30:00",
+    "ends": "18:30:00",
+    "minAge": 6,
+    "maxAge": 12
+  },
+  {
+    "organisationId": "c2910e24-5585-4c2a-b7a2-7e51f502329b",
+    "label": "Seniors, 13 and over",
+    "weekday": 2,
+    "starts": "18:45:00",
+    "ends": "20:15:00",
+    "minAge": 13,
+    "maxAge": null
+  },
+  {
+    "organisationId": "c2910e24-5585-4c2a-b7a2-7e51f502329b",
+    "label": "Seniors, 13 and over",
+    "weekday": 4,
+    "starts": "18:45:00",
+    "ends": "20:15:00",
+    "minAge": 13,
+    "maxAge": null
+  },
+  {
+    "organisationId": "c2910e24-5585-4c2a-b7a2-7e51f502329b",
+    "label": "Open training",
+    "weekday": 6,
+    "starts": "09:00:00",
+    "ends": "10:30:00",
+    "minAge": null,
+    "maxAge": null
+  }
+]

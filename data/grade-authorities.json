@@ -1,0 +1,29 @@
+[
+  {
+    "organisationId": "11111111-1111-1111-1111-111111111111",
+    "fromRankOrder": 1,
+    "toRankOrder": 7,
+    "awardedByType": "dojo",
+    "ratifiedByType": "country",
+    "minPanelSize": 1,
+    "minPanelRank": 11
+  },
+  {
+    "organisationId": "11111111-1111-1111-1111-111111111111",
+    "fromRankOrder": 8,
+    "toRankOrder": 10,
+    "awardedByType": "country",
+    "ratifiedByType": "country",
+    "minPanelSize": 2,
+    "minPanelRank": 12
+  },
+  {
+    "organisationId": "11111111-1111-1111-1111-111111111111",
+    "fromRankOrder": 11,
+    "toRankOrder": 15,
+    "awardedByType": "country",
+    "ratifiedByType": "country",
+    "minPanelSize": 3,
+    "minPanelRank": 14
+  }
+]

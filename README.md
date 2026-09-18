@@ -204,6 +204,15 @@ The proof it is real, not decorative: the same use case objects run against
 in-memory adapters with no I/O at all, and against Postgres, with identical
 results and no change to core code. See `docs/architecture.md`.
 
+## Storage
+
+**No `DATABASE_URL` → runs from JSON files in `data/`.** Deploys with nothing to
+provision. **`DATABASE_URL` set → Postgres.** One variable; the core never knew
+the difference.
+
+Files serve reads and refuse writes with a 503 that says why. Add the database
+when the admin app needs to record a grading. See `docs/storage.md`.
+
 ## Constraints this is built around
 
 - **Deployment is a phone, GitHub's web editor, and Vercel.** No terminal, no

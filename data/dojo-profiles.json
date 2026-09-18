@@ -1,0 +1,19 @@
+[
+  {
+    "organisationId": "c2910e24-5585-4c2a-b7a2-7e51f502329b",
+    "venueName": "Springvale Community Hall",
+    "addressLine": "21 Hadfield Street",
+    "suburb": "Springvale",
+    "city": "Whanganui",
+    "postcode": "4501",
+    "latitude": "-39.918700",
+    "longitude": "175.020000",
+    "directions": "Park at the back; come in the side door by the playground.",
+    "phone": "+64 6 000 0000",
+    "email": "whanganui@kyokushinkarate.co.nz",
+    "blurb": "[Two or three sentences from the dojo operator, in their own words.]",
+    "whoTrains": "Twelve active black belt instructors train and teach here.",
+    "firstClassFree": true,
+    "published": true
+  }
+]
