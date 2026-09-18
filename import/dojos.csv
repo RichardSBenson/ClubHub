@@ -1,0 +1,18 @@
+slug,name,venue_name,address_line,suburb,city,postcode,latitude,longitude,phone,email,directions,blurb,who_trains,instructor_name,instructor_grade,publish
+whanganui,Whanganui,Springvale Community Hall,21 Hadfield Street,Springvale,Whanganui,4501,-39.9187,175.0200,+64 6 000 0000,whanganui@kyokushinkarate.co.nz,Park at the back; side door by the playground.,,Twelve active black belt instructors train and teach here.,,,yes
+far-north,Far North,,,,Kaitaia,,,,,,,,,,,no
+auckland,Auckland,,,,Auckland,,,,,,,,,,,no
+gisborne,Gisborne,,,,Gisborne,,,,,,,,,,,no
+taranaki,Inglewood,,,,Inglewood,,,,,,,,,,,no
+stratford,Stratford,,,,Stratford,,,,,,,,,,,no
+new-plymouth,New Plymouth,,,,New Plymouth,,,,,,,,,,,no
+hawera,Hawera,,,,Hawera,,,,,,,,,,,no
+taumarunui,Taumarunui,,,,Taumarunui,,,,+64 27 635 3991,,,,,,,yes
+napier,Napier,,,,Napier,,,,,,,,,,,no
+carterton,Carterton,,,,Carterton,,,,,,,,,,,no
+wellington,Wellington,,,,Wellington,,,,,,,,,,,no
+christchurch,Christchurch,,,,Christchurch,,,,,,,,,,,no
+dunedin,Dunedin,,,,Dunedin,,,,,,,,,,,no
+waikouaiti,Waikouaiti,,,,Waikouaiti,,,,,,,,,,,no
+milton,Milton,,,,Milton,,,,,,,,,,,no
+japan,Japan Branch,,,,,,,,,,,,,,,no

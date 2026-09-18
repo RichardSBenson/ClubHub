@@ -1,0 +1,13 @@
+{
+  "name": "honbu",
+  "private": true,
+  "type": "module",
+  "engines": { "node": ">=20" },
+  "dependencies": { "pg": "^8.13.1" },
+  "scripts": {
+    "db": "psql -f db/schema.sql && psql -f db/seed-moknz.sql",
+    "test": "cd packages/brand && node test.mjs && cd ../content && node test.mjs && cd ../api && node test.mjs && node test-pages.mjs && node test-auth.mjs && node test-server.mjs && cd ../wallet && node test.mjs && cd ../site && node build.mjs && node verify.mjs",
+    "build": "node packages/site/build.mjs",
+    "dev": "node packages/api/server.mjs"
+  }
+}
