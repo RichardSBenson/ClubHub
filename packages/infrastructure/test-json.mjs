@@ -5,7 +5,7 @@
 
 import { CheckEligibility } from '../core/application/check-eligibility.mjs';
 import { AwardGrade } from '../core/application/award-grade.mjs';
-import { repositories, STORE } from './factory.mjs';
+import { repositories } from './factory.mjs';
 import { ReadOnlyStore } from './json/repositories.mjs';
 
 let pass = 0, fail = 0;

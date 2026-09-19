@@ -2,6 +2,9 @@ import './reset.mjs';
 import { orgs, people, rank, events, billing, pool, Forbidden, Invalid }
   from './data.mjs';
 
+// This suite needs the database, reached over a local socket.
+process.env.HONBU_STORE = 'postgres';
+
 const DOUG = '33333333-0000-0000-0000-000000000001';   // owner, national
 const TANE = '33333333-0000-0000-0000-000000000003';   // admin, Wellington only
 const AROHA = '22222222-0000-0000-0000-000000000002';  // 4th kyu, Whanganui

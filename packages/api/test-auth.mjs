@@ -1,6 +1,9 @@
 import { pool } from './data.mjs';
 import * as auth from './auth.mjs';
 
+// This suite needs the database, reached over a local socket.
+process.env.HONBU_STORE = 'postgres';
+
 let pass = 0, fail = 0;
 const ok = (n,c,d='') => c ? (pass++,console.log(`  ✓ ${n}`))
                            : (fail++,console.log(`  ✗ ${n} ${d}`));

@@ -8,7 +8,7 @@
 
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import { repositories, STORE } from '../infrastructure/factory.mjs';
+import { repositories, currentStore } from '../infrastructure/factory.mjs';
 import { renderBlocks, excerpt } from '../content/blocks.mjs';
 import { loadSettings, SettingsError } from './settings.mjs';
 import * as R from './render.mjs';
@@ -30,7 +30,7 @@ const site = repos.site;
 
 const federation = await site.federation(FED);
 if (!federation) {
-  console.error(`No federation with slug "${FED}" in the ${STORE} store.`);
+  console.error(`No federation with slug "${FED}" in the ${currentStore()} store.`);
   process.exit(1);
 }
 
@@ -122,7 +122,7 @@ written.push(await write('sitemap.xml',
 written.push(await write('robots.txt',
   `User-agent: *\nAllow: /\nSitemap: ${ORIGIN}/sitemap.xml\n`));
 
-console.log(`${written.length} files → ${OUT}  (store: ${STORE})`);
+console.log(`${written.length} files → ${OUT}  (store: ${currentStore()})`);
 console.log(`  ${dojos.length} dojo pages, ${evs.length} events, ` +
   `${articles.length} news, ${authored.length} authored`);
 

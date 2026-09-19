@@ -2,6 +2,9 @@ import { createServer } from './server.mjs';
 import { pool } from './data.mjs';
 import * as auth from './auth.mjs';
 
+// This suite needs the database, reached over a local socket.
+process.env.HONBU_STORE = 'postgres';
+
 const server = createServer();
 await new Promise(r => server.listen(0, r));
 const base = `http://localhost:${server.address().port}`;
@@ -162,7 +165,9 @@ console.log('\nRUNNING A GRADING');
     [`pass_${aroha}`]:'on', [`grade_${aroha}`]:gradeId ?? '' } });
   ok('a panel that is too small is rejected',
     bad.location?.includes('error='));
-  console.log('      → ' + decodeURIComponent(bad.location.split('error=')[1]));
+  console.log('      → ' + (bad.location
+    ? decodeURIComponent(bad.location.split('error=')[1] ?? bad.location)
+    : `status ${bad.status}: ` + (bad.html.match(/class="bad">([^<]*)/)?.[1] ?? '')));
 
   const good = await req('/o/moknz/grading', { method:'POST', form:{
     awarded_on:'2026-10-17',

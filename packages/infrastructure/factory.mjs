@@ -9,10 +9,28 @@ import { JsonData, JsonLadder, JsonRanks, JsonMembers, JsonOrganisations,
          JsonAuthorisation, JsonSiteContent, SystemClock as JsonClock }
   from './json/repositories.mjs';
 
-export const STORE = process.env.DATABASE_URL ? 'postgres' : 'files';
+/**
+ * Which store is in use.
+ *
+ * Inferred from DATABASE_URL, because that is what a hosted deployment sets.
+ * HONBU_STORE overrides it — local development reaches Postgres over a unix
+ * socket with no connection string, and inferring "no URL means no database"
+ * silently disabled the admin.
+ */
+export function currentStore() {
+  return process.env.HONBU_STORE
+    ?? (process.env.DATABASE_URL ? 'postgres' : 'files');
+}
+
+/**
+ * Read at call time, not at import. A constant evaluated when the module loads
+ * is read before anything has had a chance to configure it — which is a subtle
+ * and very annoying class of bug.
+ */
+export const STORE = { toString: currentStore, valueOf: currentStore };
 
 export async function repositories({ dataDir = null } = {}) {
-  if (STORE === 'postgres') {
+  if (currentStore() === 'postgres') {
     const { pool } = await import('../api/data.mjs');
     const pg = await import('./postgres/repositories.mjs');
     return {

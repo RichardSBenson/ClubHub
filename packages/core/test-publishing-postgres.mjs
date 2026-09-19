@@ -1,5 +1,5 @@
 import '../api/reset.mjs';
-import { pool } from '../api/data.mjs';
+import { pool } from '../infrastructure/postgres/pool.mjs';
 import { PublishRevision } from './application/publish-revision.mjs';
 import { WithdrawPublication } from './application/withdraw-publication.mjs';
 import { RunScheduledPublications } from './application/run-scheduled-publications.mjs';

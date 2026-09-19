@@ -7,7 +7,7 @@
  */
 
 import '../api/reset.mjs';          // tests own their state; no leftovers
-import { pool } from '../api/data.mjs';
+import { pool } from '../infrastructure/postgres/pool.mjs';
 import { CheckEligibility } from './application/check-eligibility.mjs';
 import { AwardGrade } from './application/award-grade.mjs';
 import { Refused, NotPermitted } from './application/ports.mjs';
