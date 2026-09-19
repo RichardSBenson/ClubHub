@@ -278,3 +278,150 @@ export class PostgresSite {
       permanent from redirect`);
   }
 }
+
+// ---------------------------------------------------------------------------
+// publishing
+// ---------------------------------------------------------------------------
+
+import { Publication } from '../../core/domain/publishing.mjs';
+
+const toPublication = (r) => new Publication({
+  id: r.id, entryId: r.entry_id, entryKind: r.entry_kind,
+  revisionId: r.revision_id, path: r.path, locale: r.locale,
+  organisationId: r.organisation_id, status: r.status,
+  publishedAt: r.published_at, scheduledFor: r.scheduled_for,
+  publishedBy: r.published_by, supersededAt: r.superseded_at,
+  withdrawnAt: r.withdrawn_at,
+});
+
+export class PostgresPublications {
+  constructor(pool) { this.pool = pool; }
+
+  async liveFor(entryId, locale) {
+    const { rows: [r] } = await this.pool.query(
+      `select * from publication where entry_id=$1 and locale=$2 and status='live'`,
+      [entryId, locale]);
+    return r ? toPublication(r) : null;
+  }
+
+  async atPath(path, locale) {
+    const { rows: [r] } = await this.pool.query(
+      `select * from publication where path=$1 and locale=$2 and status='live'`,
+      [path, locale]);
+    return r ? toPublication(r) : null;
+  }
+
+  async save(pub) {
+    const { rows: [r] } = await this.pool.query(`
+      insert into publication (entry_id, entry_kind, revision_id, path, locale,
+        organisation_id, status, published_at, scheduled_for, published_by)
+      values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) returning *`,
+      [pub.entryId, pub.entryKind, pub.revisionId, pub.path.value,
+       pub.locale.value, pub.organisationId, pub.status,
+       pub.publishedAt, pub.scheduledFor?.value ?? null, pub.publishedBy]);
+    return toPublication(r);
+  }
+
+  /**
+   * Supersede the old and publish the new in one transaction. The unique index
+   * on (entry_id, locale) where live means doing these in sequence fails — and
+   * rightly so.
+   */
+  async replace(next, previous) {
+    const client = await this.pool.connect();
+    try {
+      await client.query('begin');
+      if (previous) {
+        await client.query(`update publication set status=$2, superseded_at=$3
+          where id=$1`, [previous.id, previous.status, previous.supersededAt]);
+      }
+      let row;
+      if (next.id) {
+        ({ rows: [row] } = await client.query(`
+          update publication set status=$2, published_at=$3 where id=$1
+          returning *`, [next.id, next.status, next.publishedAt]));
+      } else {
+        ({ rows: [row] } = await client.query(`
+          insert into publication (entry_id, entry_kind, revision_id, path,
+            locale, organisation_id, status, published_at, published_by)
+          values ($1,$2,$3,$4,$5,$6,$7,$8,$9) returning *`,
+          [next.entryId, next.entryKind, next.revisionId, next.path.value,
+           next.locale.value, next.organisationId, next.status,
+           next.publishedAt, next.publishedBy]));
+      }
+      await client.query('commit');
+      return toPublication(row);
+    } catch (e) {
+      await client.query('rollback');
+      throw e;
+    } finally { client.release(); }
+  }
+
+  /** Status changes only. Content is never edited after publication. */
+  async update(pub) {
+    const { rows: [r] } = await this.pool.query(`
+      update publication set status=$2, published_at=$3, superseded_at=$4,
+             withdrawn_at=$5
+      where id=$1 returning *`,
+      [pub.id, pub.status, pub.publishedAt, pub.supersededAt, pub.withdrawnAt]);
+    if (!r) throw new Error(`No publication ${pub.id}`);
+    return toPublication(r);
+  }
+
+  async due(on) {
+    const { rows } = await this.pool.query(
+      `select * from publication where status='scheduled' and scheduled_for <= $1
+       order by scheduled_for`, [on]);
+    return rows.map(toPublication);
+  }
+
+  async historyFor(entryId) {
+    const { rows } = await this.pool.query(
+      `select * from publication where entry_id=$1 order by created_at desc`,
+      [entryId]);
+    return rows.map(toPublication);
+  }
+}
+
+export class PostgresEntries {
+  constructor(pool) { this.pool = pool; }
+
+  async byId(id) {
+    const { rows: [r] } = await this.pool.query(`
+      select id, 'page' as kind, organisation_id, slug, title from page where id=$1
+      union all
+      select id, 'article', organisation_id, slug, title from article where id=$1`,
+      [id]);
+    return r ? { id: r.id, kind: r.kind, organisationId: r.organisation_id,
+                 slug: r.slug, title: r.title } : null;
+  }
+
+  async latestRevision(entryId) {
+    const { rows: [r] } = await this.pool.query(
+      `select id, page_id as entry_id, saved_at from page_revision
+       where page_id=$1 order by saved_at desc limit 1`, [entryId]);
+    return r ? { id: r.id, entryId: r.entry_id, savedAt: r.saved_at } : null;
+  }
+
+  async revision(id) {
+    const { rows: [r] } = await this.pool.query(
+      `select id, page_id as entry_id, saved_at from page_revision where id=$1`,
+      [id]);
+    return r ? { id: r.id, entryId: r.entry_id, savedAt: r.saved_at } : null;
+  }
+}
+
+/**
+ * Events are stored, then handled. A subscriber that fails can be retried, and
+ * "why did that page change" has an answer months later.
+ */
+export class PostgresEventBus {
+  constructor(pool) { this.pool = pool; }
+  emit(event) {
+    // Fire and forget: the domain must never fail because a listener did.
+    this.pool.query(
+      `insert into domain_event (name, payload, occurred_at) values ($1,$2,$3)`,
+      [event.name, JSON.stringify(event.payload), event.at])
+      .catch((e) => console.error('event not stored:', event.name, e.message));
+  }
+}

@@ -60,6 +60,49 @@ export const AUTHORISATION = {
   ],
 };
 
+export const PUBLICATION_REPOSITORY = {
+  name: 'PublicationRepository',
+  methods: [
+    /** (entryId, locale) → Publication | null — the one that is live */
+    'liveFor',
+    /** (path, locale) → Publication | null — what is at this path */
+    'atPath',
+    /** (Publication) → Publication, with an id */
+    'save',
+    /**
+     * (next, previous|null) → Publication — atomically.
+     * The use case decides WHAT supersedes what; the adapter guarantees the
+     * two changes happen together. Saving the new one first leaves two live
+     * for an instant, which a unique index rightly rejects.
+     */
+    'replace',
+    /** (Publication) → void — status change only, never content */
+    'update',
+    /** (onDate) → Publication[] — scheduled and due */
+    'due',
+    /** (entryId) → Publication[] — every publication, newest first */
+    'historyFor',
+  ],
+};
+
+export const ENTRY_REPOSITORY = {
+  name: 'EntryRepository',
+  methods: [
+    /** (entryId) → { id, kind, organisationId, slug, title } | null */
+    'byId',
+    /** (entryId) → { id, savedAt } | null — the newest revision */
+    'latestRevision',
+    /** (revisionId) → { id, entryId, savedAt } | null */
+    'revision',
+  ],
+};
+
+export const EVENT_BUS = {
+  name: 'EventBus',
+  /** (DomainEvent) → void. Never throws into the caller. */
+  methods: ['emit'],
+};
+
 export const CLOCK = {
   name: 'Clock',
   /** () → 'YYYY-MM-DD' */

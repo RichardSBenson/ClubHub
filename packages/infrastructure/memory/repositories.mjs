@@ -85,3 +85,80 @@ export class FixedClock {
   constructor(date) { this.date = date; }
   today() { return this.date; }
 }
+
+// ---------------------------------------------------------------------------
+// publishing
+// ---------------------------------------------------------------------------
+
+import { Publication, PublicationStatus } from '../../core/domain/publishing.mjs';
+
+export class InMemoryPublications {
+  constructor(rows = []) {
+    this.rows = rows.map((r) => (r instanceof Publication ? r : new Publication(r)));
+    this.nextId = 1;
+  }
+
+  #plain(p) {
+    return { ...p, path: p.path.value, locale: p.locale.value,
+             scheduledFor: p.scheduledFor?.value ?? null };
+  }
+
+  async liveFor(entryId, locale) {
+    return this.rows.find((p) => p.entryId === entryId
+      && p.locale.value === locale && p.isLive) ?? null;
+  }
+
+  async atPath(path, locale) {
+    return this.rows.find((p) => p.path.value === path
+      && p.locale.value === locale && p.isLive) ?? null;
+  }
+
+  async save(pub) {
+    const saved = new Publication({ ...this.#plain(pub), id: `pub-${this.nextId++}` });
+    this.rows.push(saved);
+    return saved;
+  }
+
+  async update(pub) {
+    const i = this.rows.findIndex((p) => p.id === pub.id);
+    if (i === -1) throw new Error(`No publication ${pub.id}`);
+    this.rows[i] = pub;
+    return pub;
+  }
+
+  /** Both changes, or neither. */
+  async replace(next, previous) {
+    if (previous) await this.update(previous);
+    return next.id ? this.update(next) : this.save(next);
+  }
+
+  async due(on) {
+    return this.rows.filter((p) => p.isDue(on));
+  }
+
+  async historyFor(entryId) {
+    return this.rows.filter((p) => p.entryId === entryId).reverse();
+  }
+}
+
+export class InMemoryEntries {
+  constructor(entries = [], revisions = []) {
+    this.entries = new Map(entries.map((e) => [e.id, e]));
+    this.revisions = revisions;
+  }
+  async byId(id) { return this.entries.get(id) ?? null; }
+  async latestRevision(entryId) {
+    const mine = this.revisions.filter((r) => r.entryId === entryId);
+    return mine.length ? mine[mine.length - 1] : null;
+  }
+  async revision(id) { return this.revisions.find((r) => r.id === id) ?? null; }
+}
+
+/** Collects events so a test can assert what the domain announced. */
+export class RecordingEventBus {
+  constructor() { this.events = []; }
+  emit(event) { this.events.push(event); }
+  named(name) { return this.events.filter((e) => e.name === name); }
+  get last() { return this.events.at(-1) ?? null; }
+  clear() { this.events = []; return this; }
+}

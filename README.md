@@ -122,6 +122,11 @@ Not by splitting a card payment four ways across jurisdictions. Members pay thei
 dojo; each level invoices the level below from the register. That is how these
 organisations already work, and it makes the register the thing everyone trusts.
 
+**4a. Publishing is an act with a record.**
+A publication names its revision, its path and its locale. Publishing again
+supersedes rather than overwrites, which makes rollback ordinary and gives cache
+invalidation something honest to work from. See `docs/publishing.md`.
+
 **5a. Titles are not grades.**
 Shogo — Renshi, Kyoshi, Hanshi — are awarded separately from dan grade. MOKNZ's
 own leadership could not be represented until `title_award` existed. Kendo,
