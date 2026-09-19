@@ -21,6 +21,7 @@ import { pool, orgs, people, rank, events, Forbidden, NotFound, Invalid }
   from './data.mjs';
 import * as auth from './auth.mjs';
 import * as V from './views.mjs';
+import { STORE } from '../infrastructure/factory.mjs';
 
 const SESSION_COOKIE = 'honbu_session';
 const CSRF_COOKIE = 'honbu_csrf';
@@ -230,6 +231,19 @@ get('/o/:slug/events', async (ctx) => {
 
 export async function handler(req, res) {
   const url = new URL(req.url, `http://${req.headers.host ?? 'localhost'}`);
+
+  // The admin needs to read and write member data. Running from files it can do
+  // neither, so say so plainly rather than failing with a socket error three
+  // layers down. The public site is unaffected — it is static.
+  if (STORE === 'files') {
+    res.writeHead(503, { 'content-type': 'text/html; charset=utf-8',
+      ...SECURITY_HEADERS });
+    return res.end(V.error({ me: null, status: 503, csrf: null,
+      message: 'The admin is not available on this deployment. It is running ' +
+        'from files, which are read-only. Set DATABASE_URL to enable sign-in, ' +
+        'the register and grading.' }));
+  }
+
   const cookies = parseCookies(req.headers.cookie);
   const sessionToken = cookies[SESSION_COOKIE];
   const secure = (req.headers['x-forwarded-proto'] ?? '') === 'https';

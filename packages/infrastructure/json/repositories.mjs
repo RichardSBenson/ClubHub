@@ -184,6 +184,119 @@ export class JsonAuthorisation {
   }
 }
 
+/**
+ * Everything the public site renders. One port, so the site build has no idea
+ * whether it is reading files or a database.
+ */
+export class JsonSiteContent {
+  constructor(data) { this.data = data; this.orgs = new JsonOrganisations(data); }
+
+  async federation(slug) {
+    return this.data.read('organisations').find((o) => o.slug === slug) ?? null;
+  }
+
+  async brand(federationId) {
+    return this.data.read('brand')
+      .find((b) => b.organisationId === federationId) ?? { tokens: {}, fonts: {} };
+  }
+
+  async dojos(rootSlug) { return this.orgs.publicDojos(rootSlug); }
+
+  async eventsFor(orgSlug) {
+    const orgs = this.data.read('organisations');
+    const target = orgs.find((o) => o.slug === orgSlug);
+    if (!target) return [];
+    return this.data.read('events')
+      .filter((e) => {
+        const from = orgs.find((o) => o.id === e.organisationId);
+        if (!from) return false;
+        if (from.id === target.id) return true;
+        return e.publishDown && descendsFrom(target, from, orgs);
+      })
+      .map((e) => {
+        const from = orgs.find((o) => o.id === e.organisationId);
+        return { ...e, starts_at: e.startsAt, ends_at: e.endsAt,
+                 venue_name: e.venueName, entries_close: e.entriesClose,
+                 from_org: from.name, from_slug: from.slug,
+                 is_own: from.id === target.id };
+      })
+      .sort((a, b) => String(a.startsAt).localeCompare(String(b.startsAt)));
+  }
+
+  async articles() {
+    return this.data.read('articles').map((a) => ({
+      ...a, published_at: a.publishedAt, about_org: a.aboutOrg }));
+  }
+
+  async pages() {
+    return this.data.read('pages').map((p) => ({
+      ...p, meta_title: p.metaTitle, meta_description: p.metaDescription }));
+  }
+}
+
 export class SystemClock {
   today() { return new Date().toISOString().slice(0, 10); }
+}
+
+// ---------------------------------------------------------------------------
+// what the site generator reads
+// ---------------------------------------------------------------------------
+
+export class JsonSite {
+  constructor(data) {
+    this.data = data;
+    this.orgs = new JsonOrganisations(data);
+  }
+
+  async federation(slug) {
+    return this.data.read('organisations')
+      .find((o) => o.slug === slug && !o.parentId) ?? null;
+  }
+
+  async brand(organisationId) {
+    return this.data.read('brand')
+      .find((b) => b.organisationId === organisationId) ?? null;
+  }
+
+  async dojos(rootSlug) { return this.orgs.publicDojos(rootSlug); }
+
+  /**
+   * Public events for one organisation: its own, plus anything an ancestor
+   * published downward. The scoping rules hold in the flat store too — they are
+   * not a database feature.
+   */
+  async eventsFor(orgSlug) {
+    const orgs = this.data.read('organisations');
+    const target = orgs.find((o) => o.slug === orgSlug);
+    if (!target) return [];
+
+    const ancestors = new Set();
+    for (let cur = target; cur; cur = orgs.find((o) => o.id === cur.parentId))
+      ancestors.add(cur.id);
+
+    return this.data.read('events')
+      .filter((e) => e.visibility === 'public'
+        && (e.organisationId === target.id
+            || (e.publishDown && ancestors.has(e.organisationId))))
+      .map((e) => {
+        const from = orgs.find((o) => o.id === e.organisationId);
+        return { ...e, starts_at: e.startsAt, ends_at: e.endsAt,
+                 venue_name: e.venueName, entries_close: e.entriesClose,
+                 from_org: from?.name, from_slug: from?.slug,
+                 is_own: e.organisationId === target.id };
+      })
+      .sort((a, b) => String(a.startsAt).localeCompare(String(b.startsAt)));
+  }
+
+  async pages() {
+    return this.data.read('pages').map((p) => ({
+      ...p, meta_title: p.metaTitle, meta_description: p.metaDescription }));
+  }
+
+  async articles() {
+    return this.data.read('articles').map((a) => ({
+      ...a, published_at: a.publishedAt, about_org: a.aboutOrg }));
+  }
+
+  async redirects() { return this.data.read('redirects'); }
 }

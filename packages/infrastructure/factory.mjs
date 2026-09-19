@@ -6,7 +6,7 @@
  */
 
 import { JsonData, JsonLadder, JsonRanks, JsonMembers, JsonOrganisations,
-         JsonAuthorisation, SystemClock as JsonClock }
+         JsonAuthorisation, JsonSiteContent, SystemClock as JsonClock }
   from './json/repositories.mjs';
 
 export const STORE = process.env.DATABASE_URL ? 'postgres' : 'files';
@@ -22,6 +22,7 @@ export async function repositories({ dataDir = null } = {}) {
       members: new pg.PostgresMembers(pool),
       organisations: new pg.PostgresOrganisations(pool),
       auth: new pg.PostgresAuthorisation(pool),
+      site: new pg.PostgresSiteContent(pool),
       clock: new pg.SystemClock(),
       writable: true,
     };
@@ -40,6 +41,7 @@ export async function repositories({ dataDir = null } = {}) {
     members: new JsonMembers(data),
     organisations: new JsonOrganisations(data),
     auth: new JsonAuthorisation(data),
+    site: new JsonSiteContent(data),
     clock: new JsonClock(),
     writable: false,
   };

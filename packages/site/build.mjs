@@ -1,14 +1,21 @@
 /**
- * Static build. Queries the register, writes a site. No CMS in between.
+ * Static build.
+ *
+ * Reads through the site-content port, so it has no idea whether the data came
+ * from JSON files or Postgres. With no DATABASE_URL set it runs from files and
+ * needs nothing provisioned — which is how it deploys before a database exists.
  */
+
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import { pool, orgs, events as eventsApi } from '../api/data.mjs';
+import { repositories, STORE } from '../infrastructure/factory.mjs';
 import { renderBlocks, excerpt } from '../content/blocks.mjs';
 import * as R from './render.mjs';
 
 const ORIGIN = process.env.ORIGIN ?? 'https://www.kyokushinkarate.co.nz';
-const OUT = process.env.OUT ?? './dist';
+// Relative to the repository, not the working directory — so it lands in the
+// same place whether run locally, from a script, or by Vercel at the repo root.
+const OUT = process.env.OUT ?? new URL('../../dist/', import.meta.url).pathname;
 const FED = process.env.FEDERATION ?? 'moknz';
 
 const NAV = [
@@ -17,6 +24,19 @@ const NAV = [
   { href: '/about', label: 'About us' },
 ];
 
+const repos = await repositories();
+const site = repos.site;
+
+const federation = await site.federation(FED);
+if (!federation) {
+  console.error(`No federation with slug "${FED}" in the ${STORE} store.`);
+  process.exit(1);
+}
+
+const brand = await site.brand(federation.id);
+const tokens = brand?.tokens ?? {};
+const fonts = brand?.fonts ?? {};
+
 const write = async (rel, html) => {
   const file = path.join(OUT, rel);
   await fs.mkdir(path.dirname(file), { recursive: true });
@@ -24,35 +44,23 @@ const write = async (rel, html) => {
   return rel;
 };
 
-const q = async (sql, p = []) => (await pool.query(sql, p)).rows;
-
-const federation = await orgs.bySlug(FED);
-const brand = (await q('select * from brand where organisation_id=$1', [federation.id]))[0];
-const tokens = brand?.tokens ?? {};
-const fonts = brand?.fonts ?? {};
-
 await fs.rm(OUT, { recursive: true, force: true });
 const written = [];
 
 written.push(await write('theme.css', R.themeCss(tokens, fonts)));
 
-// ---- dojo pages, generated from records -----------------------------------
-const dojos = await q(`
-  select o.id, o.name, o.slug, o.country_code, d.*,
-         coalesce(json_agg(json_build_object(
-           'label', t.label, 'weekday', t.weekday,
-           'starts', t.starts::text, 'ends', t.ends::text)
-           order by t.sort_order) filter (where t.id is not null), '[]') as sessions
-  from organisation root
-  join organisation o on o.path <@ root.path and o.type='dojo' and o.status='active'
-  left join dojo_profile d on d.organisation_id=o.id
-  left join training_session t on t.organisation_id=o.id
-  where root.slug=$1
-  group by o.id, o.name, o.slug, o.country_code, d.organisation_id
-  order by o.name`, [FED]);
+// ---- dojo pages -----------------------------------------------------------
+const dojos = (await site.dojos(FED)).map((d) => ({
+  ...d,
+  venue_name: d.venue_name ?? d.venueName ?? null,
+  address_line: d.address_line ?? d.addressLine ?? null,
+  who_trains: d.who_trains ?? d.whoTrains ?? null,
+  first_class_free: d.first_class_free ?? d.firstClassFree ?? true,
+  sessions: d.sessions ?? [],
+}));
 
 for (const dojo of dojos) {
-  const evs = await eventsApi.forOrg(dojo.slug, { isMember: false });
+  const evs = await site.eventsFor(dojo.slug);
   written.push(await write(`${dojo.slug}/index.html`,
     R.dojoPage({ dojo, federation, events: evs, origin: ORIGIN, fonts, nav: NAV })));
 }
@@ -61,25 +69,14 @@ written.push(await write('find-a-dojo/index.html',
   R.findADojoPage({ dojos, federation, origin: ORIGIN, fonts, nav: NAV })));
 
 // ---- events ---------------------------------------------------------------
-const evs = await eventsApi.forOrg(FED, { isMember: false });
+const evs = await site.eventsFor(FED);
 for (const ev of evs) {
   written.push(await write(`events/${ev.slug}/index.html`,
     R.eventPage({ ev, federation, origin: ORIGIN, fonts, nav: NAV })));
 }
 
-// ---- news -----------------------------------------------------------------
-const articles = await q(`
-  select a.slug, a.title, a.summary, a.published_at, o.name as about_org
-  from article a
-  left join organisation o on o.id = a.about_org_id
-  where a.organisation_id=$1 and a.status='published'
-  order by a.published_at desc`, [federation.id]);
-
 // ---- authored pages -------------------------------------------------------
-const authored = await q(`
-  select slug, title, body, meta_title, meta_description
-  from page where organisation_id=$1 and status='published'`, [federation.id]);
-
+const authored = await site.pages();
 for (const pg of authored) {
   const html = renderBlocks(pg.body, { dojos, events: evs });
   written.push(await write(`${pg.slug}/index.html`, R.layout({
@@ -95,10 +92,11 @@ for (const pg of authored) {
 }
 
 // ---- home -----------------------------------------------------------------
+const articles = await site.articles();
 written.push(await write('index.html',
   R.homePage({ federation, dojos, events: evs, articles, origin: ORIGIN, fonts, nav: NAV })));
 
-// ---- sitemap and robots ---------------------------------------------------
+// ---- crawlability ---------------------------------------------------------
 const urls = written.filter((f) => f.endsWith('.html'))
   .map((f) => ORIGIN + '/' + f.replace(/index\.html$/, '').replace(/\/$/, ''));
 written.push(await write('sitemap.xml',
@@ -108,7 +106,11 @@ written.push(await write('sitemap.xml',
 written.push(await write('robots.txt',
   `User-agent: *\nAllow: /\nSitemap: ${ORIGIN}/sitemap.xml\n`));
 
-console.log(`${written.length} files → ${OUT}`);
+console.log(`${written.length} files → ${OUT}  (store: ${STORE})`);
 console.log(`  ${dojos.length} dojo pages, ${evs.length} events, ` +
   `${articles.length} news, ${authored.length} authored`);
-await pool.end();
+
+if (repos.store === 'postgres') {
+  const { pool } = await import('../api/data.mjs');
+  await pool.end();
+}

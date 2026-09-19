@@ -90,7 +90,14 @@ console.log('\nCRAWLABILITY');
   const count = (sm.match(/<loc>/g) || []).length;
   ok('sitemap lists every page', count === pages.length, `${count} vs ${pages.length}`);
   ok('every sitemap URL is absolute', !/<loc>(?!https?:)/.test(sm));
-  ok('authored pages are in it', sm.includes('/history') && sm.includes('/about'));
+  // Derived from what was built, not a hardcoded list — the set of authored
+  // pages differs between the file store and the database.
+  const dojoSlugs = new Set(pages.filter(p => !p.includes('/'))
+    .map(p => p.replace('/index.html','')));
+  const authored = [...dojoSlugs].filter(s =>
+    !['index.html','find-a-dojo','events'].includes(s));
+  ok('every page built is listed in the sitemap',
+    authored.every(a => sm.includes(`/${a}`)), authored.join(','));
   ok('robots points at the sitemap', read('robots.txt').includes('sitemap.xml'));
   ok('home declares the organisation',
     html('index.html').includes('"@type":"SportsOrganization"'));

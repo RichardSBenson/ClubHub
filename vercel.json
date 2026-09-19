@@ -1,4 +1,9 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
-  "rewrites": [{ "source": "/(.*)", "destination": "/api/index" }]
+  "buildCommand": "node packages/site/build.mjs",
+  "outputDirectory": "dist",
+  "rewrites": [
+    { "source": "/admin/(.*)", "destination": "/api/index" },
+    { "source": "/signin/(.*)", "destination": "/api/index" }
+  ]
 }
