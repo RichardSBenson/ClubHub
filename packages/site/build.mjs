@@ -10,6 +10,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { repositories, STORE } from '../infrastructure/factory.mjs';
 import { renderBlocks, excerpt } from '../content/blocks.mjs';
+import { loadSettings, SettingsError } from './settings.mjs';
 import * as R from './render.mjs';
 
 const ORIGIN = process.env.ORIGIN ?? 'https://www.kyokushinkarate.co.nz';
@@ -33,9 +34,24 @@ if (!federation) {
   process.exit(1);
 }
 
+const DATA = process.env.HONBU_DATA
+  ?? new URL('../../data/', import.meta.url).pathname;
+
+let settings;
+try {
+  settings = loadSettings(DATA);
+} catch (e) {
+  if (e instanceof SettingsError) { console.error('\n' + e.message); process.exit(1); }
+  throw e;
+}
+for (const n of settings.notes ?? []) console.log(`  note: ${n}`);
+
 const brand = await site.brand(federation.id);
-const tokens = brand?.tokens ?? {};
-const fonts = brand?.fonts ?? {};
+// settings.json is the source of truth; the brand record is the fallback for a
+// federation that has not customised anything yet.
+const tokens = { ...(brand?.tokens ?? {}), ...settings.tokens };
+const fonts = { ...(brand?.fonts ?? {}), ...settings.fonts };
+const NAV_ITEMS = settings.navigation.length ? settings.navigation : NAV;
 
 const write = async (rel, html) => {
   const file = path.join(OUT, rel);
@@ -62,17 +78,17 @@ const dojos = (await site.dojos(FED)).map((d) => ({
 for (const dojo of dojos) {
   const evs = await site.eventsFor(dojo.slug);
   written.push(await write(`${dojo.slug}/index.html`,
-    R.dojoPage({ dojo, federation, events: evs, origin: ORIGIN, fonts, nav: NAV })));
+    R.dojoPage({ dojo, federation, events: evs, origin: ORIGIN, fonts, nav: NAV_ITEMS })));
 }
 
 written.push(await write('find-a-dojo/index.html',
-  R.findADojoPage({ dojos, federation, origin: ORIGIN, fonts, nav: NAV })));
+  R.findADojoPage({ dojos, federation, origin: ORIGIN, fonts, nav: NAV_ITEMS })));
 
 // ---- events ---------------------------------------------------------------
 const evs = await site.eventsFor(FED);
 for (const ev of evs) {
   written.push(await write(`events/${ev.slug}/index.html`,
-    R.eventPage({ ev, federation, origin: ORIGIN, fonts, nav: NAV })));
+    R.eventPage({ ev, federation, origin: ORIGIN, fonts, nav: NAV_ITEMS })));
 }
 
 // ---- authored pages -------------------------------------------------------
@@ -83,7 +99,7 @@ for (const pg of authored) {
     title: pg.meta_title ?? `${pg.title} — ${federation.name}`,
     description: pg.meta_description ?? excerpt(pg.body),
     canonical: `${ORIGIN}/${pg.slug}`,
-    federation, fonts, nav: NAV,
+    federation, fonts, nav: NAV_ITEMS,
     body: `<section><div class="wrap narrow">
       <h1 style="font-family:var(--display);font-size:clamp(30px,5vw,46px);margin:0 0 20px">${pg.title}</h1>
       ${html}
@@ -94,7 +110,7 @@ for (const pg of authored) {
 // ---- home -----------------------------------------------------------------
 const articles = await site.articles();
 written.push(await write('index.html',
-  R.homePage({ federation, dojos, events: evs, articles, origin: ORIGIN, fonts, nav: NAV })));
+  R.homePage({ federation, dojos, events: evs, articles, origin: ORIGIN, fonts, nav: NAV_ITEMS })));
 
 // ---- crawlability ---------------------------------------------------------
 const urls = written.filter((f) => f.endsWith('.html'))

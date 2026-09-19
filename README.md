@@ -204,6 +204,23 @@ The proof it is real, not decorative: the same use case objects run against
 in-memory adapters with no I/O at all, and against Postgres, with identical
 results and no change to core code. See `docs/architecture.md`.
 
+## Changing how the site looks
+
+`data/settings.json` — colours, fonts, which sections appear on the home and
+dojo pages, and the menu. Edit it in GitHub, commit, Vercel rebuilds.
+
+Every choice is checked when the site builds. A palette that would make text
+unreadable **fails the build** with the numbers:
+
+```
+body text: #BBBBBB on #F5F5F5 is 1.76:1, needs 4.5:1
+— unreadable on a phone in daylight
+```
+
+Settings, not a canvas: someone can change anything about how it looks and
+nothing about how it is laid out. That is the line that keeps volunteer-run
+sites from breaking.
+
 ## Storage
 
 **No `DATABASE_URL` → runs from JSON files in `data/`.** Deploys with nothing to

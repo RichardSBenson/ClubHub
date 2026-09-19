@@ -1,0 +1,93 @@
+{
+  "_readme": [
+    "This file is meant to be edited by hand, in GitHub, on a phone.",
+    "",
+    "Every setting is checked when the site builds. If a colour choice would",
+    "make text unreadable, the build fails and tells you which pair and by how",
+    "much — it will not quietly ship a page nobody can read.",
+    "",
+    "Run 'npm run build' after editing, or just commit and let Vercel do it."
+  ],
+
+  "organisation": {
+    "name": "Mas Oyama Karate New Zealand",
+    "shortName": "MOKNZ",
+    "tagline": "Kyokushin karate in New Zealand since 1965",
+    "_tagline": "One line. Appears under the name in the header."
+  },
+
+  "colours": {
+    "_readme": [
+      "Taken from your crest. Change any of them.",
+      "primary      buttons, links, the accent bar under headings",
+      "accent       dates and small highlights — DARK BACKGROUNDS ONLY",
+      "ink          headers, footers, dark sections",
+      "canvas       the page background",
+      "neutral      rules, dividers, quiet text"
+    ],
+    "primary": "#CE372C",
+    "accent": "#F0CE41",
+    "ink": "#161617",
+    "canvas": "#F5F5F5",
+    "neutral": "#BDBDBF",
+
+    "_derived": [
+      "These are worked out from the ones above when the site builds.",
+      "Leave them out unless you want to override one:",
+      "primaryText, primaryTextStrong, primaryHover, inkSoft, canvasAlt, muted"
+    ]
+  },
+
+  "fonts": {
+    "_readme": [
+      "Any two families from fonts.google.com. Pick from the list below or",
+      "type your own — spelt exactly as Google spells it.",
+      "",
+      "  Shippori Mincho / Zen Kaku Gothic New   Japanese, formal. Renders kanji.",
+      "  Zen Antique / Noto Sans JP              Japanese, softer.",
+      "  Bitter / Source Sans 3                  Steady, institutional.",
+      "  Archivo / Archivo                       One family, heavy. Modern sport.",
+      "  Libre Baskerville / Inter               Classic serif, neutral body."
+    ],
+    "display": "Shippori Mincho",
+    "body": "Zen Kaku Gothic New"
+  },
+
+  "homePage": {
+    "_readme": [
+      "Which sections appear, and in what order. Remove one to hide it.",
+      "Options: hero, dojoGrid, photoBand, events, news, pathway, lineage"
+    ],
+    "sections": ["hero", "dojoGrid", "events", "news"],
+    "heroHeading": "Everyone starts as a white belt.",
+    "heroText": "Full-contact Kyokushin karate, taught in New Zealand since 1965. Your first class is free.",
+    "heroButton": "Find your dojo"
+  },
+
+  "dojoPage": {
+    "_readme": [
+      "Which sections appear on every dojo page, and in what order.",
+      "Options: hero, facts, startAnyWeek, times, about, events, findUs"
+    ],
+    "sections": ["hero", "facts", "startAnyWeek", "times", "about", "events", "findUs"],
+    "startAnyWeekText": "You can start any week — there is no term to wait for.",
+    "showFirstClassFree": true
+  },
+
+  "navigation": {
+    "_readme": [
+      "Five items is the limit. Adding a sixth means removing one — this is",
+      "the rule that stops the menu becoming forty links in five years."
+    ],
+    "items": [
+      { "href": "/find-a-dojo", "label": "Find a dojo" },
+      { "href": "/events", "label": "Events" },
+      { "href": "/about", "label": "About us" }
+    ]
+  },
+
+  "seo": {
+    "siteDescription": "Full-contact Kyokushin karate since 1965. Seventeen dojo nationwide, all welcoming beginners. Your first class is free.",
+    "origin": "https://www.kyokushinkarate.co.nz"
+  }
+}
