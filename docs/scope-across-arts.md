@@ -38,7 +38,7 @@ unbuildable. Revisit only if a kickboxing federation asks twice.
 
 ## Two gaps the list exposed — both now closed
 
-### Titles are not grades
+### Titles are not grades — and how they are obtained differs too
 
 Kendo, iaido, kyudo and most Japanese arts award **shogo** — Renshi, Kyoshi,
 Hanshi — separately from dan grade. You can hold 7th dan without being Kyoshi.
@@ -49,6 +49,16 @@ Gavegan. Shihan Russell Dilloway.
 **The schema could not represent its own customer's leadership.** Now `title`
 and `title_award` sit alongside grade, with `person_current_title` derived the
 same way `person_current_grade` is. Doug shows as Hanshi and Godan, independently.
+
+And the mechanism is configuration, not an assumption. I had modelled every
+title as awarded, which is true of shogo and wrong of most others: Senpai,
+Sensei and Shihan are **conferred by reaching a grade** — nobody awards them.
+`conferred_by_rank` decides which, per title, per federation.
+
+The vocabulary is not in the code either. Korean arts use Sabeom, Kyosa,
+Kwanjang. Chinese arts Sifu and Sigung. BJJ uses Professor and Coach. Capoeira
+uses Mestre and Contramestre. A federation types its own, chooses which are
+conferred and which awarded, and nothing is compiled in.
 
 ### Qualifications expire; rank does not
 

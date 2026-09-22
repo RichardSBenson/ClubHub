@@ -425,3 +425,138 @@ export class PostgresEventBus {
       .catch((e) => console.error('event not stored:', event.name, e.message));
   }
 }
+
+// ---------------------------------------------------------------------------
+// content types
+// ---------------------------------------------------------------------------
+
+import { ContentType, ContentEntry } from '../../core/domain/content-types.mjs';
+
+const toType = (r) => new ContentType({
+  id: r.id, organisationId: r.organisation_id, name: r.name, label: r.label,
+  pluralLabel: r.plural_label, routePattern: r.route_pattern,
+  titleField: r.title_field, slugField: r.slug_field, icon: r.icon,
+  describedAs: r.described_as, schemaType: r.schema_type, fields: r.fields,
+});
+
+export class PostgresContentTypes {
+  constructor(pool) { this.pool = pool; }
+
+  /**
+   * A type defined by a parent organisation is available to everything beneath
+   * it — so a national body defines "Instructor" once and every dojo has it.
+   * The nearest definition wins, which lets a dojo override.
+   */
+  async byName(organisationId, name) {
+    const { rows: [r] } = await this.pool.query(`
+      select ct.* from organisation target
+      join organisation owner on target.path <@ owner.path
+      join content_type ct on ct.organisation_id = owner.id
+      where target.id = $1 and ct.name = $2
+      order by nlevel(owner.path) desc limit 1`, [organisationId, name]);
+    return r ? toType(r) : null;
+  }
+
+  /** Only what this organisation owns — never an inherited definition. */
+  async ownedBy(organisationId, name) {
+    const { rows: [r] } = await this.pool.query(
+      `select * from content_type where organisation_id=$1 and name=$2`,
+      [organisationId, name]);
+    return r ? toType(r) : null;
+  }
+
+  async allFor(organisationId) {
+    const { rows } = await this.pool.query(`
+      select distinct on (ct.name) ct.* from organisation target
+      join organisation owner on target.path <@ owner.path
+      join content_type ct on ct.organisation_id = owner.id
+      where target.id = $1
+      order by ct.name, nlevel(owner.path) desc`, [organisationId]);
+    return rows.map(toType);
+  }
+
+  async save(type) {
+    const fields = JSON.stringify(type.fields);
+    const { rows: [r] } = await this.pool.query(`
+      insert into content_type (id, organisation_id, name, label, plural_label,
+        route_pattern, title_field, slug_field, icon, described_as, schema_type,
+        fields)
+      values (coalesce($1, uuid_generate_v4()),$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12::jsonb)
+      on conflict (organisation_id, name) do update set
+        label=excluded.label, plural_label=excluded.plural_label,
+        route_pattern=excluded.route_pattern, title_field=excluded.title_field,
+        slug_field=excluded.slug_field, icon=excluded.icon,
+        described_as=excluded.described_as, schema_type=excluded.schema_type,
+        fields=excluded.fields, updated_at=now()
+      returning *`,
+      [type.id, type.organisationId, type.name, type.label, type.pluralLabel,
+       type.routePattern, type.titleField, type.slugField, type.icon,
+       type.describedAs, type.schemaType, fields]);
+    return toType(r);
+  }
+
+  async countEntries(typeName, organisationId) {
+    const { rows: [r] } = await this.pool.query(`
+      select count(*)::int as n from content_entry ce
+      join organisation target on target.id = $2
+      join organisation o on o.id = ce.organisation_id and o.path <@ target.path
+      where ce.type_name = $1`, [typeName, organisationId]);
+    return r.n;
+  }
+}
+
+const toEntry = (r) => new ContentEntry({
+  id: r.id, typeName: r.type_name, organisationId: r.organisation_id,
+  slug: r.slug, values: r.values, status: r.status,
+  createdAt: r.created_at, updatedAt: r.updated_at,
+});
+
+export class PostgresContentEntries {
+  constructor(pool) { this.pool = pool; }
+
+  async byId(id) {
+    const { rows: [r] } = await this.pool.query(
+      `select * from content_entry where id = $1`, [id]);
+    return r ? toEntry(r) : null;
+  }
+
+  async bySlug(organisationId, typeName, slug) {
+    const { rows: [r] } = await this.pool.query(
+      `select * from content_entry
+       where organisation_id=$1 and type_name=$2 and slug=$3`,
+      [organisationId, typeName, slug]);
+    return r ? toEntry(r) : null;
+  }
+
+  async save(entry) {
+    const { rows: [r] } = await this.pool.query(`
+      insert into content_entry (id, type_name, organisation_id, slug, values,
+        status)
+      values (coalesce($1, uuid_generate_v4()),$2,$3,$4,$5::jsonb,$6)
+      on conflict (id) do update set
+        slug=excluded.slug, values=excluded.values, status=excluded.status,
+        updated_at=now()
+      returning *`,
+      [entry.id, entry.typeName, entry.organisationId,
+       entry.slug?.value ?? null, JSON.stringify(entry.values), entry.status]);
+    return toEntry(r);
+  }
+
+  async list(organisationId, typeName, { status = null } = {}) {
+    const { rows } = await this.pool.query(`
+      select * from content_entry
+      where organisation_id=$1 and type_name=$2
+        and ($3::text is null or status=$3)
+      order by updated_at desc`, [organisationId, typeName, status]);
+    return rows.map(toEntry);
+  }
+
+  async saveRevision(entryId, values, actorId) {
+    const { rows: [r] } = await this.pool.query(`
+      insert into content_revision (entry_id, values, saved_by)
+      values ($1,$2::jsonb,(select id from account where person_id = $3
+        union all select $3::uuid limit 1))
+      returning id`, [entryId, JSON.stringify(values), actorId]);
+    return r.id;
+  }
+}

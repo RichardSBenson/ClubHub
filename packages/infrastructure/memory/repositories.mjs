@@ -162,3 +162,66 @@ export class RecordingEventBus {
   get last() { return this.events.at(-1) ?? null; }
   clear() { this.events = []; return this; }
 }
+
+// ---------------------------------------------------------------------------
+// content types
+// ---------------------------------------------------------------------------
+
+import { ContentType, ContentEntry } from '../../core/domain/content-types.mjs';
+
+export class InMemoryContentTypes {
+  constructor(types = []) {
+    this.types = types.map((t) => (t instanceof ContentType ? t : new ContentType(t)));
+    this.entryCounts = new Map();
+    this.nextId = 1;
+  }
+  async byName(organisationId, name) {
+    return this.types.find((t) => t.organisationId === organisationId
+      && t.name === name) ?? null;
+  }
+  async ownedBy(organisationId, name) {
+    return this.types.find((t) => t.organisationId === organisationId
+      && t.name === name) ?? null;
+  }
+  async allFor(organisationId) {
+    return this.types.filter((t) => t.organisationId === organisationId);
+  }
+  async save(type) {
+    const built = new ContentType({ ...type,
+      id: type.id ?? `type-${this.nextId++}` });
+    const i = this.types.findIndex((t) => t.id === built.id);
+    if (i === -1) this.types.push(built); else this.types[i] = built;
+    return built;
+  }
+  async countEntries(name) { return this.entryCounts.get(name) ?? 0; }
+}
+
+export class InMemoryContentEntries {
+  constructor(entries = []) {
+    this.entries = entries.map((e) =>
+      e instanceof ContentEntry ? e : new ContentEntry(e));
+    this.revisions = [];
+    this.nextId = 1;
+  }
+  async byId(id) { return this.entries.find((e) => e.id === id) ?? null; }
+  async bySlug(organisationId, typeName, slug) {
+    return this.entries.find((e) => e.organisationId === organisationId
+      && e.typeName === typeName && e.slug?.value === slug) ?? null;
+  }
+  async save(entry) {
+    const built = new ContentEntry({ ...entry,
+      slug: entry.slug?.value ?? null, id: entry.id ?? `entry-${this.nextId++}` });
+    const i = this.entries.findIndex((e) => e.id === built.id);
+    if (i === -1) this.entries.push(built); else this.entries[i] = built;
+    return built;
+  }
+  async list(organisationId, typeName, { status = null } = {}) {
+    return this.entries.filter((e) => e.organisationId === organisationId
+      && e.typeName === typeName && (!status || e.status === status));
+  }
+  async saveRevision(entryId, values, actorId) {
+    const id = `rev-${this.revisions.length + 1}`;
+    this.revisions.push({ id, entryId, values, actorId });
+    return id;
+  }
+}

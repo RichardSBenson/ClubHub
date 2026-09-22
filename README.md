@@ -127,6 +127,10 @@ A publication names its revision, its path and its locale. Publishing again
 supersedes rather than overwrites, which makes rollback ordinary and gives cache
 invalidation something honest to work from. See `docs/publishing.md`.
 
+**4b. A federation defines its own content types.**
+Instructor, Kata, Sponsor — fields and all, inherited down the tree, without a
+developer. What it cannot define is layout. See `docs/content-types.md`.
+
 **5a. Titles are not grades.**
 Shogo — Renshi, Kyoshi, Hanshi — are awarded separately from dan grade. MOKNZ's
 own leadership could not be represented until `title_award` existed. Kendo,

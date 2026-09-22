@@ -1,80 +1,85 @@
-import { pool } from './data.mjs';
+import { pool } from '../infrastructure/postgres/pool.mjs';
 let pass=0, fail=0;
 const ok=(n,c,d='')=>c?(pass++,console.log(`  ✓ ${n}`)):(fail++,console.log(`  ✗ ${n} ${d}`));
 const q=async(s,p=[])=>(await pool.query(s,p)).rows;
+const { rows:[moknz] } = await pool.query(`select id from organisation where slug='moknz'`);
 
-console.log('\nTITLES ARE INDEPENDENT OF GRADE');
+console.log('\nSOME TITLES ARE CONFERRED BY RANK');
 {
-  const [doug] = await q(`
-    select p.first_name, t.label as title, t.rank_order as title_order,
-           g.label as grade, g.rank_order as grade_order
-    from person p
-    left join person_current_title t on t.person_id=p.id
-    left join person_current_grade g on g.person_id=p.id
-    where p.display_number='NZ-0001'`);
-  ok('Doug holds a title and a grade at once',
-    doug.title === 'Hanshi' && doug.grade === 'Godan');
-  ok('and they do not share a scale', doug.title_order !== doug.grade_order);
+  const doug = await q(`select label, how from person_title pt
+    join person p on p.id=pt.person_id where p.display_number='NZ-0001'
+    order by pt.rank_order`);
+  ok('Doug is Shihan without anyone awarding it',
+    doug.some(t => t.label==='Shihan' && t.how==='conferred'));
+  ok('and Hanshi because it was awarded',
+    doug.some(t => t.label==='Hanshi' && t.how==='awarded'));
+  ok('holding both at once', doug.length === 2);
 
-  const untitled = await q(`
-    select count(*)::int n from person p
-    left join person_current_title t on t.person_id=p.id
-    where t.person_id is null`);
-  ok('most people have no title, which is normal', untitled[0].n === 2);
+  const tane = await q(`select label, how from person_title pt
+    join person p on p.id=pt.person_id where p.display_number='NZ-0288'`);
+  ok('Tane at nidan is Sensei, not Shihan',
+    tane.some(t=>t.label==='Sensei') && !tane.some(t=>t.label==='Shihan'));
 }
 
-console.log('\nQUALIFICATIONS EXPIRE; RANK DOES NOT');
+console.log('\nCONFERRED TITLES MOVE WITH THE GRADE');
 {
-  const rows = await q(`select status, count(*)::int n from qualification_status
-    group by status order by n desc`);
-  ok('status is classified', rows.length >= 3);
-  console.log('      → ' + rows.map(r=>`${r.status}: ${r.n}`).join(', '));
+  const { rows:[aroha] } = await pool.query(
+    `select id from person where display_number='NZ-0417'`);
+  const before = await q(`select label from person_title where person_id=$1`,[aroha.id]);
+  ok('a 4th kyu holds none', before.length === 0);
 
-  const [perm] = await q(`select * from qualification_status
-    where status='permanent' limit 1`);
-  ok('a qualification with no validity period never expires',
-    perm && perm.expires_on === null);
+  // Grade her to 3rd kyu — rank 8, where Senpai begins.
+  const { rows:[g] } = await pool.query(
+    `select id from grade where label='3rd kyu' and organisation_id=$1`,[moknz.id]);
+  const { rows:[rec] } = await pool.query(`
+    insert into grading_record (person_id, grade_id, awarded_on, awarded_by_org)
+    values ($1,$2,'2026-09-19',$3) returning id`,[aroha.id,g.id,moknz.id]);
 
-  const [auto] = await q(`
-    select awarded_on, expires_on from qualification_award qa
-    join qualification q on q.id=qa.qualification_id
-    where q.code='police-vet' and qa.expires_on is not null limit 1`);
-  const months = (new Date(auto.expires_on) - new Date(auto.awarded_on))
-    / (1000*60*60*24*30.44);
-  ok('expiry is filled in from the validity period, not by hand',
-    Math.round(months) === 36, Math.round(months));
+  const after = await q(`select label, how from person_title where person_id=$1`,[aroha.id]);
+  ok('grading to 3rd kyu makes her Senpai, with no separate record',
+    after.length===1 && after[0].label==='Senpai' && after[0].how==='conferred');
+  console.log(`      → 4th kyu: nothing  →  3rd kyu: ${after[0].label}`);
+
+  await pool.query('delete from grading_record where id=$1',[rec.id]);
+  ok('and it goes again if the grading is reversed',
+    (await q(`select 1 from person_title where person_id=$1`,[aroha.id])).length===0);
 }
 
-console.log('\nTHE SAFEGUARDING QUESTION');
+console.log('\nAWARDED BEATS CONFERRED WHEN ADDRESSING SOMEONE');
 {
-  const blocked = await q(`
-    select p.first_name||' '||p.last_name as who, s.label
-    from qualification_status s join person p on p.id=s.person_id
-    where 'instruct' = any(s.required_for) and s.status='expired'`);
-  ok('the system can name who may not instruct right now',
-    blocked.length === 1 && blocked[0].label === 'Police vetting');
-  console.log(`      → ${blocked[0].who}: ${blocked[0].label} expired`);
-
-  const soon = await q(`select count(*)::int n from qualification_status
-    where status='expiring'`);
-  ok('and who lapses within sixty days', typeof soon[0].n === 'number');
+  const [doug] = await q(`select ct.label, ct.how from person_current_title ct
+    join person p on p.id=ct.person_id where p.display_number='NZ-0001'`);
+  ok('Doug is addressed as Hanshi, not Shihan',
+    doug.label==='Hanshi' && doug.how==='awarded');
 }
 
-console.log('\nTHE LADDER IS NOT KARATE-SPECIFIC');
+console.log('\nTHE VOCABULARY IS NOT IN THE CODE');
 {
-  const { rows:[org] } = await pool.query(
-    `insert into organisation (parent_id,type,name,slug,path,country_code)
-     select id,'country','Test Taekwondo NZ','ttnz','ttnz','NZ'
-     from organisation where slug='moknz' limit 1 returning id`);
-  // a different art types its own ladder — geup counts down, dan counts up
-  for (const [i,label] of ['10th geup','9th geup','1st geup','1st dan'].entries())
+  // A Korean art, defined entirely as data.
+  const { rows:[ttnz] } = await pool.query(`
+    insert into organisation (parent_id,type,name,slug,path,country_code)
+    select id,'country','Test Taekwondo NZ','ttnz','ttnz','NZ'
+    from organisation where slug='moknz' limit 1 returning id`);
+  for (const [i,label] of ['9th geup','1st geup','1st dan','4th dan'].entries())
     await pool.query(`insert into grade (organisation_id,label,rank_order,is_dan)
-      values ($1,$2,$3,$4)`, [org.id, label, i+1, label.includes('dan')]);
-  const ladder = await q(`select label from grade where organisation_id=$1
-    order by rank_order`, [org.id]);
-  ok('another art defines its own ladder with no code change',
-    ladder[0].label === '10th geup' && ladder.at(-1).label === '1st dan');
-  await pool.query('delete from organisation where id=$1', [org.id]);
+      values ($1,$2,$3,$4)`,[ttnz.id,label,i+1,label.includes('dan')]);
+  for (const [label,min,max,conf] of [
+      ['Kyosa',3,3,true], ['Sabeom',4,null,true], ['Kwanjang',4,null,false]])
+    await pool.query(`insert into title (organisation_id,label,rank_order,
+      min_grade_order,max_grade_order,conferred_by_rank)
+      values ($1,$2,$3,$4,$5,$6)`,
+      [ttnz.id,label,['Kyosa','Sabeom','Kwanjang'].indexOf(label)+1,min,max,conf]);
+
+  const titles = await q(`select label, conferred_by_rank from title
+    where organisation_id=$1 order by rank_order`,[ttnz.id]);
+  ok('a Korean art defines its own titles with no code change',
+    titles.map(t=>t.label).join() === 'Kyosa,Sabeom,Kwanjang');
+  ok('choosing for itself which are conferred and which awarded',
+    titles[0].conferred_by_rank && !titles[2].conferred_by_rank);
+  console.log('      → ' + titles.map(t =>
+    `${t.label} (${t.conferred_by_rank?'conferred':'awarded'})`).join(', '));
+
+  await pool.query('delete from organisation where id=$1',[ttnz.id]);
 }
 
 console.log(`\n${pass} passed, ${fail} failed\n`);

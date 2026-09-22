@@ -97,6 +97,46 @@ export const ENTRY_REPOSITORY = {
   ],
 };
 
+export const CONTENT_TYPE_REPOSITORY = {
+  name: 'ContentTypeRepository',
+  methods: [
+    /**
+     * (organisationId, name) → ContentType | null
+     * Resolves inheritance: a type defined by a parent is visible to everything
+     * beneath it, and the nearest definition wins.
+     */
+    'byName',
+    /**
+     * (organisationId, name) → ContentType | null
+     * Only a type this organisation owns. Overriding an inherited type creates
+     * a new one for this organisation; it does not edit the parent's.
+     */
+    'ownedBy',
+    /** (organisationId) → ContentType[] */
+    'allFor',
+    /** (ContentType) → ContentType, with an id */
+    'save',
+    /** (typeName, organisationId) → number — entries already using it */
+    'countEntries',
+  ],
+};
+
+export const CONTENT_ENTRY_REPOSITORY = {
+  name: 'ContentEntryRepository',
+  methods: [
+    /** (entryId) → ContentEntry | null */
+    'byId',
+    /** (organisationId, typeName, slug) → ContentEntry | null */
+    'bySlug',
+    /** (ContentEntry) → ContentEntry, with an id */
+    'save',
+    /** (organisationId, typeName, {status}) → ContentEntry[] */
+    'list',
+    /** (entryId, values, actorId) → revisionId */
+    'saveRevision',
+  ],
+};
+
 export const EVENT_BUS = {
   name: 'EventBus',
   /** (DomainEvent) → void. Never throws into the caller. */
