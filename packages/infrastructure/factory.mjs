@@ -41,6 +41,7 @@ export async function repositories({ dataDir = null } = {}) {
       organisations: new pg.PostgresOrganisations(pool),
       auth: new pg.PostgresAuthorisation(pool),
       site: new pg.PostgresSiteContent(pool),
+      messenger: messengerFrom(),
       clock: new pg.SystemClock(),
       writable: true,
     };
@@ -60,6 +61,7 @@ export async function repositories({ dataDir = null } = {}) {
     organisations: new JsonOrganisations(data),
     auth: new JsonAuthorisation(data),
     site: new JsonSiteContent(data),
+    messenger: messengerFrom(),
     clock: new JsonClock(),
     writable: false,
   };

@@ -22,6 +22,8 @@ import { pool, orgs, people, rank, events, Forbidden, NotFound, Invalid }
 import * as auth from './auth.mjs';
 import * as V from './views.mjs';
 import { currentStore } from '../infrastructure/factory.mjs';
+import { messengerFrom } from '../infrastructure/messaging/messengers.mjs';
+import { SendSignInLink } from '../core/application/send-sign-in-link.mjs';
 
 const SESSION_COOKIE = 'honbu_session';
 const CSRF_COOKIE = 'honbu_csrf';
@@ -101,12 +103,31 @@ get('/signin', async (ctx) => ctx.send(200, V.signIn({
 post('/signin', async (ctx) => {
   const form = await ctx.form();
   try {
-    const { token } = await auth.requestLink(form.email, { ip: ctx.ip });
-    if (token && process.env.NODE_ENV !== 'production')
-      console.log(`  sign-in link for ${form.email}: /signin/${token}`);
+    const issue = await auth.requestLink(form.email, { ip: ctx.ip });
+
+    const send = new SendSignInLink({
+      messenger: messengerFrom(),
+      clock: { today: () => new Date().toISOString().slice(0, 10) },
+    });
+
+    // Awaited. Responding before the message is away is how sign-in links
+    // vanish while the logs stay clean.
+    await send.execute({
+      email: form.email,
+      issue,
+      origin: `${ctx.secure ? 'https' : 'http'}://${ctx.req.headers.host}`,
+      federation: process.env.FEDERATION_NAME ?? 'your organisation',
+    });
   } catch (e) {
     if (e.status === 429)
       return ctx.send(429, V.signIn({ error: e.message, csrf: ctx.csrf }));
+    // A messenger failure must not look like success — the person would wait
+    // forever for a link that was never sent.
+    if (e.name === 'MessengerError') {
+      console.error('sign-in link not sent:', e.message);
+      return ctx.send(503, V.signIn({ csrf: ctx.csrf,
+        error: 'We could not send the sign-in link just now. Try again shortly.' }));
+    }
     throw e;
   }
   return ctx.redirect('/signin?sent=1');
@@ -122,6 +143,24 @@ get('/signin/:token', async (ctx) => {
     return ctx.redirect(redirectTo ?? '/dashboard');
   } catch (e) {
     return ctx.send(403, V.signIn({ error: e.message, csrf: ctx.csrf }));
+  }
+});
+
+/**
+ * The way in before email works. Exists only while HONBU_BOOTSTRAP is set.
+ */
+get('/bootstrap/:secret', async (ctx) => {
+  try {
+    const { token, account, expiresInDays } =
+      await auth.bootstrapSignIn(ctx.params.secret, {
+        userAgent: ctx.req.headers['user-agent'], ip: ctx.ip });
+    ctx.cookie(`${SESSION_COOKIE}=${token}; HttpOnly; SameSite=Lax; Path=/; ` +
+      `Max-Age=${expiresInDays * 86400}${ctx.secure ? '; Secure' : ''}`);
+    return ctx.redirect('/dashboard');
+  } catch (e) {
+    // A wrong secret and a disabled route look identical from outside.
+    return ctx.send(403, V.error({ me: null, status: 403, csrf: ctx.csrf,
+      message: e.message }));
   }
 });
 

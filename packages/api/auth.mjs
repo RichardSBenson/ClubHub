@@ -213,3 +213,86 @@ export function signInEmail({ name, link, federation, minutes = LINK_TTL_MINUTES
   ].join('\n');
   return { subject, text };
 }
+
+// ---------------------------------------------------------------------------
+// bootstrap
+// ---------------------------------------------------------------------------
+
+/**
+ * A way in before email works.
+ *
+ * Sign-in normally means emailing a link. Until a mail provider is wired up
+ * nobody can get in at all — including whoever is setting the system up. This
+ * closes that gap and nothing else.
+ *
+ * Deliberately narrow:
+ *  - Off unless HONBU_BOOTSTRAP is set, and refused if the value is short.
+ *  - Compared in constant time.
+ *  - Only ever signs in an account that already holds a role. It creates
+ *    nothing, and grants nothing.
+ *  - Every use is recorded, and the session is short.
+ *
+ * Delete the environment variable once email is working. The code can stay —
+ * with no variable set, the route does not exist.
+ */
+
+const BOOTSTRAP_TTL_DAYS = 2;
+const MIN_SECRET_LENGTH = 24;
+
+export function bootstrapEnabled() {
+  const s = process.env.HONBU_BOOTSTRAP;
+  return typeof s === 'string' && s.length >= MIN_SECRET_LENGTH;
+}
+
+export async function bootstrapSignIn(supplied, { userAgent = null, ip = null } = {}) {
+  const secret = process.env.HONBU_BOOTSTRAP;
+
+  if (!bootstrapEnabled()) {
+    if (typeof secret === 'string' && secret.length)
+      throw new Forbidden(
+        `HONBU_BOOTSTRAP must be at least ${MIN_SECRET_LENGTH} characters. ` +
+        'A short one is worse than none.');
+    throw new Forbidden('Not available');
+  }
+
+  const a = Buffer.from(String(supplied ?? ''));
+  const b = Buffer.from(secret);
+  if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) {
+    await pool.query(
+      `insert into login_attempt (email, ip, outcome) values ($1,$2,'unknown_email')`,
+      ['bootstrap', ip]);
+    throw new Forbidden('Not available');
+  }
+
+  // The most senior account that already has a role. Never creates one, so a
+  // leaked secret cannot mint an administrator out of nothing.
+  const account = await one(`
+    select a.id, a.email, p.first_name, p.last_name
+    from grant_role gr
+    join account a on a.id = gr.account_id
+    left join person p on p.id = a.person_id
+    join organisation o on o.id = gr.organisation_id
+    order by case gr.role when 'owner' then 0 when 'administrator' then 1 else 2 end,
+             nlevel(o.path)
+    limit 1`);
+
+  if (!account)
+    throw new Forbidden(
+      'No account holds a role yet. Load the seed data, or grant a role in SQL, ' +
+      'before using bootstrap.');
+
+  const raw = token(48);
+  await pool.query(`
+    insert into session (account_id, token_hash, expires_at, user_agent, ip)
+    values ($1,$2, now() + ($3 || ' days')::interval, $4, $5)`,
+    [account.id, hash(raw), String(BOOTSTRAP_TTL_DAYS),
+     `bootstrap: ${userAgent ?? 'unknown'}`, ip]);
+
+  await pool.query(
+    `insert into login_attempt (email, ip, outcome) values ($1,$2,'sent')`,
+    [`bootstrap:${account.email}`, ip]);
+
+  console.warn(`BOOTSTRAP SIGN-IN used for ${account.email} from ${ip ?? 'unknown'}`);
+
+  return { token: raw, account, expiresInDays: BOOTSTRAP_TTL_DAYS };
+}

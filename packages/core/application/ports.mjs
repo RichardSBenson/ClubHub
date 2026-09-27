@@ -137,6 +137,20 @@ export const CONTENT_ENTRY_REPOSITORY = {
   ],
 };
 
+export const MESSENGER = {
+  name: 'Messenger',
+  methods: [
+    /**
+     * ({ to, subject, text, kind }) → { delivered, id?, detail? }
+     *
+     * Must resolve only once the message has actually been handed over. A
+     * messenger that returns before the provider has accepted is the single
+     * most common way sign-in links vanish with clean logs.
+     */
+    'send',
+  ],
+};
+
 export const EVENT_BUS = {
   name: 'EventBus',
   /** (DomainEvent) → void. Never throws into the caller. */
