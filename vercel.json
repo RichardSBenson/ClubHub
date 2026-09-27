@@ -1,6 +1,6 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
-  "buildCommand": "node packages/site/build.mjs",
+  "buildCommand": "node tools/check-dependencies.mjs && node tools/check-wiring.mjs && node packages/site/build.mjs",
   "outputDirectory": "dist",
   "rewrites": [
     { "source": "/admin/(.*)", "destination": "/api/index" },

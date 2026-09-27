@@ -8,6 +8,7 @@
 import { JsonData, JsonLadder, JsonRanks, JsonMembers, JsonOrganisations,
          JsonAuthorisation, JsonSiteContent, SystemClock as JsonClock }
   from './json/repositories.mjs';
+import { messengerFrom } from './messaging/messengers.mjs';
 
 /**
  * Which store is in use.
