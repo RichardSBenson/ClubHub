@@ -41,6 +41,7 @@ const SKIP_FILES = [
   /(^|\/)verify\.m?js$/,
   /(^|\/)server\.m?js$/,
   /(^|\/)reset\.m?js$/,
+  /(^|\/)dev\.m?js$/,
   /(^|\/)tools\//,
   /(^|\/)import\//,
 ];
