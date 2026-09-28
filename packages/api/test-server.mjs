@@ -1,11 +1,12 @@
-import { createServer } from './server.mjs';
+import http from 'node:http';
+import handler from './server.mjs';
 import { pool } from './data.mjs';
 import * as auth from './auth.mjs';
 
 // This suite needs the database, reached over a local socket.
 process.env.HONBU_STORE = 'postgres';
 
-const server = createServer();
+const server = http.createServer(handler);
 await new Promise(r => server.listen(0, r));
 const base = `http://localhost:${server.address().port}`;
 

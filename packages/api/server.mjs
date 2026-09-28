@@ -10,7 +10,16 @@
  *  - Server-rendered HTML. Every screen works with JavaScript off, because
  *    these get used in halls with bad reception.
  *
- * Exports `handler(req, res)` for Vercel's Node runtime.
+ * Exports `handler(req, res)` for Vercel's Node runtime — and nothing else.
+ *
+ * This module does not import node:http, does not call createServer, and does
+ * not call listen. Vercel's builder inspects a function's module graph and,
+ * on finding an HTTP server being constructed, treats the function as a
+ * captured Node server that will bind a port at startup. This one never binds,
+ * so there was nothing to route to: every admin route 404'd in production
+ * while the build stayed green and every local test passed. Anything that
+ * needs a real listening server — dev.mjs, the tests — builds one itself
+ * around this handler.
  *
  * Nothing in this file calls listen(). That is deliberate and it is not a
  * style preference. Vercel's builder treats a listen() anywhere in a
@@ -21,7 +30,6 @@
  * green. The local listener lives in dev.mjs now. Keep it there.
  */
 
-import http from 'node:http';
 import crypto from 'node:crypto';
 import { URL } from 'node:url';
 import { pool, orgs, people, rank, events, Forbidden, NotFound, Invalid }
@@ -374,5 +382,4 @@ export async function handler(req, res) {
   }
 }
 
-export const createServer = () => http.createServer(handler);
 export default handler;

@@ -1,10 +1,11 @@
 process.env.HONBU_STORE = 'postgres';
 process.env.PGDATABASE = 'fresh';
-import { createServer } from './server.mjs';
+import http from 'node:http';
+import handler from './server.mjs';
 import { pool } from '../infrastructure/postgres/pool.mjs';
 import * as auth from './auth.mjs';
 
-const server = createServer();
+const server = http.createServer(handler);
 await new Promise(r => server.listen(0, r));
 const base = `http://localhost:${server.address().port}`;
 

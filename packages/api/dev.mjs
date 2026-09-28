@@ -1,12 +1,14 @@
 /**
  * Local development listener.
  *
- * Deliberately separate from server.mjs: a listen() call inside the module
- * graph that Vercel bundles makes it treat the function as a captured Node
- * server, and the route 404s in production. Keep binding here.
+ * The server is constructed here, not in server.mjs. A createServer or listen
+ * call inside the module graph Vercel bundles makes it treat the function as
+ * a captured Node server, and every route 404s in production. Keep the
+ * plumbing on this side of the line.
  */
-import { createServer } from './server.mjs';
+import http from 'node:http';
+import handler from './server.mjs';
 
 const port = +(process.env.PORT ?? 8080);
-createServer().listen(port, () =>
+http.createServer(handler).listen(port, () =>
   console.log(`honbu admin on http://localhost:${port}`));
