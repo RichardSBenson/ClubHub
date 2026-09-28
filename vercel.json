@@ -5,12 +5,27 @@
   "functions": {
     "api/index.js": {
       "maxDuration": 15
+    },
+    "api/ping.js": {
+      "maxDuration": 5
     }
   },
   "rewrites": [
-    { "source": "/admin", "destination": "/api/index" },
-    { "source": "/admin/:path*", "destination": "/api/index" },
-    { "source": "/signin", "destination": "/api/index" },
-    { "source": "/signin/:path*", "destination": "/api/index" }
+    {
+      "source": "/admin",
+      "destination": "/api/index"
+    },
+    {
+      "source": "/admin/:path*",
+      "destination": "/api/index"
+    },
+    {
+      "source": "/signin",
+      "destination": "/api/index"
+    },
+    {
+      "source": "/signin/:path*",
+      "destination": "/api/index"
+    }
   ]
 }
