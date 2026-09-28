@@ -13,7 +13,6 @@ import { renderBlocks, excerpt } from '../content/blocks.mjs';
 import { loadSettings, SettingsError } from './settings.mjs';
 import * as R from './render.mjs';
 
-const ORIGIN = process.env.ORIGIN ?? 'https://www.kyokushinkarate.co.nz';
 // Relative to the repository, not the working directory — so it lands in the
 // same place whether run locally, from a script, or by Vercel at the repo root.
 const OUT = process.env.OUT ?? new URL('../../dist/', import.meta.url).pathname;
@@ -45,6 +44,17 @@ try {
   throw e;
 }
 for (const n of settings.notes ?? []) console.log(`  note: ${n}`);
+
+// Origin comes from settings, so it is declared after they load. It used to be
+// a literal up top — one federation's domain compiled into shared code. The
+// environment variable stays, for a one-off build against a preview domain.
+const ORIGIN = process.env.ORIGIN ?? settings.seo?.origin ?? 'http://localhost';
+
+// The federation's own discipline, for schema.org. Karate was hard-coded in
+// the renderer, which is exactly the sort of thing that differs by art.
+if (settings.organisation?.discipline) {
+  federation.discipline = settings.organisation.discipline;
+}
 
 const brand = await site.brand(federation.id);
 // settings.json is the source of truth; the brand record is the fallback for a
@@ -94,7 +104,7 @@ for (const ev of evs) {
 // ---- authored pages -------------------------------------------------------
 const authored = await site.pages();
 for (const pg of authored) {
-  const html = renderBlocks(pg.body, { dojos, events: evs });
+  const html = renderBlocks(pg.body, { dojos, events: evs }, { origin: ORIGIN });
   written.push(await write(`${pg.slug}/index.html`, R.layout({
     title: pg.meta_title ?? `${pg.title} — ${federation.name}`,
     description: pg.meta_description ?? excerpt(pg.body),
@@ -110,7 +120,8 @@ for (const pg of authored) {
 // ---- home -----------------------------------------------------------------
 const articles = await site.articles();
 written.push(await write('index.html',
-  R.homePage({ federation, dojos, events: evs, articles, origin: ORIGIN, fonts, nav: NAV_ITEMS })));
+  R.homePage({ federation, dojos, events: evs, articles, origin: ORIGIN,
+    fonts, nav: NAV_ITEMS, homeCopy: settings.homePage ?? {} })));
 
 // ---- crawlability ---------------------------------------------------------
 const urls = written.filter((f) => f.endsWith('.html'))

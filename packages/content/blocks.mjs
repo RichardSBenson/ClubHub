@@ -69,7 +69,14 @@ function cleanRich(value) {
   }).filter((r) => r.text !== '');
 }
 
-function renderRich(runs) {
+/**
+ * `origin` is this federation's own site. A link that starts with it is
+ * internal; everything else is external and gets rel="noopener". This used to
+ * test for "kyokushinkarate" in the URL, which is one federation's domain
+ * written into shared code — every other federation's own links would have
+ * been treated as somebody else's.
+ */
+function renderRich(runs, origin = '') {
   // Never trust the input. Documents can arrive from a migration, a seed or an
   // older schema version, and a renderer that throws takes the whole site down.
   const safe = Array.isArray(runs) && runs.every((r) => r && typeof r === 'object')
@@ -80,7 +87,10 @@ function renderRich(runs) {
       if (m === 'strong') html = `<strong>${html}</strong>`;
       if (m === 'em') html = `<em>${html}</em>`;
       if (m === 'link' && r.href) {
-        const ext = /^https?:/i.test(r.href) && !r.href.includes('kyokushinkarate');
+        // External means "not this federation's own site". Which site that is
+        // is configuration, not something to recognise by name.
+        const ext = /^https?:/i.test(r.href)
+          && !(origin && r.href.startsWith(origin));
         html = `<a href="${esc(r.href)}"${ext ? ' rel="noopener"' : ''}>${html}</a>`;
       }
     }
@@ -142,24 +152,24 @@ export function validate(doc) {
  * `data` supplies the live blocks: { dojos, events, honours }.
  * Absent data renders nothing rather than an empty shell.
  */
-export function renderBlocks(doc, data = {}) {
+export function renderBlocks(doc, data = {}, { origin = '' } = {}) {
   return (doc?.blocks ?? []).map((b) => {
     switch (b.type) {
       case 'heading':
         return `<h${b.level}>${esc(b.text ?? '')}</h${b.level}>`;
 
       case 'paragraph':
-        return `<p>${renderRich(b.text ?? [])}</p>`;
+        return `<p>${renderRich(b.text ?? [], origin)}</p>`;
 
       case 'list': {
         const tag = b.ordered ? 'ol' : 'ul';
         const items = Array.isArray(b.items) ? b.items : [];
         return `<${tag}>${items
-          .map((i) => `<li>${renderRich(i)}</li>`).join('')}</${tag}>`;
+          .map((i) => `<li>${renderRich(i, origin)}</li>`).join('')}</${tag}>`;
       }
 
       case 'quote':
-        return `<blockquote><p>${renderRich(b.text ?? [])}</p>` +
+        return `<blockquote><p>${renderRich(b.text ?? [], origin)}</p>` +
           (b.attribution ? `<cite>${esc(b.attribution)}</cite>` : '') + `</blockquote>`;
 
       case 'image': {
@@ -171,7 +181,7 @@ export function renderBlocks(doc, data = {}) {
 
       case 'callout':
         return `<div class="callout ${b.tone === 'warning' ? 'warn' : 'note'}">` +
-          `<p>${renderRich(b.text ?? [])}</p></div>`;
+          `<p>${renderRich(b.text ?? [], origin)}</p></div>`;
 
       case 'divider':
         return '<hr>';

@@ -133,7 +133,7 @@ export const roster = ({ me, csrf, org, roster }) => page({
     <tbody>${roster.map((p) => `<tr>
       <td><a href="/p/${p.id}">${esc(p.first_name)} ${esc(p.last_name)}</a>
         <span class="muted">${esc(p.display_number ?? '')}</span></td>
-      <td>${p.grade ? `<span class="tag ${p.rank_order >= 11 ? 'dan' : 'ok'}">${esc(p.grade)}</span>`
+      <td>${p.grade ? `<span class="tag ${p.is_dan ? 'dan' : 'ok'}">${esc(p.grade)}</span>`
         : '<span class="tag no">ungraded</span>'}</td>
       <td class="hide-sm">${p.age ?? ''}</td>
       <td class="hide-sm">${esc(p.role)}</td>

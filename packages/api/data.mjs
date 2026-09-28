@@ -120,7 +120,7 @@ export const people = {
     return q(`
       select p.id, p.display_number, p.first_name, p.last_name,
              date_part('year', age(p.date_of_birth))::int as age,
-             cg.label as grade, cg.rank_order, cg.awarded_on as graded_on,
+             cg.label as grade, cg.rank_order, cg.is_dan, cg.awarded_on as graded_on,
              a.role, a.status, a.paid_until,
              o.name as dojo, o.slug as dojo_slug
              ${includePrivate ? `, pv.emergency_name, pv.emergency_phone` : ''}

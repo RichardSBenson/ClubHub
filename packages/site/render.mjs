@@ -41,6 +41,14 @@ function groupSessions(sessions) {
 // structured data — the thing Sporty cannot do
 // ---------------------------------------------------------------------------
 
+/**
+ * What schema.org should call the sport. Karate is MOKNZ's answer, not the
+ * platform's — build.mjs puts the federation's own on the object from
+ * settings. The fallback only covers a federation record that has not been
+ * given one.
+ */
+const disciplineOf = (federation) => federation?.discipline ?? 'Karate';
+
 export function dojoJsonLd(dojo, federation, origin) {
   const ld = {
     '@context': 'https://schema.org',
@@ -49,7 +57,7 @@ export function dojoJsonLd(dojo, federation, origin) {
     url: `${origin}/${dojo.slug}`,
     parentOrganization: { '@type': 'SportsOrganization', name: federation.name,
       url: origin },
-    sport: 'Karate',
+    sport: disciplineOf(federation),
   };
   if (dojo.venue_name || dojo.city) {
     ld.address = { '@type': 'PostalAddress', addressCountry: dojo.country_code ?? 'NZ' };
@@ -357,13 +365,25 @@ export function eventPage({ ev, federation, origin, fonts, nav }) {
   });
 }
 
-export function homePage({ federation, dojos, events, articles, origin, fonts, nav }) {
+/**
+ * The hero copy comes from settings. It used to be written here, which made
+ * data/settings.json a liar: it offered heroHeading, heroText and heroButton
+ * and nothing read them. The defaults below are MOKNZ's words, kept only so an
+ * empty settings file still renders something.
+ */
+export function homePage({ federation, dojos, events, articles, origin, fonts,
+                           nav, homeCopy = {} }) {
+  const heading = homeCopy.heroHeading ?? 'Everyone starts as a white belt.';
+  const heroText = homeCopy.heroText
+    ?? 'Full-contact Kyokushin karate, taught in New Zealand since 1965. '
+     + 'Your first class is free.';
+  const heroButton = homeCopy.heroButton ?? 'Find your dojo';
+
   const body = `
 <div class="hero"><div class="wrap">
-  <h1>Everyone starts as a white belt.</h1>
-  <p>Full-contact Kyokushin karate, taught in New Zealand since 1965.
-  Your first class is free.</p>
-  <a class="btn" href="/find-a-dojo">Find your dojo</a>
+  <h1>${esc(heading)}</h1>
+  <p>${esc(heroText)}</p>
+  <a class="btn" href="/find-a-dojo">${esc(heroButton)}</a>
   <a class="btn ghost" href="/events" style="margin-left:8px">Events</a>
 </div></div>
 
@@ -401,7 +421,7 @@ ${articles.length ? `<section><div class="wrap">
     canonical: origin,
     jsonLd: [{
       '@context':'https://schema.org','@type':'SportsOrganization',
-      name: federation.name, url: origin, sport: 'Karate',
+      name: federation.name, url: origin, sport: disciplineOf(federation),
       foundingDate: federation.founded?.toISOString?.().slice(0,10),
     }],
     federation, fonts, nav, body,
