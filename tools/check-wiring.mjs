@@ -35,12 +35,12 @@ const SKIP_DIRECTORIES = new Set(['node_modules', 'dist', 'data', '.git', '.verc
 
 /** Modules that are scripts, not libraries: importing them does work. */
 const SKIP_FILES = [
-  /(^|\/)test-[^/]*\.mjs$/,
-  /(^|\/)test\.mjs$/,
-  /(^|\/)build\.mjs$/,
-  /(^|\/)verify\.mjs$/,
-  /(^|\/)server\.mjs$/,
-  /(^|\/)reset\.mjs$/,
+  /(^|\/)test-[^/]*\.m?js$/,
+  /(^|\/)test\.m?js$/,
+  /(^|\/)build\.m?js$/,
+  /(^|\/)verify\.m?js$/,
+  /(^|\/)server\.m?js$/,
+  /(^|\/)reset\.m?js$/,
   /(^|\/)tools\//,
   /(^|\/)import\//,
 ];
@@ -65,7 +65,10 @@ async function* modules(dir) {
     if (entry.isDirectory()) {
       if (SKIP_DIRECTORIES.has(entry.name)) continue;
       yield* modules(full);
-    } else if (entry.name.endsWith('.mjs')) {
+    } else if (entry.name.endsWith('.mjs') || entry.name.endsWith('.js')) {
+      // .js counts because package.json sets "type": "module" — api/index.js
+      // is an ES module, and it is the one file a deployment cannot do
+      // without. Checking only .mjs would skip exactly the wrong file.
       yield full;
     }
   }
@@ -173,6 +176,59 @@ if (driverInstalled) {
   console.warn('pg is not installed — the Postgres branch was NOT checked.');
 }
 
+// ------------------------------------------------- 4. the deployment entry
+
+/**
+ * A serverless function that is never detected does not fail the build. It
+ * just 404s in production while every local test passes, which is a miserable
+ * thing to debug from a phone. So check the three things that have to agree:
+ * vercel.json names a file, that file exists, and it exports a handler.
+ */
+{
+  const { readFile } = await import('node:fs/promises');
+
+  let vercel = null;
+  try {
+    vercel = JSON.parse(await readFile(join(root, 'vercel.json'), 'utf8'));
+  } catch (error) {
+    note('vercel.json', error);
+  }
+
+  if (vercel) {
+    const declared = Object.keys(vercel.functions ?? {});
+    if (declared.length === 0) {
+      note('vercel.json', new Error('no functions declared — the admin will 404'));
+    }
+
+    for (const path of declared) {
+      // Globs are allowed in this field; this project names files outright, so
+      // anything with a wildcard is left for Vercel to resolve.
+      if (/[*?[\]]/.test(path)) continue;
+
+      try {
+        const entry = await import(pathToFileURL(join(root, path)).href);
+        if (typeof entry.default !== 'function') {
+          note(`vercel.json → ${path}`,
+            new Error('does not export a default handler function'));
+        }
+      } catch (error) {
+        note(`vercel.json → ${path}`, error);
+      }
+    }
+
+    // Every rewrite has to land on a function that is actually declared.
+    for (const { source, destination } of vercel.rewrites ?? []) {
+      const target = destination.replace(/^\//, '');
+      const hit = declared.some((path) =>
+        path === target || path.replace(/\.[cm]?[jt]s$/, '') === target);
+      if (!hit) {
+        note(`rewrite ${source}`,
+          new Error(`sends traffic to ${destination}, which no function serves`));
+      }
+    }
+  }
+}
+
 // ------------------------------------------------------------------ report
 
 if (failures.length) {
@@ -183,5 +239,6 @@ if (failures.length) {
 
 console.log(
   `Wiring holds. ${imported} modules import cleanly; ` +
-  `both stores assemble and satisfy their ports.`
+  `both stores assemble and satisfy their ports; ` +
+  `the deployment entry point exports a handler and every rewrite reaches it.`
 );

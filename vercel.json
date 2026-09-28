@@ -2,8 +2,15 @@
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "buildCommand": "node tools/check-dependencies.mjs && node tools/check-wiring.mjs && node packages/site/build.mjs",
   "outputDirectory": "dist",
+  "functions": {
+    "api/index.js": {
+      "maxDuration": 15
+    }
+  },
   "rewrites": [
-    { "source": "/admin/(.*)", "destination": "/api/index" },
-    { "source": "/signin/(.*)", "destination": "/api/index" }
+    { "source": "/admin", "destination": "/api/index" },
+    { "source": "/admin/:path*", "destination": "/api/index" },
+    { "source": "/signin", "destination": "/api/index" },
+    { "source": "/signin/:path*", "destination": "/api/index" }
   ]
 }
