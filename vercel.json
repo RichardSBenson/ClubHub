@@ -35,6 +35,12 @@
     },
     "api/ping12.js": {
       "maxDuration": 10
+    },
+    "api/ping13.js": {
+      "maxDuration": 20
+    },
+    "api/ping14.js": {
+      "maxDuration": 20
     }
   },
   "rewrites": [
