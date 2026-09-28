@@ -47,16 +47,33 @@ function groupSessions(sessions) {
  * settings. The fallback only covers a federation record that has not been
  * given one.
  */
-const disciplineOf = (federation) => federation?.discipline ?? 'Karate';
+const capitalise = (t) => t.charAt(0).toUpperCase() + t.slice(1);
 
-export function dojoJsonLd(dojo, federation, origin) {
+const disciplineOf = (federation) => federation?.discipline ?? 'Martial arts';
+
+/**
+ * The phrase a page uses when the federation has not written its own copy.
+ *
+ * It is built from the federation's own discipline and vocabulary, never from
+ * a sentence about Kyokushin. The old defaults said "Full-contact Kyokushin
+ * karate, taught in New Zealand since 1965", which is true of exactly one
+ * customer and appeared on every other federation's pages the moment there
+ * was more than one.
+ */
+const artOf = (federation) =>
+  federation?.artName ?? federation?.discipline ?? 'martial arts';
+const clubWord = (v = {}) => (v.club ?? 'club').toLowerCase();
+const clubsWordOf = (v = {}) => (v.clubPlural ?? v.club ?? 'clubs').toLowerCase();
+
+export function dojoJsonLd(dojo, federation, origin, base = '') {
+  const federationUrl = `${origin}${base}`;
   const ld = {
     '@context': 'https://schema.org',
     '@type': 'SportsActivityLocation',
     name: `${federation.name} — ${dojo.name} Dojo`,
-    url: `${origin}/${dojo.slug}`,
+    url: `${origin}${base}/${dojo.slug}`,
     parentOrganization: { '@type': 'SportsOrganization', name: federation.name,
-      url: origin },
+      url: federationUrl },
     sport: disciplineOf(federation),
   };
   if (dojo.venue_name || dojo.city) {
@@ -80,7 +97,7 @@ export function dojoJsonLd(dojo, federation, origin) {
   return ld;
 }
 
-export function eventJsonLd(ev, org, origin) {
+export function eventJsonLd(ev, org, origin, base = '') {
   return {
     '@context': 'https://schema.org',
     '@type': 'SportsEvent',
@@ -89,11 +106,11 @@ export function eventJsonLd(ev, org, origin) {
     endDate: ev.ends_at ?? undefined,
     eventStatus: ev.status === 'cancelled'
       ? 'https://schema.org/EventCancelled' : 'https://schema.org/EventScheduled',
-    url: `${origin}/events/${ev.slug}`,
+    url: `${origin}${base}/events/${ev.slug}`,
     organizer: { '@type': 'SportsOrganization', name: ev.from_org ?? org.name },
     location: ev.venue_name
       ? { '@type': 'Place', name: ev.venue_name }
-      : { '@type': 'VirtualLocation', url: `${origin}/events/${ev.slug}` },
+      : { '@type': 'VirtualLocation', url: `${origin}${base}/events/${ev.slug}` },
   };
 }
 
@@ -204,8 +221,17 @@ footer.site a{color:var(--neutral)}
 // layout
 // ---------------------------------------------------------------------------
 
+/**
+ * `base` is the path this federation's site is published under: '' for the
+ * one at the root, '/demo/tkd' for a second federation on the same
+ * deployment. Every internal link goes through it. Absolute links worked
+ * while there was one federation and silently send a visitor to another
+ * federation's page once there are three.
+ */
 export function layout({ title, description, canonical, body, jsonLd = [],
-                         federation, fonts, nav = [] }) {
+                         federation, fonts, nav = [], base = '', vocabulary = {} }) {
+  const at = (p) => `${base}${p}`;
+  const clubsWord = vocabulary.clubPlural ?? vocabulary.club ?? 'Clubs';
   const fontHref = [fonts.display, fonts.body].filter(Boolean)
     .map((f) => `family=${f.replace(/ /g, '+')}:wght@400;500;700`).join('&');
 
@@ -224,17 +250,17 @@ export function layout({ title, description, canonical, body, jsonLd = [],
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?${fontHref}&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="/theme.css">
+<link rel="stylesheet" href="${at('/theme.css')}">
 ${jsonLd.map((l) => `<script type="application/ld+json">${JSON.stringify(l)}</script>`).join('\n')}
 </head>
 <body>
 <header class="site"><div class="wrap">
-  <a class="brandmark" href="/">${esc(federation.name)}<span>${esc(federation.country_code ?? '')}</span></a>
-  <nav class="main">${nav.map((n) => `<a href="${n.href}">${esc(n.label)}</a>`).join('')}</nav>
+  <a class="brandmark" href="${at('/')}">${esc(federation.name)}<span>${esc(federation.country_code ?? '')}</span></a>
+  <nav class="main">${nav.map((n) => `<a href="${at(n.href)}">${esc(n.label)}</a>`).join('')}</nav>
 </div></header>
 ${body}
 <footer class="site"><div class="wrap">
-  ${esc(federation.name)} · <a href="/find-a-dojo">Dojo</a> · <a href="/events">Events</a>
+  ${esc(federation.name)} · <a href="${at('/find-a-dojo')}">${esc(clubsWord)}</a> · <a href="${at('/events')}">Events</a>
 </div></footer>
 </body>
 </html>`;
@@ -244,7 +270,9 @@ ${body}
 // pages
 // ---------------------------------------------------------------------------
 
-export function dojoPage({ dojo, federation, events, origin, fonts, nav }) {
+export function dojoPage({ dojo, federation, events, origin, fonts, nav,
+                           base = '', vocabulary = {} }) {
+  const at = (p) => `${base}${p}`;
   const groups = groupSessions(dojo.sessions ?? []);
   const town = dojo.name;
   const daysLine = groups.length
@@ -253,8 +281,8 @@ export function dojoPage({ dojo, federation, events, origin, fonts, nav }) {
 
   const body = `
 <div class="hero"><div class="wrap">
-  <h1>Kyokushin karate in ${esc(town)}</h1>
-  <p>Full-contact karate for adults and children. ${esc(daysLine)}.${
+  <h1>${esc(federation.name)} in ${esc(town)}</h1>
+  <p>${esc(capitalise(artOf(federation)))} for adults and children. ${esc(daysLine)}.${
     dojo.first_class_free ? ' Your first class is free.' : ''}</p>
   <a class="btn" href="#visit">Come to a class</a>
 </div></div>
@@ -293,7 +321,7 @@ export function dojoPage({ dojo, federation, events, origin, fonts, nav }) {
     return `<li>
       <div class="d"><b>${d.getDate()}</b><span>${d.toLocaleDateString('en-NZ',{month:'short'})}</span></div>
       <div>${e.is_own ? '' : `<span class="tag">${esc(e.from_org)}</span>`}
-        <h3><a href="/events/${esc(e.slug)}">${esc(e.title)}</a></h3>
+        <h3><a href="${at(`/events/${esc(e.slug)}`)}">${esc(e.title)}</a></h3>
         <p>${esc(e.venue_name ?? '')}</p></div></li>`;
   }).join('')}</ul>` : ''}
 
@@ -303,17 +331,19 @@ export function dojoPage({ dojo, federation, events, origin, fonts, nav }) {
 </div></section>`;
 
   return layout({
-    title: `Kyokushin karate in ${town} — ${federation.name}`,
-    description: `Full-contact Kyokushin karate classes in ${town} for adults and ` +
+    title: `${capitalise(artOf(federation))} in ${town} — ${federation.name}`,
+    description: `${capitalise(artOf(federation))} classes in ${town} for adults and ` +
       `children.${dojo.first_class_free ? ' First class free.' : ''}` +
       (groups.length ? ` ${daysLine} at ${dojo.venue_name}.` : ''),
-    canonical: `${origin}/${dojo.slug}`,
-    jsonLd: [dojoJsonLd(dojo, federation, origin)],
-    federation, fonts, nav, body,
+    canonical: `${origin}${at(`/${dojo.slug}`)}`,
+    jsonLd: [dojoJsonLd(dojo, federation, origin, base)],
+    federation, fonts, nav, base, vocabulary, body,
   });
 }
 
-export function findADojoPage({ dojos, federation, origin, fonts, nav }) {
+export function findADojoPage({ dojos, federation, origin, fonts, nav,
+                                base = '', vocabulary = {} }) {
+  const at = (p) => `${base}${p}`;
   const ready = dojos.filter((d) => d.published);
   const body = `
 <section><div class="wrap">
@@ -321,7 +351,7 @@ export function findADojoPage({ dojos, federation, origin, fonts, nav }) {
   <p style="font-size:19px;max-width:60ch">${dojos.length} dojo. Every one takes
   beginners, and your first class is free.</p>
   <div class="grid" style="margin-top:28px">
-    ${dojos.map((d) => `<a href="/${esc(d.slug)}"><strong>${esc(d.name)}</strong>
+    ${dojos.map((d) => `<a href="${at(`/${esc(d.slug)}`)}"><strong>${esc(d.name)}</strong>
       <span>${esc(d.published ? (d.city ?? 'Book a free class') : 'Details coming')}</span></a>`).join('')}
   </div>
   <p style="margin-top:22px;color:var(--muted);font-size:15px">
@@ -330,20 +360,23 @@ export function findADojoPage({ dojos, federation, origin, fonts, nav }) {
 
   return layout({
     title: `Find a dojo — ${federation.name}`,
-    description: `${dojos.length} Kyokushin karate dojo. Find your nearest and book a free first class.`,
-    canonical: `${origin}/find-a-dojo`,
+    description: `${dojos.length} ${clubsWordOf(vocabulary)}. Find your nearest and book a free first class.`,
+    canonical: `${origin}${at('/find-a-dojo')}`,
     jsonLd: [{
       '@context':'https://schema.org','@type':'SportsOrganization',
-      name: federation.name, url: origin,
+      name: federation.name, url: `${origin}${base}`,
       subOrganization: dojos.map((d) => ({
-        '@type':'SportsActivityLocation', name: `${d.name} Dojo`,
-        url: `${origin}/${d.slug}` })),
+        '@type':'SportsActivityLocation',
+        name: `${d.name} ${vocabulary.club ?? 'Club'}`,
+        url: `${origin}${at(`/${d.slug}`)}` })),
     }],
-    federation, fonts, nav, body,
+    federation, fonts, nav, base, vocabulary, body,
   });
 }
 
-export function eventPage({ ev, federation, origin, fonts, nav }) {
+export function eventPage({ ev, federation, origin, fonts, nav,
+                            base = '', vocabulary = {} }) {
+  const at = (p) => `${base}${p}`;
   const body = `
 <div class="hero"><div class="wrap">
   <span class="tag">${esc(ev.kind.replace('_',' ').toUpperCase())}</span>
@@ -359,9 +392,9 @@ export function eventPage({ ev, federation, origin, fonts, nav }) {
   return layout({
     title: `${ev.title} — ${federation.name}`,
     description: ev.summary ?? `${ev.title}, ${date(ev.starts_at)}.`,
-    canonical: `${origin}/events/${ev.slug}`,
-    jsonLd: [eventJsonLd(ev, federation, origin)],
-    federation, fonts, nav, body,
+    canonical: `${origin}${at(`/events/${ev.slug}`)}`,
+    jsonLd: [eventJsonLd(ev, federation, origin, base)],
+    federation, fonts, nav, base, vocabulary, body,
   });
 }
 
@@ -372,25 +405,26 @@ export function eventPage({ ev, federation, origin, fonts, nav }) {
  * empty settings file still renders something.
  */
 export function homePage({ federation, dojos, events, articles, origin, fonts,
-                           nav, homeCopy = {} }) {
-  const heading = homeCopy.heroHeading ?? 'Everyone starts as a white belt.';
+                           nav, homeCopy = {}, base = '', vocabulary = {} }) {
+  const at = (p) => `${base}${p}`;
+  const heading = homeCopy.heroHeading ?? 'Everyone starts somewhere.';
   const heroText = homeCopy.heroText
-    ?? 'Full-contact Kyokushin karate, taught in New Zealand since 1965. '
-     + 'Your first class is free.';
-  const heroButton = homeCopy.heroButton ?? 'Find your dojo';
+    ?? `${capitalise(artOf(federation))} taught at ${dojos.length} `
+     + `${clubsWordOf(vocabulary)}. Your first class is free.`;
+  const heroButton = homeCopy.heroButton ?? `Find your ${clubWord(vocabulary)}`;
 
   const body = `
 <div class="hero"><div class="wrap">
   <h1>${esc(heading)}</h1>
   <p>${esc(heroText)}</p>
-  <a class="btn" href="/find-a-dojo">${esc(heroButton)}</a>
-  <a class="btn ghost" href="/events" style="margin-left:8px">Events</a>
+  <a class="btn" href="${at('/find-a-dojo')}">${esc(heroButton)}</a>
+  <a class="btn ghost" href="${at('/events')}" style="margin-left:8px">Events</a>
 </div></div>
 
 <section><div class="wrap">
   <h2>Where we train</h2>
   <div class="grid">${dojos.slice(0,16).map((d) =>
-    `<a href="/${esc(d.slug)}"><strong>${esc(d.name)}</strong><span>Book a free class</span></a>`).join('')}</div>
+    `<a href="${at(`/${esc(d.slug)}`)}"><strong>${esc(d.name)}</strong><span>Book a free class</span></a>`).join('')}</div>
 </div></section>
 
 ${events.length ? `<section style="background:var(--canvas-alt)"><div class="wrap">
@@ -399,7 +433,7 @@ ${events.length ? `<section style="background:var(--canvas-alt)"><div class="wra
     const d = new Date(e.starts_at);
     return `<li><div class="d"><b>${d.getDate()}</b>
       <span>${d.toLocaleDateString('en-NZ',{month:'short'})}</span></div>
-      <div><h3><a href="/events/${esc(e.slug)}">${esc(e.title)}</a></h3>
+      <div><h3><a href="${at(`/events/${esc(e.slug)}`)}">${esc(e.title)}</a></h3>
       <p>${esc(e.venue_name ?? e.from_org ?? '')}</p></div></li>`;
   }).join('')}</ul>
 </div></section>` : ''}
@@ -410,21 +444,21 @@ ${articles.length ? `<section><div class="wrap">
     `<li><div class="d"><b>${new Date(a.published_at).getDate()}</b>
       <span>${new Date(a.published_at).toLocaleDateString('en-NZ',{month:'short'})}</span></div>
       <div>${a.about_org ? `<span class="tag">${esc(a.about_org)}</span>` : ''}
-      <h3><a href="/news/${esc(a.slug)}">${esc(a.title)}</a></h3>
+      <h3><a href="${at(`/news/${esc(a.slug)}`)}">${esc(a.title)}</a></h3>
       <p>${esc(a.summary ?? '')}</p></div></li>`).join('')}</ul>
 </div></section>` : ''}`;
 
   return layout({
-    title: `Kyokushin karate in New Zealand — ${federation.name}`,
-    description: `Full-contact Kyokushin karate since 1965. ${dojos.length} dojo ` +
+    title: `${federation.name} — ${capitalise(artOf(federation))}`,
+    description: `${capitalise(artOf(federation))}. ${dojos.length} ${clubsWordOf(vocabulary)} ` +
       `nationwide, all welcoming beginners. Your first class is free.`,
-    canonical: origin,
+    canonical: `${origin}${base}`,
     jsonLd: [{
       '@context':'https://schema.org','@type':'SportsOrganization',
-      name: federation.name, url: origin, sport: disciplineOf(federation),
+      name: federation.name, url: `${origin}${base}`, sport: disciplineOf(federation),
       foundingDate: federation.founded?.toISOString?.().slice(0,10),
     }],
-    federation, fonts, nav, body,
+    federation, fonts, nav, base, vocabulary, body,
   });
 }
 

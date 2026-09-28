@@ -14,7 +14,9 @@
     "tagline": "Kyokushin karate in New Zealand since 1965",
     "_tagline": "One line. Appears under the name in the header.",
     "discipline": "Karate",
-    "_discipline": "The art, as schema.org should label it. Judo, Taekwondo, Brazilian Jiu-Jitsu."
+    "_discipline": "The art, as schema.org should label it. Judo, Taekwondo, Brazilian Jiu-Jitsu.",
+    "artName": "Kyokushin karate",
+    "_artName": "What the pages call the art, which need not match the schema.org sport above. \"Kyokushin karate\" reads better in a page title than \"Karate\"."
   },
   "vocabulary": {
     "_readme": "What this federation calls things. The platform serves any graded martial art, so none of these words are built in. A taekwondo body types Dojang, a kung fu body Kwoon, a BJJ body Academy, a Muay Thai body Gym. Leave a value out and the neutral word is used.",

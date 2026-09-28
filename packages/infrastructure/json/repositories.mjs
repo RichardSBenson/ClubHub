@@ -270,14 +270,18 @@ export class JsonSiteContent {
       .sort((a, b) => String(a.startsAt).localeCompare(String(b.startsAt)));
   }
 
-  async articles() {
-    return this.data.read('articles').map((a) => ({
-      ...a, published_at: a.publishedAt, about_org: a.aboutOrg }));
+  /** Scoped to one federation, so a second one's news never shows here. */
+  async articles(federationId = null) {
+    return this.data.read('articles')
+      .filter((a) => !federationId || a.organisationId === federationId)
+      .map((a) => ({ ...a, published_at: a.publishedAt, about_org: a.aboutOrg }));
   }
 
-  async pages() {
-    return this.data.read('pages').map((p) => ({
-      ...p, meta_title: p.metaTitle, meta_description: p.metaDescription }));
+  async pages(federationId = null) {
+    return this.data.read('pages')
+      .filter((p) => !federationId || p.organisationId === federationId)
+      .map((p) => ({ ...p, meta_title: p.metaTitle,
+                     meta_description: p.metaDescription }));
   }
 }
 
@@ -335,14 +339,18 @@ export class JsonSite {
       .sort((a, b) => String(a.startsAt).localeCompare(String(b.startsAt)));
   }
 
-  async pages() {
-    return this.data.read('pages').map((p) => ({
-      ...p, meta_title: p.metaTitle, meta_description: p.metaDescription }));
+  async pages(federationId = null) {
+    return this.data.read('pages')
+      .filter((p) => !federationId || p.organisationId === federationId)
+      .map((p) => ({ ...p, meta_title: p.metaTitle,
+                     meta_description: p.metaDescription }));
   }
 
-  async articles() {
-    return this.data.read('articles').map((a) => ({
-      ...a, published_at: a.publishedAt, about_org: a.aboutOrg }));
+  /** Scoped to one federation, so a second one's news never shows here. */
+  async articles(federationId = null) {
+    return this.data.read('articles')
+      .filter((a) => !federationId || a.organisationId === federationId)
+      .map((a) => ({ ...a, published_at: a.publishedAt, about_org: a.aboutOrg }));
   }
 
   async redirects() { return this.data.read('redirects'); }

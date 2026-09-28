@@ -76,6 +76,11 @@ values ('44444444-0000-0000-0000-000000000001', null, 'country',
         'NZ', 'Pacific/Auckland', '1988-03-01',
         jsonb_build_object(
           'demo', true,
+          'discipline', 'Taekwondo',
+          'homePage', jsonb_build_object(
+            'heroHeading', 'Start where everyone starts.',
+            'heroText', 'Taekwondo for adults and children across the Waikato and Bay of Plenty. Your first class is free.',
+            'heroButton', 'Find a dojang'),
           'vocabulary', jsonb_build_object(
             'club', 'Dojang', 'clubPlural', 'Dojangs',
             'grading', 'Promotion test', 'grade', 'Rank')));
@@ -149,6 +154,11 @@ values ('55555555-0000-0000-0000-000000000001', null, 'country',
         'AU', 'Australia/Sydney', '2009-06-01',
         jsonb_build_object(
           'demo', true,
+          'discipline', 'Brazilian Jiu-Jitsu',
+          'homePage', jsonb_build_object(
+            'heroHeading', 'Everyone gets tapped. That is the lesson.',
+            'heroText', 'Brazilian jiu-jitsu, gi and no-gi, at three academies. Beginners train in their own class for the first three months.',
+            'heroButton', 'Find an academy'),
           'vocabulary', jsonb_build_object(
             'club', 'Academy', 'clubPlural', 'Academies',
             'grading', 'Promotion', 'grade', 'Belt')));

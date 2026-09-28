@@ -212,18 +212,31 @@ export class PostgresSiteContent {
     return rows;
   }
 
-  async articles() {
+  /**
+   * Scoped to one federation's subtree. Unscoped, a second federation on the
+   * same deployment showed the first one's news on its own front page, which
+   * is the kind of leak that is only funny until it happens in a demo.
+   */
+  async articles(federationId = null) {
     const { rows } = await this.pool.query(`
       select a.slug, a.title, a.summary, a.published_at, o.name as about_org
       from article a left join organisation o on o.id = a.about_org_id
-      where a.status='published' order by a.published_at desc`);
+      where a.status='published'
+        and ($1::uuid is null or a.organisation_id in (
+          select d.id from organisation d, organisation root
+          where root.id = $1 and d.path <@ root.path))
+      order by a.published_at desc`, [federationId]);
     return rows;
   }
 
-  async pages() {
+  async pages(federationId = null) {
     const { rows } = await this.pool.query(`
       select slug, title, body, meta_title, meta_description
-      from page where status='published'`);
+      from page
+      where status='published'
+        and ($1::uuid is null or organisation_id in (
+          select d.id from organisation d, organisation root
+          where root.id = $1 and d.path <@ root.path))`, [federationId]);
     return rows;
   }
 }
@@ -288,16 +301,29 @@ export class PostgresSite {
       order by e.starts_at`, [orgSlug]);
   }
 
-  async pages() {
+  async pages(federationId = null) {
     return this.#q(`select slug, title, meta_title, meta_description, body
-      from page where status='published'`);
+      from page
+      where status='published'
+        and ($1::uuid is null or organisation_id in (
+          select d.id from organisation d, organisation root
+          where root.id = $1 and d.path <@ root.path))`, [federationId]);
   }
 
-  async articles() {
+  /**
+   * Scoped to one federation's subtree. Unscoped, a second federation on the
+   * same deployment showed the first one's news on its own front page, which
+   * is the kind of leak that is only funny until it happens in a demo.
+   */
+  async articles(federationId = null) {
     return this.#q(`
       select a.slug, a.title, a.summary, a.published_at, o.name as about_org
       from article a left join organisation o on o.id = a.about_org_id
-      where a.status='published' order by a.published_at desc`);
+      where a.status='published'
+        and ($1::uuid is null or a.organisation_id in (
+          select d.id from organisation d, organisation root
+          where root.id = $1 and d.path <@ root.path))
+      order by a.published_at desc`, [federationId]);
   }
 
   async redirects() {
