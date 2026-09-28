@@ -52,8 +52,26 @@ write('grade-authorities', await q(`
   select organisation_id as "organisationId",
          from_rank_order as "fromRankOrder", to_rank_order as "toRankOrder",
          awarded_by_type as "awardedByType", ratified_by_type as "ratifiedByType",
-         min_panel_size as "minPanelSize", min_panel_rank as "minPanelRank"
-  from grade_authority order by from_rank_order`));
+         min_panel_size as "minPanelSize", min_panel_rank as "minPanelRank",
+         requires_title_id as "requiresTitleId",
+         (select label from title t where t.id = ga.requires_title_id)
+           as "requiresTitleLabel"
+  from grade_authority ga order by from_rank_order`));
+
+// Titles, so the files store can answer "is there a Shihan on this panel?" the
+// same way Postgres does. Definitions and awards only — no personal detail
+// beyond the link between a person and a title they hold publicly anyway.
+write('titles', await q(`
+  select id, organisation_id as "organisationId", label,
+         short_label as "shortLabel", rank_order as "rankOrder",
+         min_grade_order as "minGradeOrder", max_grade_order as "maxGradeOrder",
+         conferred_by_rank as "conferredByRank"
+  from title order by organisation_id, rank_order`));
+
+write('title-awards', await q(`
+  select person_id as "personId", title_id as "titleId",
+         awarded_on as "awardedOn"
+  from title_award order by awarded_on`));
 
 // People and gradings are the register. Only export what the PUBLIC site needs
 // — instructor names and grades — never dates of birth or contact details.

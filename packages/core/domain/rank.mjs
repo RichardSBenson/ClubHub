@@ -80,7 +80,8 @@ export class Grade {
  */
 export class GradingAuthority {
   constructor({ fromRankOrder, toRankOrder, awardedByType, ratifiedByType = null,
-                minPanelSize = 1, minPanelRank = null }) {
+                minPanelSize = 1, minPanelRank = null,
+                requiresTitleId = null, requiresTitleLabel = null }) {
     this.from = RankOrder.of(fromRankOrder);
     this.to = RankOrder.of(toRankOrder);
     if (this.from.isAbove(this.to))
@@ -91,6 +92,18 @@ export class GradingAuthority {
     this.ratifiedByType = ratifiedByType;
     this.minPanelSize = minPanelSize;
     this.minPanelRank = minPanelRank == null ? null : RankOrder.of(minPanelRank);
+    /**
+     * A title someone on the panel must hold — MOKNZ requires a Shihan to see
+     * 2nd and 1st kyu.
+     *
+     * A title and not a rank, even though MOKNZ confers Shihan from yondan and
+     * the two would agree today. They do not agree everywhere: a federation
+     * that awards its senior titles individually can have a yondan who is not
+     * one, and writing the rank here would quietly promote them. The register
+     * knows who holds the title; ask it.
+     */
+    this.requiresTitleId = requiresTitleId;
+    this.requiresTitleLabel = requiresTitleLabel;
   }
 
   covers(rankOrder) {
@@ -102,7 +115,7 @@ export class GradingAuthority {
    * Returns every reason this grading may not proceed. A list, not a boolean —
    * a registrar needs to know all of it, not the first thing that failed.
    *
-   * `panel` is an array of { personId, rankOrder }.
+   * `panel` is an array of { personId, rankOrder, titleIds }.
    */
   objectionsTo({ grade, awardingOrgType, panel = [] }) {
     const out = [];
@@ -127,6 +140,16 @@ export class GradingAuthority {
       if (tooJunior.length)
         out.push(`${tooJunior.length} examiner(s) are below the minimum rank ` +
           `for ${grade.label}`);
+    }
+
+    if (this.requiresTitleId) {
+      const held = panel.some((p) =>
+        (p.titleIds ?? []).some((id) => id === this.requiresTitleId));
+      if (!held) {
+        const title = this.requiresTitleLabel ?? 'the required title';
+        out.push(`${grade.label} must be seen by a ${title}, ` +
+          'and nobody on the panel holds that title');
+      }
     }
 
     return out;

@@ -78,6 +78,52 @@ export class JsonLadder {
   }
 }
 
+/**
+ * Titles from the exported files: those awarded outright, plus those the
+ * federation confers from a grade. Both, because the Postgres view does both
+ * and the two stores have to answer alike.
+ */
+export class JsonTitles {
+  constructor(data) { this.data = data; }
+
+  async heldBy(personIds) {
+    const ids = [...new Set(personIds ?? [])].filter(Boolean);
+    const held = new Map(ids.map((id) => [id, []]));
+    if (!ids.length) return held;
+
+    const titles = this.data.read('titles');
+    const wanted = new Set(ids);
+
+    for (const award of this.data.read('title-awards')) {
+      if (wanted.has(award.personId)) held.get(award.personId).push(award.titleId);
+    }
+
+    // Conferred: read the person's rank the same way JsonRanks does, so a
+    // grade that earns a title here earns it there too.
+    const gradeRank = new Map(
+      this.data.read('grades').map((g) => [g.id, g.rankOrder]));
+    const rankOf = new Map();
+    for (const record of this.data.read('gradings')) {
+      if (!wanted.has(record.personId)) continue;
+      if (record.result && !['pass', 'provisional'].includes(record.result)) continue;
+      const order = gradeRank.get(record.gradeId);
+      if (order == null) continue;
+      rankOf.set(record.personId, Math.max(rankOf.get(record.personId) ?? 0, order));
+    }
+
+    for (const [personId, order] of rankOf) {
+      for (const t of titles) {
+        if (!t.conferredByRank) continue;
+        if (order < (t.minGradeOrder ?? 0)) continue;
+        if (t.maxGradeOrder != null && order > t.maxGradeOrder) continue;
+        if (!held.get(personId).includes(t.id)) held.get(personId).push(t.id);
+      }
+    }
+
+    return held;
+  }
+}
+
 export class JsonRanks {
   constructor(data) { this.data = data; }
 

@@ -65,6 +65,23 @@ export class InMemoryRanks {
   }
 }
 
+/**
+ * Titles held, as a plain map of personId → titleId[].
+ *
+ * Kept as held titles rather than as rules, because a fake that recomputed
+ * conferral would be testing its own arithmetic. The point of these tests is
+ * whether the use case asks the register at all.
+ */
+export class InMemoryTitles {
+  constructor(held = {}) { this.held = held; }
+
+  async heldBy(personIds) {
+    return new Map([...new Set(personIds ?? [])]
+      .filter(Boolean)
+      .map((id) => [id, this.held[id] ?? []]));
+  }
+}
+
 export class InMemoryMembers {
   constructor(people = [], sessions = {}) {
     this.people = new Map(people.map((p) => [p.id, p]));

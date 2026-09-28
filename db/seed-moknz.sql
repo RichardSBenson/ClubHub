@@ -64,15 +64,18 @@ from (values
 -- who may award what — the rule nobody else models
 -- ---------------------------------------------------------------------------
 
+-- MOKNZ's rule. The Shihan requirement for 2nd and 1st kyu is attached in
+-- 010-grading-authority-title.sql, because it points at a title and the titles
+-- are seeded after this file.
 insert into grade_authority (organisation_id, from_rank_order, to_rank_order,
                              awarded_by_type, ratified_by_type,
                              min_panel_size, min_panel_rank)
 values
-  -- 10th to 4th kyu: the dojo grades, the country ratifies
-  ('11111111-1111-1111-1111-111111111111', 1,  7, 'dojo',    'country', 1, 11),
-  -- 3rd to 1st kyu: national grading
-  ('11111111-1111-1111-1111-111111111111', 8, 10, 'country', 'country', 2, 12),
-  -- dan grades: national panel of three, 4th dan or above
+  -- 10th to 3rd kyu: the dojo grades, the country ratifies
+  ('11111111-1111-1111-1111-111111111111', 1,  8, 'dojo',    'country', 1, 11),
+  -- 2nd and 1st kyu: still the dojo's grading, but a Shihan must see it
+  ('11111111-1111-1111-1111-111111111111', 9, 10, 'dojo',    'country', 1, 11),
+  -- Shodan and above: national grading, panel of three, 4th dan or above
   ('11111111-1111-1111-1111-111111111111',11, 15, 'country', 'country', 3, 14);
 
 -- ---------------------------------------------------------------------------

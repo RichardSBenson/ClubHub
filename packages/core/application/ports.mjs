@@ -151,6 +151,19 @@ export const MESSENGER = {
   ],
 };
 
+/**
+ * Which titles a person holds. Separate from rank because they are separate
+ * things: some federations confer a title from a grade, others award it on its
+ * own, and several do both. Only the register knows which.
+ */
+export const TITLE_REPOSITORY = {
+  name: 'TitleRepository',
+  methods: [
+    /** (personIds[]) → Map<personId, titleId[]> */
+    'heldBy',
+  ],
+};
+
 export const EVENT_BUS = {
   name: 'EventBus',
   /** (DomainEvent) → void. Never throws into the caller. */

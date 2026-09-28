@@ -11,7 +11,7 @@ import { RankOrder, MemberNumber, GradingDate, Age, DomainError }
   from './domain/values.mjs';
 import { Grade, GradingAuthority, RankHistory, GradingRecord } from './domain/rank.mjs';
 import { InMemoryLadder, InMemoryRanks, InMemoryMembers, InMemoryOrganisations,
-         AllowAll, DenyAll, FixedClock }
+         AllowAll, DenyAll, FixedClock, InMemoryTitles }
   from '../infrastructure/memory/repositories.mjs';
 
 let pass = 0, fail = 0;
@@ -66,6 +66,34 @@ console.log('\nTHE LADDER AND AUTHORITY ARE DOMAIN OBJECTS');
   ok('it objects to everything wrong at once', objections.length === 3, objections.length);
   objections.forEach(o => console.log('      → ' + o));
 
+  // MOKNZ: 2nd and 1st kyu must be seen by a Shihan.
+  const nikyu = new Grade({ id:'g9', label:'2nd kyu', rankOrder:9 });
+  const shihanBand = new GradingAuthority({ fromRankOrder:9, toRankOrder:10,
+    awardedByType:'dojo', ratifiedByType:'country', minPanelSize:1,
+    minPanelRank:11, requiresTitleId:'t-shihan', requiresTitleLabel:'Shihan' });
+
+  const withoutShihan = shihanBand.objectionsTo({ grade: nikyu,
+    awardingOrgType:'dojo', panel:[{personId:'a', rankOrder:12, titleIds:['t-sensei']}] });
+  ok('2nd kyu is refused when no Shihan saw it',
+    withoutShihan.length === 1 && /Shihan/.test(withoutShihan[0]));
+  console.log('      → ' + withoutShihan[0]);
+
+  const withShihan = shihanBand.objectionsTo({ grade: nikyu,
+    awardingOrgType:'dojo', panel:[{personId:'b', rankOrder:14, titleIds:['t-shihan']}] });
+  ok('and allowed when one did', withShihan.length === 0);
+
+  // The point of a title rather than a rank: a senior grade is not the title.
+  const seniorButUntitled = shihanBand.objectionsTo({ grade: nikyu,
+    awardingOrgType:'dojo', panel:[{personId:'c', rankOrder:15, titleIds:[]}] });
+  ok('rank alone does not stand in for the title', seniorButUntitled.length === 1);
+
+  // 3rd kyu is the dojo's own, with no title requirement at all.
+  const sankyu = new Grade({ id:'g8', label:'3rd kyu', rankOrder:8 });
+  const dojoBand = new GradingAuthority({ fromRankOrder:1, toRankOrder:8,
+    awardedByType:'dojo', ratifiedByType:'country', minPanelSize:1, minPanelRank:11 });
+  ok('3rd kyu needs no Shihan', dojoBand.objectionsTo({ grade: sankyu,
+    awardingOrgType:'dojo', panel:[{personId:'d', rankOrder:11, titleIds:[]}] }).length === 0);
+
   ok('a backwards range is rejected',
     (() => { try { new GradingAuthority({ fromRankOrder:5, toRankOrder:2,
       awardedByType:'dojo' }); return false; } catch { return true; } })());
@@ -118,7 +146,8 @@ const LADDER = new InMemoryLadder({
   ],
 });
 
-const build = ({ records = [], sessions = {}, auth = new AllowAll() } = {}) => {
+const build = ({ records = [], sessions = {}, auth = new AllowAll(),
+                 titlesHeld = {} } = {}) => {
   const ranks = new InMemoryRanks(records,
     new Map([['g7',7],['g8',8],['g9',9],['dan',14]]));
   const members = new InMemoryMembers([
@@ -133,7 +162,7 @@ const build = ({ records = [], sessions = {}, auth = new AllowAll() } = {}) => {
   return {
     check: new CheckEligibility({ ladder: LADDER, ranks, members, clock }),
     award: new AwardGrade({ ladder: LADDER, ranks, members, organisations,
-      auth, clock }),
+      titles: new InMemoryTitles(titlesHeld), auth, clock }),
     ranks,
   };
 };
@@ -205,6 +234,64 @@ console.log('\nAWARDING — THE RULES ARE IN THE CORE, NOT THE CONTROLLER');
   ok('a valid grading is recorded', out.record.id.startsWith('mem-'));
   ok('and the authority says who must ratify it',
     out.needsRatification && out.ratifiedBy === 'country');
+}
+
+console.log("\nA TITLE THE CALLER DOES NOT GET TO ASSERT");
+{
+  // MOKNZ: 2nd kyu is the dojo's grading, but a Shihan must see it.
+  const ladder = new InMemoryLadder({
+    grades: [
+      { id:'g8', label:'3rd kyu', rankOrder:8 },
+      { id:'g9', label:'2nd kyu', rankOrder:9 },
+    ],
+    authorities: [
+      { fromRankOrder:1, toRankOrder:8, awardedByType:'dojo',
+        ratifiedByType:'country', minPanelSize:1, minPanelRank:11 },
+      { fromRankOrder:9, toRankOrder:10, awardedByType:'dojo',
+        ratifiedByType:'country', minPanelSize:1, minPanelRank:11,
+        requiresTitleId:'t-shihan', requiresTitleLabel:'Shihan' },
+    ],
+  });
+
+  const at3rdKyu = [
+    { personId:'aroha', gradeId:'g8', awardedOn:'2025-01-11', awardedByOrgId:'moknz' },
+    ...PANEL_RECORDS,
+  ];
+
+  const make = (titlesHeld) => {
+    const ranks = new InMemoryRanks(at3rdKyu,
+      new Map([['g8',8],['g9',9],['dan',14]]));
+    return new AwardGrade({
+      ladder,
+      ranks,
+      members: new InMemoryMembers([{ id:'aroha', dateOfBirth:'2011-08-04' }], {}),
+      organisations: new InMemoryOrganisations([
+        { id:'moknz', type:'country', name:'MOKNZ', federationId:'moknz' },
+        { id:'whanganui', type:'dojo', name:'Whanganui', federationId:'moknz' },
+      ]),
+      titles: new InMemoryTitles(titlesHeld),
+      auth: new AllowAll(),
+      clock: new FixedClock('2026-09-17'),
+    });
+  };
+
+  await throws('2nd kyu is refused when no Shihan is on the panel', async () => {
+    await make({}).execute({ actorId:'a', personId:'aroha', gradeId:'g9',
+      awardingOrgId:'whanganui', panel: [{ personId:'tane' }] });
+  }, Refused, 'Shihan');
+
+  // The whole reason panel titles are read from the register: a caller who
+  // simply says the examiner is a Shihan must get nowhere.
+  await throws('and claiming one in the request does not help', async () => {
+    await make({}).execute({ actorId:'a', personId:'aroha', gradeId:'g9',
+      awardingOrgId:'whanganui',
+      panel: [{ personId:'tane', titleIds:['t-shihan'], rankOrder:15 }] });
+  }, Refused, 'Shihan');
+
+  const out = await make({ doug: ['t-shihan'] }).execute({
+    actorId:'a', personId:'aroha', gradeId:'g9',
+    awardingOrgId:'whanganui', panel: [{ personId:'doug' }] });
+  ok('a Shihan on the register lets it through', out.grade === '2nd kyu');
 }
 
 console.log('\nOVERRIDE IS POSSIBLE BUT NEVER SILENT');

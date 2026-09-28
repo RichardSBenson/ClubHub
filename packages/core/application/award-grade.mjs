@@ -11,16 +11,18 @@ import { GradingRecord } from '../domain/rank.mjs';
 import { CheckEligibility } from './check-eligibility.mjs';
 import { requirePort, Refused, NotPermitted,
          LADDER_REPOSITORY, RANK_REPOSITORY, MEMBER_REPOSITORY,
-         ORGANISATION_REPOSITORY, AUTHORISATION, CLOCK } from './ports.mjs';
+         ORGANISATION_REPOSITORY, TITLE_REPOSITORY, AUTHORISATION,
+         CLOCK } from './ports.mjs';
 
 const MAY_RECORD = ['owner', 'administrator', 'registrar'];
 
 export class AwardGrade {
-  constructor({ ladder, ranks, members, organisations, auth, clock }) {
+  constructor({ ladder, ranks, members, organisations, titles, auth, clock }) {
     this.ladder = requirePort(ladder, LADDER_REPOSITORY);
     this.ranks = requirePort(ranks, RANK_REPOSITORY);
     this.members = requirePort(members, MEMBER_REPOSITORY);
     this.organisations = requirePort(organisations, ORGANISATION_REPOSITORY);
+    this.titles = requirePort(titles, TITLE_REPOSITORY);
     this.auth = requirePort(auth, AUTHORISATION);
     this.clock = requirePort(clock, CLOCK);
   }
@@ -43,11 +45,16 @@ export class AwardGrade {
       org.federationId, grade.rankOrder.value);
     if (!authority) throw new Refused(`No authority rule covers ${grade.label}`);
 
-    // Panel ranks come from the register, never from the caller.
+    // Panel ranks and titles come from the register, never from the caller.
+    // Someone submitting a grading does not get to assert that the examiner is
+    // a Shihan.
     const panelIds = panel.map((p) => (typeof p === 'string' ? p : p.personId));
     const ranks = await this.ranks.rankOrdersFor(panelIds);
+    const titles = await this.titles.heldBy(panelIds);
     const panelWithRanks = panelIds.map((id) => ({
-      personId: id, rankOrder: ranks.get(id) ?? null,
+      personId: id,
+      rankOrder: ranks.get(id) ?? null,
+      titleIds: titles.get(id) ?? [],
     }));
 
     const objections = authority.objectionsTo({

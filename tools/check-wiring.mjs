@@ -107,6 +107,7 @@ const CONTRACTS = {
   members: ports.MEMBER_REPOSITORY,
   organisations: ports.ORGANISATION_REPOSITORY,
   auth: ports.AUTHORISATION,
+  titles: ports.TITLE_REPOSITORY,
   messenger: ports.MESSENGER,
   clock: ports.CLOCK,
 };

@@ -30,18 +30,45 @@ export class PostgresLadder {
 
   async authorityFor(federationId, rankOrder) {
     const { rows: [r] } = await this.pool.query(`
-      select from_rank_order, to_rank_order, awarded_by_type, ratified_by_type,
-             min_panel_size, min_panel_rank
-      from grade_authority
-      where organisation_id = $1
-        and $2 between from_rank_order and to_rank_order`,
+      select ga.from_rank_order, ga.to_rank_order, ga.awarded_by_type,
+             ga.ratified_by_type, ga.min_panel_size, ga.min_panel_rank,
+             ga.requires_title_id, t.label as requires_title_label
+      from grade_authority ga
+      left join title t on t.id = ga.requires_title_id
+      where ga.organisation_id = $1
+        and $2 between ga.from_rank_order and ga.to_rank_order`,
       [federationId, rankOrder]);
     if (!r) return null;
     return new GradingAuthority({
       fromRankOrder: r.from_rank_order, toRankOrder: r.to_rank_order,
       awardedByType: r.awarded_by_type, ratifiedByType: r.ratified_by_type,
       minPanelSize: r.min_panel_size, minPanelRank: r.min_panel_rank,
+      requiresTitleId: r.requires_title_id,
+      requiresTitleLabel: r.requires_title_label,
     });
+  }
+}
+
+/**
+ * Which titles each person holds, conferred or awarded.
+ *
+ * Reads person_title, the view that unions both, so a federation that confers
+ * Shihan from a grade and one that awards it by hand answer the same question
+ * the same way.
+ */
+export class PostgresTitles {
+  constructor(pool) { this.pool = pool; }
+
+  async heldBy(personIds) {
+    const ids = [...new Set(personIds ?? [])].filter(Boolean);
+    const held = new Map(ids.map((id) => [id, []]));
+    if (!ids.length) return held;
+
+    const { rows } = await this.pool.query(
+      `select person_id, title_id from person_title where person_id = any($1)`,
+      [ids]);
+    for (const row of rows) held.get(row.person_id)?.push(row.title_id);
+    return held;
   }
 }
 
