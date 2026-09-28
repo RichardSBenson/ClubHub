@@ -9,31 +9,7 @@
     "api/ping.js": {
       "maxDuration": 5
     },
-    "api/ping2.js": {
-      "maxDuration": 10
-    },
-    "api/ping3.js": {
-      "maxDuration": 10
-    },
-    "api/ping4.js": {
-      "maxDuration": 10
-    },
-    "api/ping5.js": {
-      "maxDuration": 10
-    },
-    "api/ping6.js": {
-      "maxDuration": 10
-    },
     "api/ping8.js": {
-      "maxDuration": 10
-    },
-    "api/ping10.js": {
-      "maxDuration": 10
-    },
-    "api/ping11.js": {
-      "maxDuration": 10
-    },
-    "api/ping12.js": {
       "maxDuration": 10
     },
     "api/ping13.js": {
