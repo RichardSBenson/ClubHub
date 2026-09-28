@@ -8,6 +8,15 @@
     },
     "api/ping.js": {
       "maxDuration": 5
+    },
+    "api/ping2.js": {
+      "maxDuration": 10
+    },
+    "api/ping3.js": {
+      "maxDuration": 10
+    },
+    "api/ping4.js": {
+      "maxDuration": 10
     }
   },
   "rewrites": [
