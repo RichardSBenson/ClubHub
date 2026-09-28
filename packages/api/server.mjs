@@ -112,6 +112,10 @@ function match(pattern, path) {
 
 get('/', async (ctx) => ctx.redirect(ctx.me ? '/dashboard' : '/signin'));
 
+// The static site owns /, so / above is only reachable in local development.
+// /admin is the door people will actually type.
+get('/admin', async (ctx) => ctx.redirect(ctx.me ? '/dashboard' : '/signin'));
+
 get('/signin', async (ctx) => ctx.send(200, V.signIn({
   sent: ctx.url.searchParams.get('sent'), csrf: ctx.csrf })));
 

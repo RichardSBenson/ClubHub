@@ -217,6 +217,30 @@ if (driverInstalled) {
       }
     }
 
+    // Every route the admin defines has to be routed TO it. The rewrites
+    // once covered /admin and /signin while the app actually lived at
+    // /dashboard, /o/:slug/..., /p/:id, /signout and /bootstrap/:secret —
+    // so those paths never reached the function and Vercel answered 404 for
+    // routes the app was perfectly able to serve.
+    const server = await readFile(join(root, 'packages/api/server.mjs'), 'utf8');
+    const sources = (vercel.rewrites ?? []).map(({ source }) => source);
+    const covered = new Set(
+      sources.map((source) => source.split('/')[1]?.replace(/:.*$/, '')).filter(Boolean));
+
+    const defined = new Set();
+    for (const [, path] of server.matchAll(/^(?:get|post)\('(\/[^']*)'/gm)) {
+      const segment = path.split('/')[1];
+      // '/' is served by the static site, so it is deliberately not rewritten.
+      if (segment && !segment.startsWith(':')) defined.add(segment);
+    }
+
+    for (const segment of defined) {
+      if (!covered.has(segment)) {
+        note(`route /${segment}`,
+          new Error('the admin serves it, but no rewrite sends it there'));
+      }
+    }
+
     // Every rewrite has to land on a function that is actually declared.
     for (const { source, destination } of vercel.rewrites ?? []) {
       const target = destination.replace(/^\//, '');

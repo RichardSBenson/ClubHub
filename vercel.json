@@ -5,18 +5,6 @@
   "functions": {
     "api/index.js": {
       "maxDuration": 15
-    },
-    "api/ping.js": {
-      "maxDuration": 5
-    },
-    "api/ping8.js": {
-      "maxDuration": 10
-    },
-    "api/ping13.js": {
-      "maxDuration": 20
-    },
-    "api/ping14.js": {
-      "maxDuration": 20
     }
   },
   "rewrites": [
@@ -25,15 +13,31 @@
       "destination": "/api/index"
     },
     {
-      "source": "/admin/:path*",
-      "destination": "/api/index"
-    },
-    {
       "source": "/signin",
       "destination": "/api/index"
     },
     {
       "source": "/signin/:path*",
+      "destination": "/api/index"
+    },
+    {
+      "source": "/signout",
+      "destination": "/api/index"
+    },
+    {
+      "source": "/dashboard",
+      "destination": "/api/index"
+    },
+    {
+      "source": "/bootstrap/:path*",
+      "destination": "/api/index"
+    },
+    {
+      "source": "/o/:path*",
+      "destination": "/api/index"
+    },
+    {
+      "source": "/p/:path*",
       "destination": "/api/index"
     }
   ]
