@@ -16,6 +16,14 @@
     "discipline": "Karate",
     "_discipline": "The art, as schema.org should label it. Judo, Taekwondo, Brazilian Jiu-Jitsu."
   },
+  "vocabulary": {
+    "_readme": "What this federation calls things. The platform serves any graded martial art, so none of these words are built in. A taekwondo body types Dojang, a kung fu body Kwoon, a BJJ body Academy, a Muay Thai body Gym. Leave a value out and the neutral word is used.",
+    "club": "Dojo",
+    "clubPlural": "Dojo",
+    "_clubPlural": "Some words do not take an s. Dojo is one of them.",
+    "grading": "Grading",
+    "grade": "Grade"
+  },
   "colours": {
     "_readme": [
       "Taken from your crest. Change any of them.",

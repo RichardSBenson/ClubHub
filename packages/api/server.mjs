@@ -212,7 +212,7 @@ get('/o/:slug/roster', async (ctx) => {
   const org = await orgs.bySlug(ctx.params.slug);
   if (!org) throw new NotFound('Organisation');
   const roster = await people.roster(ctx.me.accountId, org.id,
-    { subtree: org.type !== 'dojo' });
+    { subtree: !(org.type === 'club' || org.type === 'dojo') });
   return ctx.send(200, V.roster({ me: ctx.me, org, roster, csrf: ctx.csrf }));
 });
 
@@ -234,7 +234,7 @@ get('/o/:slug/grading', async (ctx) => {
   if (!org) throw new NotFound('Organisation');
   const fed = await orgs.bySlug('moknz');
   const roster = await people.roster(ctx.me.accountId, org.id,
-    { subtree: org.type !== 'dojo' });
+    { subtree: !(org.type === 'club' || org.type === 'dojo') });
 
   const candidates = [];
   for (const p of roster) {

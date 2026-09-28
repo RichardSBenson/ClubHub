@@ -188,7 +188,7 @@ export class PostgresSiteContent {
                'starts', t.starts::text, 'ends', t.ends::text)
                order by t.sort_order) filter (where t.id is not null), '[]') as sessions
       from organisation root
-      join organisation o on o.path <@ root.path and o.type='dojo' and o.status='active'
+      join organisation o on o.path <@ root.path and o.type::text in ('club','dojo') and o.status='active'
       left join dojo_profile d on d.organisation_id=o.id
       left join training_session t on t.organisation_id=o.id
       where root.slug=$1
@@ -265,7 +265,7 @@ export class PostgresSite {
                'starts', t.starts::text, 'ends', t.ends::text)
                order by t.sort_order) filter (where t.id is not null), '[]') as sessions
       from organisation root
-      join organisation o on o.path <@ root.path and o.type='dojo' and o.status='active'
+      join organisation o on o.path <@ root.path and o.type::text in ('club','dojo') and o.status='active'
       left join dojo_profile d on d.organisation_id=o.id
       left join training_session t on t.organisation_id=o.id
       where root.slug=$1

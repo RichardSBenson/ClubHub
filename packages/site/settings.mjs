@@ -26,6 +26,15 @@ const HEX = /^#[0-9a-fA-F]{6}$/;
 const HOME_SECTIONS = ['hero','dojoGrid','photoBand','events','news','pathway','lineage'];
 const DOJO_SECTIONS = ['hero','facts','startAnyWeek','times','about','events','findUs'];
 
+/**
+ * The neutral words. A federation overrides whichever it uses differently —
+ * Dojang, Kwoon, Academy, Gym — and anything it leaves out falls back to these
+ * rather than to one art's vocabulary.
+ */
+const VOCABULARY = {
+  club: 'Club', clubPlural: 'Clubs', grading: 'Grading', grade: 'Grade',
+};
+
 const DEFAULTS = {
   colours: { primary:'#CE372C', accent:'#F0CE41', ink:'#161617',
              canvas:'#F5F5F5', neutral:'#BDBDBF' },
@@ -100,6 +109,7 @@ function complete(s) {
 
   return {
     organisation: s.organisation ?? {},
+    vocabulary: { ...VOCABULARY, ...(s.vocabulary ?? {}) },
     tokens,
     fonts: { ...DEFAULTS.fonts, ...(s.fonts ?? {}) },
     homePage: { ...DEFAULTS.homePage, ...(s.homePage ?? {}) },
@@ -186,6 +196,7 @@ export function settingsFromCrest(pixels, { name, tagline } = {}) {
   const { tokens } = deriveTokens(palette);
   return {
     organisation: { name, tagline },
+    vocabulary: { ...VOCABULARY },
     colours: {
       primary: tokens.primary, accent: tokens.accent ?? tokens.neutral,
       ink: tokens.ink, canvas: tokens.canvas, neutral: tokens.neutral,

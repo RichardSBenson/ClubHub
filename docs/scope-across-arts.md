@@ -43,12 +43,20 @@ unbuildable. Revisit only if a kickboxing federation asks twice.
 Kendo, iaido, kyudo and most Japanese arts award **shogo** — Renshi, Kyoshi,
 Hanshi — separately from dan grade. You can hold 7th dan without being Kyoshi.
 
-MOKNZ does this. Hanshi Doug Holloway. Kyoshi Mike Kenworthy. Kyoshi Graeme
-Gavegan. Shihan Russell Dilloway.
+**The schema could not represent that at all.** Now `title` and `title_award`
+sit alongside grade, with `person_current_title` derived the same way
+`person_current_grade` is, so a 7th dan who is not Kyoshi is representable.
 
-**The schema could not represent its own customer's leadership.** Now `title`
-and `title_award` sit alongside grade, with `person_current_title` derived the
-same way `person_current_grade` is. Doug shows as Hanshi and Godan, independently.
+MOKNZ turned out **not** to work that way, which is the more useful lesson.
+There, Shihan, Renshi, Kyoshi and Hanshi are the names of the 5th to 8th dan
+grades themselves — the ladder runs Shodan, Nidan, Sandan, Yondan, Shihan,
+Renshi, Kyoshi, Hanshi. So "a Shihan must see this grading" is a rank rule,
+not a title rule, and encoding it as a title would have been worse than
+useless: seniority is cumulative and a title band is not, so the rule would
+have turned a Hanshi away from a 1st kyu grading.
+
+Both shapes are now supported and neither is assumed. Which one a federation
+uses is its own data.
 
 And the mechanism is configuration, not an assumption. I had modelled every
 title as awarded, which is true of shogo and wrong of most others: Senpai,
@@ -81,6 +89,28 @@ That is the safeguarding question every governing body is supposed to be able to
 answer and most answer from memory. `required_for` tags each qualification with
 what it gates — instruct, judge, panel — so the system can refuse rather than
 remind.
+
+## Nothing is called a dojo
+
+Dojo is karate's and judo's word. A taekwondo school is a dojang, a kung fu
+school a kwoon, a BJJ school an academy, a Muay Thai gym a gym.
+
+The leaf organisation type is therefore `club` — a neutral token — and what a
+federation *calls* its clubs is a label it configures. The website, the admin
+and the membership card all read the same setting, so a Korean federation's
+register says Dojang throughout and never once says dojo.
+
+The same applies to the other words a system like this puts in front of people:
+what a grading is called, what a grade is called. Any of them can be typed by
+the federation, and anything left blank falls back to a neutral word rather
+than to one art's vocabulary.
+
+This was not true until it was checked. `rank_order >= 11` decided whether a
+roster row was a black belt — eleven being where MOKNZ's dan grades start and
+nobody else's. A link was external if its URL did not contain
+"kyokushinkarate". The hero copy said Kyokushin in the shared renderer while
+the settings file offered heading fields nothing read. Those are fixed; the
+club and find-a-club page copy is not yet.
 
 ## The market, briefly
 

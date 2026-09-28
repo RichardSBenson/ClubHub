@@ -136,6 +136,6 @@ select o.name as dojo,
        to_char(count(*) filter (where a.status='active') * 40.00, 'FM$999,990.00') as owed_to_national
 from organisation o
 join affiliation a on a.organisation_id = o.id and a.role = 'member' and a.ends is null
-where o.type = 'dojo'
+where o.type::text in ('club','dojo')
 group by o.name
 order by active_members desc;

@@ -18,7 +18,7 @@ values ('11111111-1111-1111-1111-111111111111', null, 'country',
         'NZ', 'Pacific/Auckland', '1965-01-01');
 
 insert into organisation (parent_id, type, name, slug, path, country_code, timezone)
-select '11111111-1111-1111-1111-111111111111', 'dojo', name, slug,
+select '11111111-1111-1111-1111-111111111111', 'club', name, slug,
        ('moknz.' || replace(slug,'-','_'))::ltree, 'NZ', 'Pacific/Auckland'
 from (values
   ('Far North','far-north'), ('Auckland','auckland'), ('Gisborne','gisborne'),
@@ -31,7 +31,7 @@ from (values
 
 -- Japan sits under MOKNZ but outside NZ payment rails.
 insert into organisation (parent_id, type, name, slug, path, country_code, timezone)
-values ('11111111-1111-1111-1111-111111111111', 'dojo', 'Japan Branch', 'japan',
+values ('11111111-1111-1111-1111-111111111111', 'club', 'Japan Branch', 'japan',
         'moknz.japan', 'JP', 'Asia/Tokyo');
 
 -- ---------------------------------------------------------------------------
@@ -72,9 +72,9 @@ insert into grade_authority (organisation_id, from_rank_order, to_rank_order,
                              min_panel_size, min_panel_rank)
 values
   -- 10th to 3rd kyu: the dojo grades, the country ratifies
-  ('11111111-1111-1111-1111-111111111111', 1,  8, 'dojo',    'country', 1, 11),
+  ('11111111-1111-1111-1111-111111111111', 1,  8, 'club',    'country', 1, 11),
   -- 2nd and 1st kyu: still the dojo's grading, but a Shihan must see it
-  ('11111111-1111-1111-1111-111111111111', 9, 10, 'dojo',    'country', 1, 11),
+  ('11111111-1111-1111-1111-111111111111', 9, 10, 'club',    'country', 1, 11),
   -- Shodan and above: national grading, panel of three, 4th dan or above
   ('11111111-1111-1111-1111-111111111111',11, 15, 'country', 'country', 3, 14);
 

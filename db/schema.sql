@@ -18,7 +18,9 @@ create extension if not exists citext;
 -- ORGANISATIONS
 -- ---------------------------------------------------------------------------
 
-create type org_type as enum ('international','country','region','dojo');
+-- The leaf is a club. What a federation CALLS it — Dojo, Dojang, Academy,
+-- Kwoon, Gym — is a label it configures, never a value in here.
+create type org_type as enum ('international','country','region','club');
 
 create table organisation (
   id            uuid primary key default uuid_generate_v4(),

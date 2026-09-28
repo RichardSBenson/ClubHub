@@ -84,6 +84,10 @@ export function applePass(member, federation, config) {
     passTypeIdentifier, teamIdentifier, organizationName, webServiceURL,
   } = config;
 
+  // What this federation calls a club. Printed on the card, so it has to be
+  // their word: a dojang is not a dojo and a member can see the difference.
+  const V = { club: 'Club', grade: 'Grade', ...(federation.vocabulary ?? {}) };
+
   const pass = {
     formatVersion: 1,
     passTypeIdentifier,
@@ -113,7 +117,7 @@ export function applePass(member, federation, config) {
       ],
       secondaryFields: [
         { key: 'grade', label: 'GRADE', value: member.grade ?? 'Ungraded' },
-        { key: 'dojo', label: 'DOJO', value: member.dojo },
+        { key: 'club', label: V.club.toUpperCase(), value: member.dojo },
       ],
       auxiliaryFields: [
         { key: 'number', label: 'NUMBER', value: member.memberNumber },
@@ -182,6 +186,7 @@ export function googleClass(federation, config) {
 }
 
 export function googleObject(member, federation, config) {
+  const V = { club: 'Club', grade: 'Grade', ...(federation.vocabulary ?? {}) };
   return {
     id: `${config.issuerId}.${member.memberNumber.replace(/[^\w.-]/g, '')}`,
     classId: `${config.issuerId}.${federation.slug}`,
@@ -192,8 +197,8 @@ export function googleObject(member, federation, config) {
     barcode: { type: 'QR_CODE', value: member.token,
                alternateText: member.memberNumber },
     textModulesData: [
-      { id: 'grade', header: 'Grade', body: member.grade ?? 'Ungraded' },
-      { id: 'dojo', header: 'Dojo', body: member.dojo },
+      { id: 'grade', header: V.grade, body: member.grade ?? 'Ungraded' },
+      { id: 'club', header: V.club, body: member.dojo },
       { id: 'number', header: 'Member number', body: member.memberNumber },
     ],
   };

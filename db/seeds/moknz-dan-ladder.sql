@@ -1,5 +1,5 @@
 -- ===========================================================================
---  011 — MOKNZ's dan ladder is named, not numbered, from 5th dan up
+--  SEED (MOKNZ) — the dan ladder, named rather than numbered from 5th dan
 --
 --  Corrects 010 and the original seed. The ladder is:
 --
@@ -108,13 +108,13 @@ delete from grade_authority
 insert into grade_authority (organisation_id, from_rank_order, to_rank_order,
                              awarded_by_type, ratified_by_type,
                              min_panel_size, min_panel_rank)
-values ('11111111-1111-1111-1111-111111111111', 1, 8, 'dojo', 'country', 1, 11);
+values ('11111111-1111-1111-1111-111111111111', 1, 8, 'club', 'country', 1, 11);
 
 -- 2nd and 1st kyu: the dojo's grading, seen by a Shihan — 5th dan or above.
 insert into grade_authority (organisation_id, from_rank_order, to_rank_order,
                              awarded_by_type, ratified_by_type,
                              min_panel_size, min_panel_rank)
-values ('11111111-1111-1111-1111-111111111111', 9, 10, 'dojo', 'country', 1, 15);
+values ('11111111-1111-1111-1111-111111111111', 9, 10, 'club', 'country', 1, 15);
 
 -- Shodan and above: a national grading.
 insert into grade_authority (organisation_id, from_rank_order, to_rank_order,

@@ -73,7 +73,7 @@ export const orgs = {
              ) order by t.weekday, t.starts)
                filter (where t.id is not null), '[]') as sessions
       from organisation root
-      join organisation o on o.path <@ root.path and o.type = 'dojo'
+      join organisation o on o.path <@ root.path and o.type::text in ('club','dojo')
       left join dojo_profile d on d.organisation_id = o.id
       left join training_session t on t.organisation_id = o.id
       where root.slug = $1 and o.status = 'active'

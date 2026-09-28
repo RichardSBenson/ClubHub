@@ -1,9 +1,38 @@
+import fs from 'node:fs';
+import path from 'node:path';
 /**
  * HONBU — admin views
  *
  * Plain HTML. No client framework, no build step. Every screen works with
  * JavaScript turned off, because these get used on bad connections in halls.
  */
+
+/**
+ * What this federation calls things. Read from the same settings file the
+ * public site uses, so the admin and the website never disagree about whether
+ * a place is a Dojo, a Dojang, an Academy or a Gym.
+ *
+ * Read once, and neutral if the file is missing or unreadable — the admin
+ * failing to load because somebody mistyped a label would be a poor trade.
+ */
+const VOCABULARY = (() => {
+  const fallback = { club: 'Club', clubPlural: 'Clubs', grading: 'Grading',
+                     grade: 'Grade' };
+  try {
+    const dir = process.env.HONBU_DATA
+      ?? new URL('../../data/', import.meta.url).pathname;
+    const raw = fs.readFileSync(path.join(dir, 'settings.json'), 'utf8');
+    const custom = JSON.parse(raw).vocabulary ?? {};
+    const clean = Object.fromEntries(
+      Object.entries(custom).filter(([k, v]) =>
+        !k.startsWith('_') && typeof v === 'string' && v.trim()));
+    return { ...fallback, ...clean };
+  } catch {
+    return fallback;
+  }
+})();
+
+const V = VOCABULARY;
 
 const esc = (s = '') => String(s)
   .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
@@ -99,9 +128,9 @@ export const signIn = ({ sent, error, csrf } = {}) => page({
 });
 
 export const dashboard = ({ me, csrf, orgs }) => {
-  const dojos = orgs.filter((o) => o.type === 'dojo');
-  const parents = orgs.filter((o) => o.type !== 'dojo');
-  const total = dojos.reduce((n, o) => n + Number(o.members), 0);
+  const clubs = orgs.filter((o) => o.type === 'club' || o.type === 'dojo');
+  const parents = orgs.filter((o) => !(o.type === 'club' || o.type === 'dojo'));
+  const total = clubs.reduce((n, o) => n + Number(o.members), 0);
   return page({ title: 'Dashboard', me, csrf, body: `
   <h1>${esc(me.name)}</h1>
   <p class="sub">${orgs.length} organisation${orgs.length === 1 ? '' : 's'},
@@ -114,8 +143,8 @@ export const dashboard = ({ me, csrf, orgs }) => {
        · <a href="/o/${esc(o.slug)}/grading">Grading</a></p>
   </div>`).join('')}
 
-  <h2>Dojo</h2>
-  <div class="grid">${dojos.map((o) => `<div class="card">
+  <h2>${esc(V.clubPlural)}</h2>
+  <div class="grid">${clubs.map((o) => `<div class="card">
     <h3><a href="/o/${esc(o.slug)}/roster">${esc(o.name)}</a></h3>
     <p>${o.members} member${Number(o.members) === 1 ? '' : 's'}</p>
   </div>`).join('')}</div>` });

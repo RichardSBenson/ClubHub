@@ -111,10 +111,11 @@ export class Ladder {
  */
 export class Organisation {
   constructor({ id, name, slug, type, ancestry = [], countryCode = null }) {
-    if (!['international', 'country', 'region', 'dojo'].includes(type))
+    const canonical = type === 'dojo' ? 'club' : type;
+    if (!['international', 'country', 'region', 'club'].includes(canonical))
       throw new DomainError(`"${type}" is not an organisation type`);
     Object.assign(this, {
-      id, name, type, countryCode,
+      id, name, type: canonical, countryCode,
       slug: slug instanceof Slug ? slug : new Slug(slug),
       ancestry: [...ancestry],
     });

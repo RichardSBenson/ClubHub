@@ -110,12 +110,29 @@ export class Age {
   }
 }
 
-/** The organisation types a federation tree can contain, most senior first. */
+/**
+ * The organisation types a federation tree can contain, most senior first.
+ *
+ * The leaf is a CLUB, not a dojo. Dojo is karate's and judo's word; a
+ * taekwondo school is a dojang, a kung fu school a kwoon, a BJJ school an
+ * academy, a Muay Thai school a gym. What each federation calls its clubs is
+ * a label it configures — see the vocabulary in settings. This value is the
+ * internal token and stays the same everywhere.
+ *
+ * 'dojo' is still accepted as an alias so that a database migrated before the
+ * code, or after it, behaves the same either way. It normalises to 'club' the
+ * moment it is read.
+ */
+const LEAF_ALIASES = Object.freeze({ dojo: 'club' });
+
 export const OrgType = Object.freeze({
   INTERNATIONAL: 'international',
   COUNTRY: 'country',
   REGION: 'region',
-  DOJO: 'dojo',
-  all: ['international', 'country', 'region', 'dojo'],
-  isValid(t) { return OrgType.all.includes(t); },
+  CLUB: 'club',
+  all: ['international', 'country', 'region', 'club'],
+  /** Accepts the legacy spelling and answers with the canonical one. */
+  of(t) { return LEAF_ALIASES[t] ?? t; },
+  isValid(t) { return OrgType.all.includes(OrgType.of(t)); },
+  isLeaf(t) { return OrgType.of(t) === OrgType.CLUB; },
 });

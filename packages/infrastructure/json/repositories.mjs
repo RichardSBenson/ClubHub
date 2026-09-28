@@ -23,6 +23,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { Grade, GradingAuthority, GradingRecord }
   from '../../core/domain/rank.mjs';
+import { OrgType } from '../../core/domain/values.mjs';
 
 export class ReadOnlyStore extends Error {
   constructor(what) {
@@ -193,7 +194,7 @@ export class JsonOrganisations {
     if (!root) return [];
 
     return orgs
-      .filter((o) => o.type === 'dojo' && descendsFrom(o, root, orgs))
+      .filter((o) => OrgType.isLeaf(o.type) && descendsFrom(o, root, orgs))
       .map((o) => ({
         ...o, ...(profiles.get(o.id) ?? {}),
         sessions: sessions.filter((s) => s.organisationId === o.id),
