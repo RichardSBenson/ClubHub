@@ -2,7 +2,11 @@
 import fs from 'node:fs';
 import path from 'node:path';
 
-const OUT = './dist';
+// Resolved from this file, not from the working directory, and honouring the
+// same OUT the build honours. It used to be './dist', which meant this only
+// ran from the repository root — while npm test runs it from packages/site,
+// where there is no dist and every check died on the first read.
+const OUT = process.env.OUT ?? new URL('../../dist/', import.meta.url).pathname;
 let pass = 0, fail = 0;
 const ok = (n, c, d='') => c ? (pass++, console.log(`  ✓ ${n}`))
                              : (fail++, console.log(`  ✗ ${n} ${d}`));

@@ -1,3 +1,13 @@
+/**
+ * Starts from a rebuilt database.
+ *
+ * test-auth.mjs deliberately exhausts the sign-in rate limit for this very
+ * address — that is the rule it is there to prove — and the limiter counts by
+ * email for an hour. Without a reset, every sign-in here is refused and this
+ * file cannot run at all. It went unnoticed because the suite has been dying
+ * on its first line, in packages/brand, on a fixture that was never committed.
+ */
+import './reset.mjs';
 import http from 'node:http';
 import handler from './server.mjs';
 import { pool } from './data.mjs';

@@ -103,7 +103,8 @@ const hue = (hex) => rgbToHsl(hexToRgb(hex))[0];
  * Cluster the opaque pixels of a crest into candidate brand colours.
  * `pixels` is a flat RGBA array (Uint8ClampedArray from a canvas, or Buffer).
  */
-export function extractPalette(pixels, { maxColours = 6, minShare = 0.02 } = {}) {
+export function extractPalette(pixels, { maxColours = 6, minShare = 0.02,
+                                         mergeWithin = 18 } = {}) {
   const bucket = new Map();
   let opaque = 0;
 
@@ -117,7 +118,9 @@ export function extractPalette(pixels, { maxColours = 6, minShare = 0.02 } = {})
     else bucket.set(key, { n: 1, r: pixels[i], g: pixels[i + 1], b: pixels[i + 2] });
   }
 
-  return [...bucket.values()]
+  if (!opaque) return [];
+
+  return mergeNeighbours([...bucket.values()], mergeWithin)
     .filter((e) => e.n / opaque >= minShare)
     .sort((a, b) => b.n - a.n)
     .slice(0, maxColours)
@@ -126,6 +129,45 @@ export function extractPalette(pixels, { maxColours = 6, minShare = 0.02 } = {})
       share: +(e.n / opaque).toFixed(4),
     }));
 }
+
+/**
+ * Join buckets that are the same colour to the eye.
+ *
+ * The 5-bit grid alone is not enough, because it is a FIXED grid: two shades
+ * one value apart land in different cells whenever they happen to straddle a
+ * boundary. #CE372C and #CF382D are indistinguishable on screen, but 0x37 and
+ * 0x38 fall either side of a cut, so they were counted as two brand colours.
+ *
+ * On a real crest that is not a curiosity. Every anti-aliased edge and every
+ * JPEG artefact smears one colour across neighbouring cells, so a federation's
+ * actual red arrives split into three or four fragments — each one small
+ * enough to be dropped by the 2% floor, or small enough to lose the ordering
+ * to a colour that covers less of the crest. A federation uploads its crest
+ * and gets back somebody else's brand.
+ *
+ * So buckets are joined, largest first, when they are within `mergeWithin` of
+ * an already-kept colour. Distance is plain Euclidean in RGB weighted towards
+ * green, which is where the eye is most sensitive — not a perceptual colour
+ * space, but close enough at this scale and with no dependency to install.
+ */
+function mergeNeighbours(buckets, within) {
+  if (within <= 0) return buckets;
+  const kept = [];
+
+  for (const b of [...buckets].sort((x, y) => y.n - x.n)) {
+    const colour = [b.r / b.n, b.g / b.n, b.b / b.n];
+    const near = kept.find((k) =>
+      distance(colour, [k.r / k.n, k.g / k.n, k.b / k.n]) <= within);
+    // Totals are summed, so the merged colour is the weighted average of its
+    // parts — the fragments pull it towards wherever most of the pixels were.
+    if (near) { near.n += b.n; near.r += b.r; near.g += b.g; near.b += b.b; }
+    else kept.push({ ...b });
+  }
+  return kept;
+}
+
+const distance = ([r1, g1, b1], [r2, g2, b2]) =>
+  Math.sqrt(2 * (r1 - r2) ** 2 + 4 * (g1 - g2) ** 2 + 3 * (b1 - b2) ** 2) / 3;
 
 // ---------------------------------------------------------------------------
 // token derivation
