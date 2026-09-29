@@ -69,6 +69,26 @@ export const orgs = {
       .filter(([k, val]) => !k.startsWith('_') && typeof val === 'string' && val.trim()));
   },
 
+  /**
+   * Whose grading ladder applies here.
+   *
+   * The nearest ancestor, itself included, that defines grades. Not "the
+   * federation": a multinational body and each of its national members can
+   * both keep a ladder, and the one nearest the club is the one it grades on.
+   * A club that defines none inherits from whoever above it does.
+   */
+  async ladderOwnerOf(orgId) {
+    if (!orgId) return null;
+    return one(`
+      select a.*
+      from organisation target
+      join organisation a on target.path <@ a.path
+      where target.id = $1
+        and exists (select 1 from grade g where g.organisation_id = a.id)
+      order by nlevel(a.path) desc
+      limit 1`, [orgId]);
+  },
+
   /** The whole subtree beneath (and including) an organisation. */
   async subtree(rootId) {
     return q(`
@@ -190,6 +210,144 @@ export const people = {
       where a.person_id = $1 order by a.starts`, [personId]);
 
     return { person, history, affiliations };
+  },
+
+  /**
+   * Put a person on the register at a club.
+   *
+   * Person and affiliation in one transaction, because a person with no
+   * affiliation is a record nobody can find and nobody is responsible for.
+   *
+   * The member number is allocated here rather than typed. Federations that
+   * number their members care a great deal about it, and a number chosen by
+   * whoever happened to be filling in the form is how two people end up with
+   * the same one.
+   */
+  async enrol(actor, { organisationId, firstName, lastName, preferredName = null,
+                       dateOfBirth = null, gender = null, email = null,
+                       phone = null, role = 'member', starts = null,
+                       paidUntil = null, emergencyName = null,
+                       emergencyPhone = null }) {
+    await assertRole(actor, organisationId, REGISTER);
+
+    const problems = [];
+    if (!String(firstName ?? '').trim()) problems.push('A first name is required');
+    if (!String(lastName ?? '').trim()) problems.push('A last name is required');
+    if (!['member', 'instructor', 'assistant', 'official', 'supporter'].includes(role))
+      problems.push(`"${role}" is not a role`);
+    if (dateOfBirth && Number.isNaN(Date.parse(dateOfBirth)))
+      problems.push('Date of birth is not a date');
+    if (problems.length) throw new Invalid(problems.join('; '));
+
+    const client = await pool.connect();
+    try {
+      await client.query('begin');
+
+      // The federation's prefix, and the next number in its sequence. Inside
+      // the transaction so two registrars saving at once cannot collide.
+      const { rows: [fed] } = await client.query(`
+        select coalesce(f.short_name, f.slug) as prefix, f.id
+        from organisation target
+        join organisation f on target.path <@ f.path and f.parent_id is null
+        where target.id = $1`, [organisationId]);
+
+      const prefix = (fed?.prefix ?? 'M').toUpperCase().replace(/[^A-Z]/g, '').slice(0, 5)
+        || 'M';
+      const { rows: [seq] } = await client.query(`
+        select coalesce(max(substring(display_number from '[0-9]+$')::int), 0) + 1 as next
+        from person where display_number like $1`, [`${prefix}-%`]);
+      const number = `${prefix}-${String(seq.next).padStart(4, '0')}`;
+
+      const { rows: [person] } = await client.query(`
+        insert into person (display_number, first_name, last_name, preferred_name,
+                            date_of_birth, gender, email, phone)
+        values ($1,$2,$3,$4,$5,$6,$7,$8) returning *`,
+        [number, firstName.trim(), lastName.trim(), preferredName || null,
+         dateOfBirth || null, gender || null, email || null, phone || null]);
+
+      if (emergencyName || emergencyPhone) {
+        await client.query(`
+          insert into person_private (person_id, emergency_name, emergency_phone)
+          values ($1,$2,$3)
+          on conflict (person_id) do update
+            set emergency_name = excluded.emergency_name,
+                emergency_phone = excluded.emergency_phone`,
+          [person.id, emergencyName || null, emergencyPhone || null]);
+      }
+
+      await client.query(`
+        insert into affiliation (person_id, organisation_id, role, starts,
+                                 status, paid_until)
+        values ($1,$2,$3,coalesce($4::date, current_date),'active',$5)`,
+        [person.id, organisationId, role, starts || null, paidUntil || null]);
+
+      await client.query(`
+        insert into audit_log (actor_id, action, entity, entity_id, detail)
+        values ($1,'enrol','person',$2,$3)`,
+        [actor, person.id, JSON.stringify({ organisationId, role, number })]);
+
+      await client.query('commit');
+      return person;
+    } catch (e) {
+      await client.query('rollback'); throw e;
+    } finally { client.release(); }
+  },
+
+  /**
+   * Change what the register says about someone.
+   *
+   * Grade is not here, and never will be: a grade changes by being awarded,
+   * through the authority rules, not by someone editing a field.
+   */
+  async update(actor, personId, fields = {}) {
+    const home = await one(`
+      select organisation_id from affiliation
+      where person_id = $1 and ends is null and role = 'member'
+      union all
+      select organisation_id from affiliation
+      where person_id = $1 and ends is null
+      limit 1`, [personId]);
+    if (!home) throw new NotFound('Person');
+    await assertRole(actor, home.organisation_id, REGISTER);
+
+    const allowed = {
+      first_name: fields.firstName, last_name: fields.lastName,
+      preferred_name: fields.preferredName, date_of_birth: fields.dateOfBirth,
+      gender: fields.gender, email: fields.email, phone: fields.phone,
+    };
+    const sets = Object.entries(allowed).filter(([, v]) => v !== undefined);
+    if (!sets.length && fields.paidUntil === undefined && fields.status === undefined)
+      throw new Invalid('Nothing to change');
+
+    const client = await pool.connect();
+    try {
+      await client.query('begin');
+
+      if (sets.length) {
+        const cols = sets.map(([c], i) => `${c} = $${i + 2}`).join(', ');
+        await client.query(
+          `update person set ${cols}, updated_at = now() where id = $1`,
+          [personId, ...sets.map(([, v]) => (v === '' ? null : v))]);
+      }
+
+      if (fields.paidUntil !== undefined || fields.status !== undefined) {
+        await client.query(`
+          update affiliation
+             set paid_until = coalesce($2::date, paid_until),
+                 status = coalesce($3, status)
+           where person_id = $1 and ends is null`,
+          [personId, fields.paidUntil || null, fields.status || null]);
+      }
+
+      await client.query(`
+        insert into audit_log (actor_id, action, entity, entity_id, detail)
+        values ($1,'update','person',$2,$3)`,
+        [actor, personId, JSON.stringify(fields)]);
+
+      await client.query('commit');
+    } catch (e) {
+      await client.query('rollback'); throw e;
+    } finally { client.release(); }
   },
 
   /**

@@ -10,6 +10,7 @@
 
 import { Grade, GradingAuthority, GradingRecord }
   from '../../core/domain/rank.mjs';
+import { Event } from '../../core/domain/calendar.mjs';
 
 export class InMemoryLadder {
   constructor({ grades = [], authorities = [] } = {}) {
@@ -80,6 +81,43 @@ export class InMemoryTitles {
       .filter(Boolean)
       .map((id) => [id, this.held[id] ?? []]));
   }
+}
+
+/** The calendar, in a Map. Proves the use cases need no database. */
+export class InMemoryEvents {
+  constructor(events = []) {
+    this.rows = new Map();
+    this.n = 0;
+    for (const e of events) this.save(e instanceof Event ? e : new Event(e));
+  }
+
+  async byId(id) { return this.rows.get(id) ?? null; }
+
+  async bySlug(organisationId, slug) {
+    for (const e of this.rows.values()) {
+      if (e.organisationId === organisationId && String(e.slug) === String(slug)) return e;
+    }
+    return null;
+  }
+
+  async save(event) {
+    const id = event.id ?? `mem-event-${++this.n}`;
+    const stored = event.id ? event : event.revisedWith({ id });
+    stored.id = id;
+    this.rows.set(id, stored);
+    return stored;
+  }
+
+  async listFor(organisationId, { status = null } = {}) {
+    return [...this.rows.values()]
+      .filter((e) => e.organisationId === organisationId
+        && (status == null || e.status === status))
+      .sort((a, b) => b.startsAt - a.startsAt);
+  }
+
+  async remove(id) { this.rows.delete(id); }
+
+  get all() { return [...this.rows.values()]; }
 }
 
 export class InMemoryMembers {

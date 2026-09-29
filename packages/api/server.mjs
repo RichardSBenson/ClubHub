@@ -39,6 +39,10 @@ import * as V from './views.mjs';
 import { currentStore } from '../infrastructure/factory.mjs';
 import { messengerFrom } from '../infrastructure/messaging/messengers.mjs';
 import { SendSignInLink } from '../core/application/send-sign-in-link.mjs';
+import { ScheduleEvent, ReviseEvent, CancelEvent, MAY_SCHEDULE }
+  from '../core/application/schedule-event.mjs';
+import { repositories } from '../infrastructure/factory.mjs';
+import { toInstant, toLocalInput } from './zones.mjs';
 
 const SESSION_COOKIE = 'honbu_session';
 const CSRF_COOKIE = 'honbu_csrf';
@@ -296,12 +300,235 @@ post('/o/:slug/grading', async (ctx) => {
 
 // ---- events ---------------------------------------------------------------
 
-get('/o/:slug/events', async (ctx) => {
+/**
+ * The calendar use cases, built once.
+ *
+ * Assembled from the factory rather than reached for directly, so this route
+ * file does not name a database. `repositories()` caches its imports, and the
+ * use cases hold no request state, so one set serves every request in this
+ * instance.
+ */
+let _calendar = null;
+async function calendar() {
+  if (_calendar) return _calendar;
+  const r = await repositories();
+  const deps = { events: r.events, organisations: r.organisations,
+                 auth: r.auth, clock: r.clock };
+  _calendar = {
+    repo: r.events,
+    authz: r.auth,
+    schedule: new ScheduleEvent(deps),
+    revise: new ReviseEvent(deps),
+    cancel: new CancelEvent({ events: r.events, auth: r.auth }),
+  };
+  return _calendar;
+}
+
+/**
+ * The organisation named in the path — after checking the person may be there.
+ *
+ * Reading is checked as well as writing. The use cases stop unauthorised
+ * WRITES, which is the part that matters most, but without this a signed-in
+ * member of one club could fetch any other club's calendar by typing its slug,
+ * including its unpublished drafts. `me.scope` is the subtree their grants
+ * reach and is already computed on every request.
+ *
+ * `toSchedule` additionally asks whether they may change it, so a form is never
+ * rendered for somebody whose submission will be refused. The answer comes from
+ * the same list the use case uses, not a copy of it.
+ */
+async function organisationFor(ctx, { toSchedule = false } = {}) {
   ctx.requireActor();
   const org = await orgs.bySlug(ctx.params.slug);
   if (!org) throw new NotFound('Organisation');
-  const list = await events.forOrg(org.slug, { isMember: true, viewerRankOrder: 99 });
-  return ctx.send(200, V.events({ me: ctx.me, org, events: list, csrf: ctx.csrf }));
+
+  if (!ctx.me.scope?.some((o) => o.id === org.id))
+    throw new Forbidden(`You do not have access to ${org.name}.`);
+
+  if (toSchedule && !await mayScheduleAt(ctx, org)) {
+    throw new Forbidden(
+      `You can see ${org.name}'s calendar but not change it. `
+      + 'Adding and editing events needs an owner, administrator or '
+      + 'registrar role there.');
+  }
+  return org;
+}
+
+/** Whether this actor may put something on that calendar. */
+async function mayScheduleAt(ctx, org) {
+  const { authz } = await calendar();
+  return authz.hasRoleAt(ctx.me.accountId, org.id, MAY_SCHEDULE);
+}
+
+/**
+ * The grade dropdowns, from whoever above this club keeps the ladder.
+ *
+ * Not a fixed list. A karate federation's 10th kyu to 8th dan and a taekwondo
+ * federation's gup-and-dan are different ladders with different names, and the
+ * form must offer the one the person filling it in actually uses.
+ */
+async function gradesFor(org) {
+  const owner = await orgs.ladderOwnerOf(org.id);
+  if (!owner) return [];
+  const rows = await rank.ladder(owner.id);
+  return rows.map((g) => ({ rankOrder: g.rank_order, label: g.label }));
+}
+
+/**
+ * A submitted form becomes the fields the entity expects.
+ *
+ * Every empty text input arrives as '' rather than absent, and '' is not the
+ * same as "no value" for a number or a date — `capacity: ''` would become 0.
+ * A checkbox that is not ticked does not arrive at all.
+ */
+function eventFieldsFrom(form, zone) {
+  const text = (k) => (form[k]?.trim() ? form[k].trim() : null);
+  const number = (k) => (form[k]?.trim() ? form[k].trim() : null);
+  return {
+    title: form.title ?? '',
+    kind: form.kind,
+    slug: text('slug'),
+    summary: text('summary'),
+    startsAt: toInstant(text('startsAt'), zone),
+    endsAt: toInstant(text('endsAt'), zone),
+    allDay: !!form.allDay,
+    venueName: text('venueName'),
+    addressLine: text('addressLine'),
+    visibility: form.visibility ?? 'public',
+    minRankOrder: number('minRankOrder'),
+    maxRankOrder: number('maxRankOrder'),
+    minAge: number('minAge'),
+    maxAge: number('maxAge'),
+    entriesOpen: toInstant(text('entriesOpen'), zone),
+    entriesClose: toInstant(text('entriesClose'), zone),
+    capacity: number('capacity'),
+    publishDown: !!form.publishDown,
+    publishUp: !!form.publishUp,
+  };
+}
+
+/** An Event back into what the form wants: local wall-clock strings. */
+const eventAsForm = (e, zone) => ({
+  ...e.toJSON(),
+  slug: String(e.slug),
+  startsAt: toLocalInput(e.startsAt, zone),
+  endsAt: toLocalInput(e.endsAt, zone),
+  entriesOpen: toLocalInput(e.entriesOpen, zone),
+  entriesClose: toLocalInput(e.entriesClose, zone),
+  minRankOrder: e.minRankOrder == null ? '' : String(e.minRankOrder),
+  maxRankOrder: e.maxRankOrder == null ? '' : String(e.maxRankOrder),
+  minAge: e.minAge == null ? '' : String(e.minAge),
+  maxAge: e.maxAge == null ? '' : String(e.maxAge),
+  capacity: e.capacity == null ? '' : String(e.capacity),
+});
+
+get('/o/:slug/events', async (ctx) => {
+  const org = await organisationFor(ctx);
+  const { repo } = await calendar();
+
+  const own = await repo.listFor(org.id);
+  // What the old read-only view showed: everything visible here, including
+  // events published down from above. Those are read-only, so they are listed
+  // separately and the org's own ones are dropped from the inherited list.
+  const visible = await events.forOrg(org.slug,
+    { isMember: true, viewerRankOrder: 99 });
+  const inherited = visible.filter((e) => !e.is_own);
+
+  return ctx.send(200, V.events({
+    me: ctx.me, org, own, inherited, zone: org.timezone, csrf: ctx.csrf,
+    canSchedule: await mayScheduleAt(ctx, org),
+    done: ctx.url.searchParams.get('done'),
+    error: ctx.url.searchParams.get('error'),
+  }));
+});
+
+get('/o/:slug/events/new', async (ctx) => {
+  const org = await organisationFor(ctx, { toSchedule: true });
+  return ctx.send(200, V.eventForm({
+    me: ctx.me, org, csrf: ctx.csrf, isNew: true,
+    zone: org.timezone, grades: await gradesFor(org),
+    values: { kind: 'training', visibility: 'public' },
+  }));
+});
+
+post('/o/:slug/events/new', async (ctx) => {
+  const org = await organisationFor(ctx, { toSchedule: true });
+  const form = await ctx.form();
+  const { schedule } = await calendar();
+
+  try {
+    const saved = await schedule.execute({
+      actorId: ctx.me.accountId, organisationId: org.id,
+      ...eventFieldsFrom(form, org.timezone),
+      status: form.status === 'published' ? 'published' : 'draft',
+    });
+    return ctx.redirect(`/o/${org.slug}/events?done=`
+      + encodeURIComponent(`"${saved.title}" saved.`));
+  } catch (e) {
+    // Back to the form with what they typed still in it. Re-rendering an empty
+    // form after a refusal is how somebody loses fifteen fields to a typo in
+    // one of them.
+    return ctx.send(e.status ?? 422, V.eventForm({
+      me: ctx.me, org, csrf: ctx.csrf, isNew: true, error: e.message,
+      zone: org.timezone, grades: await gradesFor(org), values: form,
+    }));
+  }
+});
+
+get('/o/:slug/events/:eventSlug/edit', async (ctx) => {
+  const org = await organisationFor(ctx, { toSchedule: true });
+  const { repo } = await calendar();
+  const event = await repo.bySlug(org.id, ctx.params.eventSlug);
+  if (!event) throw new NotFound('Event');
+
+  return ctx.send(200, V.eventForm({
+    me: ctx.me, org, csrf: ctx.csrf, isNew: false, status: event.status,
+    zone: org.timezone, grades: await gradesFor(org),
+    values: eventAsForm(event, org.timezone),
+  }));
+});
+
+post('/o/:slug/events/:eventSlug/edit', async (ctx) => {
+  const org = await organisationFor(ctx, { toSchedule: true });
+  const form = await ctx.form();
+  const { repo, revise } = await calendar();
+
+  const existing = await repo.bySlug(org.id, ctx.params.eventSlug);
+  if (!existing) throw new NotFound('Event');
+
+  try {
+    const saved = await revise.execute({
+      actorId: ctx.me.accountId, eventId: existing.id,
+      ...eventFieldsFrom(form, org.timezone),
+      status: form.status,
+    });
+    return ctx.redirect(`/o/${org.slug}/events?done=`
+      + encodeURIComponent(`"${saved.title}" updated.`));
+  } catch (e) {
+    return ctx.send(e.status ?? 422, V.eventForm({
+      me: ctx.me, org, csrf: ctx.csrf, isNew: false, status: existing.status,
+      error: e.message, zone: org.timezone, grades: await gradesFor(org),
+      values: { ...form, slug: String(existing.slug) },
+    }));
+  }
+});
+
+post('/o/:slug/events/:eventSlug/cancel', async (ctx) => {
+  const org = await organisationFor(ctx, { toSchedule: true });
+  await ctx.form();
+  const { repo, cancel } = await calendar();
+
+  const existing = await repo.bySlug(org.id, ctx.params.eventSlug);
+  if (!existing) throw new NotFound('Event');
+
+  try {
+    await cancel.execute({ actorId: ctx.me.accountId, eventId: existing.id });
+  } catch (e) {
+    return ctx.redirect(
+      `/o/${org.slug}/events?error=${encodeURIComponent(e.message)}`);
+  }
+  return ctx.redirect(`/o/${org.slug}/events?done=`
+    + encodeURIComponent(`"${existing.title}" is cancelled.`));
 });
 
 // ---------------------------------------------------------------------------

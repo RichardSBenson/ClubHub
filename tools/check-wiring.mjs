@@ -108,6 +108,7 @@ const CONTRACTS = {
   organisations: ports.ORGANISATION_REPOSITORY,
   auth: ports.AUTHORISATION,
   titles: ports.TITLE_REPOSITORY,
+  events: ports.EVENT_REPOSITORY,
   messenger: ports.MESSENGER,
   clock: ports.CLOCK,
 };

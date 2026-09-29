@@ -6,7 +6,7 @@
  */
 
 import { JsonData, JsonLadder, JsonRanks, JsonMembers, JsonOrganisations,
-         JsonAuthorisation, JsonSiteContent, JsonTitles,
+         JsonAuthorisation, JsonSiteContent, JsonTitles, JsonEvents,
          SystemClock as JsonClock }
   from './json/repositories.mjs';
 import { messengerFrom } from './messaging/messengers.mjs';
@@ -43,6 +43,7 @@ export async function repositories({ dataDir = null } = {}) {
       organisations: new pg.PostgresOrganisations(pool),
       auth: new pg.PostgresAuthorisation(pool),
       titles: new pg.PostgresTitles(pool),
+      events: new pg.PostgresEvents(pool),
       site: new pg.PostgresSiteContent(pool),
       messenger: messengerFrom(),
       clock: new pg.SystemClock(),
@@ -64,6 +65,7 @@ export async function repositories({ dataDir = null } = {}) {
     organisations: new JsonOrganisations(data),
     auth: new JsonAuthorisation(data),
     titles: new JsonTitles(data),
+    events: new JsonEvents(data),
     site: new JsonSiteContent(data),
     messenger: messengerFrom(),
     clock: new JsonClock(),

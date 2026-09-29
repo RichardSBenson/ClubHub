@@ -152,6 +152,33 @@ export const MESSENGER = {
 };
 
 /**
+ * The calendar. An organisation's own events, by id or by slug.
+ *
+ * `save` takes an Event and returns it with an id, so a caller never has to
+ * know whether it was an insert or an update — the entity's own id decides.
+ */
+export const EVENT_REPOSITORY = {
+  name: 'EventRepository',
+  methods: [
+    /** (id) → Event | null */
+    'byId',
+    /** (organisationId, slug) → Event | null */
+    'bySlug',
+    /** (Event) → Event, with an id */
+    'save',
+    /**
+     * (organisationId, { status? }) → Event[], soonest first.
+     * What the person running the calendar sees, drafts included. The public
+     * site reads events by a different route, because what a visitor may see
+     * is a different question from what an administrator may edit.
+     */
+    'listFor',
+    /** (id) → void */
+    'remove',
+  ],
+};
+
+/**
  * Which titles a person holds. Separate from rank because they are separate
  * things: some federations confer a title from a grade, others award it on its
  * own, and several do both. Only the register knows which.

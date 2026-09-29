@@ -86,6 +86,25 @@ label{display:block;font-size:14px;font-weight:600;margin:14px 0 4px}
 ul.plain{list-style:none;padding:0;margin:0}
 ul.plain li{padding:8px 0;border-bottom:1px solid var(--canvas-2)}
 footer{color:var(--muted);font-size:13px;padding:40px 0}
+textarea{font:inherit;padding:9px 11px;border:1px solid var(--silver);
+  background:#fff;width:100%;max-width:560px;min-height:90px}
+.row{display:flex;flex-wrap:wrap;gap:18px}
+.row > div{flex:1 1 200px}
+.row input,.row select{max-width:none}
+.hint{font-size:13px;color:var(--muted);margin:4px 0 0;font-weight:400}
+label .hint{display:block}
+.check{display:flex;align-items:flex-start;gap:9px;margin:12px 0;font-size:15px}
+.check input{width:auto;margin-top:4px}
+fieldset{border:1px solid var(--canvas-2);background:#fff;padding:4px 20px 20px;
+  margin:22px 0}
+legend{font-size:13px;letter-spacing:.04em;text-transform:uppercase;
+  color:var(--muted);font-weight:700;padding:0 6px}
+.actions{display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin:26px 0 0}
+.actions form{display:inline}
+.right{margin-left:auto}
+td form{display:inline}
+td .btn{padding:6px 12px;font-size:14px}
+.draft td{background:#FCFCF7}
 @media(max-width:600px){
   table{font-size:14px} td,th{padding:9px 8px}
   .hide-sm{display:none}
@@ -251,20 +270,293 @@ export const grading = ({ me, csrf, org, candidates, ladder, done, error }) => {
   </form>` });
 };
 
-export const events = ({ me, csrf, org, events }) => page({
+/**
+ * The calendar as the person running it sees it.
+ *
+ * Two lists, deliberately separate. Its own events, which it may change, and
+ * events inherited from above, which it may not. Mixing them into one table
+ * with some rows editable is how somebody ends up trying to cancel the
+ * national grading from their dojo page.
+ */
+export const events = ({ me, csrf, org, own = [], inherited = [], zone,
+                         canSchedule = true, done, error }) => page({
   title: `Events — ${org.name}`, me, csrf, body: `
   <h1>Events</h1>
-  <p class="sub">${esc(org.name)} · <a href="/o/${esc(org.slug)}/roster">Back to roster</a></p>
-  ${events.length ? `<table>
-    <thead><tr><th>Date</th><th>Event</th><th class="hide-sm">From</th>
-      <th>Visibility</th></tr></thead>
-    <tbody>${events.map((e) => `<tr>
-      <td>${String(new Date(e.starts_at).toISOString().slice(0,10))}</td>
-      <td><strong>${esc(e.title)}</strong></td>
-      <td class="hide-sm">${esc(e.from_org)}${e.is_own ? '' : ' <span class="muted">(inherited)</span>'}</td>
-      <td><span class="tag ${e.visibility === 'public' ? 'ok' : 'no'}">${esc(e.visibility)}</span></td>
+  <p class="sub">${esc(org.name)} ·
+    <a href="/o/${esc(org.slug)}/roster">Back to roster</a></p>
+
+  ${done ? `<div class="good">${esc(done)}</div>` : ''}
+  ${error ? `<div class="bad">${esc(error)}</div>` : ''}
+
+  ${canSchedule
+    ? `<p><a class="btn" href="/o/${esc(org.slug)}/events/new">Add an event</a></p>`
+    : '<p class="muted">You can see this calendar but not change it.</p>'}
+
+  ${own.length ? `<table>
+    <thead><tr><th>When</th><th>Event</th><th class="hide-sm">Kind</th>
+      <th>Status</th><th></th></tr></thead>
+    <tbody>${own.map((e) => `<tr${e.status === 'draft' ? ' class="draft"' : ''}>
+      <td>${esc(readable(e.startsAt, zone, !e.allDay))}</td>
+      <td><strong>${esc(e.title)}</strong>
+        ${e.venueName ? `<div class="muted">${esc(e.venueName)}</div>` : ''}</td>
+      <td class="hide-sm">${esc(kindLabel(e.kind))}</td>
+      <td>${statusTag(e.status)}</td>
+      <td>${canSchedule ? `<a class="btn quiet"
+        href="/o/${esc(org.slug)}/events/${esc(String(e.slug))}/edit">Edit</a>` : ''}</td>
     </tr>`).join('')}</tbody></table>`
-    : '<div class="note">Nothing scheduled.</div>'}` });
+    : '<div class="note">Nothing on this calendar yet.</div>'}
+
+  ${inherited.length ? `<h2>From further up</h2>
+  <p class="muted">Published to this calendar by a parent organisation. Edit
+    these where they were created.</p>
+  <table>
+    <thead><tr><th>When</th><th>Event</th><th class="hide-sm">From</th></tr></thead>
+    <tbody>${inherited.map((e) => `<tr>
+      <td>${esc(readable(e.starts_at, zone, true))}</td>
+      <td>${esc(e.title)}</td>
+      <td class="hide-sm">${esc(e.from_org ?? '')}</td>
+    </tr>`).join('')}</tbody></table>` : ''}` });
+
+const KIND_LABELS = {
+  grading: 'Grading', tournament: 'Tournament', camp: 'Camp',
+  seminar: 'Seminar', fight_night: 'Fight night', training: 'Training',
+  social: 'Social', other: 'Other',
+};
+const kindLabel = (k) => KIND_LABELS[k] ?? k;
+
+const VISIBILITY_LABELS = {
+  public: 'Anyone, including the public website',
+  members: 'Members anywhere in the federation',
+  own_org: 'This organisation only',
+  by_grade: 'Only within a grade range',
+  invite: 'Invited people only',
+};
+
+const STATUS_TAGS = {
+  draft: ['no', 'Draft'], published: ['ok', 'Published'],
+  cancelled: ['no', 'Cancelled'], completed: ['dan', 'Completed'],
+};
+const statusTag = (s) => {
+  const [cls, label] = STATUS_TAGS[s] ?? ['no', s];
+  return `<span class="tag ${cls}">${esc(label)}</span>`;
+};
+
+/**
+ * Rendering a time is the view's job, so the view is given the zone rather
+ * than the formatted string: a table that formats its own dates cannot get
+ * half of them in one zone and half in another.
+ */
+const readable = (instant, zone, withTime = true) => {
+  if (!instant) return '';
+  const d = instant instanceof Date ? instant : new Date(instant);
+  if (Number.isNaN(d.getTime())) return '';
+  try {
+    return new Intl.DateTimeFormat('en-NZ', {
+      weekday: 'short', day: 'numeric', month: 'short', year: 'numeric',
+      ...(withTime ? { hour: 'numeric', minute: '2-digit', hour12: true } : {}),
+      timeZone: zone || 'UTC',
+    }).format(d);
+  } catch { return d.toISOString().slice(0, 16).replace('T', ' '); }
+};
+
+const option = (value, label, selected) =>
+  `<option value="${esc(value)}"${value === selected ? ' selected' : ''}>${esc(label)}</option>`;
+
+const checkbox = (name, label, checked, hint = '') => `
+  <div class="check">
+    <input type="checkbox" id="${name}" name="${name}" value="1"${checked ? ' checked' : ''}>
+    <label for="${name}" style="margin:0;font-weight:400">${esc(label)}
+      ${hint ? `<span class="hint">${esc(hint)}</span>` : ''}</label>
+  </div>`;
+
+/**
+ * One form for creating and for changing.
+ *
+ * Two forms would drift: a field added to one and forgotten in the other means
+ * an event you can create with a capacity and then never edit it. `values` is
+ * whatever the person last submitted when something was refused, so a mistake
+ * in one field does not throw away the other fifteen.
+ */
+export const eventForm = ({ me, csrf, org, values = {}, zone, error,
+                            isNew = true, status = 'draft', grades = [] }) => {
+  const v = (k, fallback = '') => values[k] ?? fallback;
+  const action = isNew
+    ? `/o/${org.slug}/events/new`
+    : `/o/${org.slug}/events/${values.slug}/edit`;
+
+  return page({
+    title: `${isNew ? 'New event' : values.title} — ${org.name}`, me, csrf, body: `
+  <h1>${isNew ? 'Add an event' : 'Edit event'}</h1>
+  <p class="sub">${esc(org.name)} ·
+    <a href="/o/${esc(org.slug)}/events">Back to the calendar</a>
+    ${isNew ? '' : ` · ${statusTag(status)}`}</p>
+
+  ${error ? `<div class="bad">${esc(error)}</div>` : ''}
+  ${zone ? `<p class="muted">Times are ${esc(zone.replace('_', ' '))}
+    — the local time where the event is.</p>` : ''}
+
+  <form method="post" action="${esc(action)}">
+    <input type="hidden" name="_csrf" value="${esc(csrf ?? '')}">
+
+    <label for="title">Title</label>
+    <input id="title" name="title" required maxlength="200"
+      value="${esc(v('title'))}" style="max-width:560px">
+
+    <div class="row">
+      <div>
+        <label for="kind">Kind</label>
+        <select id="kind" name="kind">
+          ${Object.keys(KIND_LABELS).map((k) =>
+            option(k, KIND_LABELS[k], v('kind', 'training'))).join('')}
+        </select>
+      </div>
+      <div>
+        <label for="slug">Web address
+          <span class="hint">Leave blank and it is made from the title.</span></label>
+        <input id="slug" name="slug" value="${esc(v('slug'))}"
+          pattern="[a-z0-9]+(-[a-z0-9]+)*">
+      </div>
+    </div>
+
+    <label for="summary">One line about it</label>
+    <input id="summary" name="summary" maxlength="300"
+      value="${esc(v('summary'))}" style="max-width:560px">
+
+    <fieldset>
+      <legend>When</legend>
+      <div class="row">
+        <div>
+          <label for="startsAt">Starts</label>
+          <input id="startsAt" name="startsAt" type="datetime-local" required
+            value="${esc(v('startsAt'))}">
+        </div>
+        <div>
+          <label for="endsAt">Ends <span class="hint">Optional.</span></label>
+          <input id="endsAt" name="endsAt" type="datetime-local"
+            value="${esc(v('endsAt'))}">
+        </div>
+      </div>
+      ${checkbox('allDay', 'All day', !!v('allDay'),
+        'Hides the time wherever this is shown.')}
+    </fieldset>
+
+    <fieldset>
+      <legend>Where</legend>
+      <div class="row">
+        <div>
+          <label for="venueName">Venue</label>
+          <input id="venueName" name="venueName" maxlength="200"
+            value="${esc(v('venueName'))}">
+        </div>
+        <div>
+          <label for="addressLine">Address</label>
+          <input id="addressLine" name="addressLine" maxlength="300"
+            value="${esc(v('addressLine'))}">
+        </div>
+      </div>
+    </fieldset>
+
+    <fieldset>
+      <legend>Who it is for</legend>
+      <label for="visibility">Who can see it</label>
+      <select id="visibility" name="visibility" style="max-width:420px">
+        ${Object.keys(VISIBILITY_LABELS).map((k) =>
+          option(k, VISIBILITY_LABELS[k], v('visibility', 'public'))).join('')}
+      </select>
+
+      <div class="row">
+        <div>
+          <label for="minRankOrder">Lowest grade
+            <span class="hint">Leave blank for no limit.</span></label>
+          <select id="minRankOrder" name="minRankOrder">
+            ${option('', 'No limit', v('minRankOrder'))}
+            ${grades.map((g) => option(String(g.rankOrder), g.label,
+              v('minRankOrder'))).join('')}
+          </select>
+        </div>
+        <div>
+          <label for="maxRankOrder">Highest grade</label>
+          <select id="maxRankOrder" name="maxRankOrder">
+            ${option('', 'No limit', v('maxRankOrder'))}
+            ${grades.map((g) => option(String(g.rankOrder), g.label,
+              v('maxRankOrder'))).join('')}
+          </select>
+        </div>
+      </div>
+
+      <div class="row">
+        <div>
+          <label for="minAge">Youngest age</label>
+          <input id="minAge" name="minAge" type="number" min="0" max="120"
+            value="${esc(v('minAge'))}">
+        </div>
+        <div>
+          <label for="maxAge">Oldest age</label>
+          <input id="maxAge" name="maxAge" type="number" min="0" max="120"
+            value="${esc(v('maxAge'))}">
+        </div>
+      </div>
+    </fieldset>
+
+    <fieldset>
+      <legend>Entries</legend>
+      <div class="row">
+        <div>
+          <label for="entriesOpen">Entries open</label>
+          <input id="entriesOpen" name="entriesOpen" type="datetime-local"
+            value="${esc(v('entriesOpen'))}">
+        </div>
+        <div>
+          <label for="entriesClose">Entries close</label>
+          <input id="entriesClose" name="entriesClose" type="datetime-local"
+            value="${esc(v('entriesClose'))}">
+        </div>
+        <div>
+          <label for="capacity">Places <span class="hint">Blank for no limit.</span></label>
+          <input id="capacity" name="capacity" type="number" min="1" max="32000"
+            value="${esc(v('capacity'))}">
+        </div>
+      </div>
+    </fieldset>
+
+    <fieldset>
+      <legend>Where it appears</legend>
+      ${checkbox('publishDown', 'Show on the calendars below this organisation',
+        !!v('publishDown'), 'Every club under it sees it on their own page.')}
+      ${checkbox('publishUp', 'Ask for it to appear on the parent calendar',
+        !!v('publishUp'), 'The parent has to approve it.')}
+    </fieldset>
+
+    <div class="actions">
+      ${isNew ? `
+        <button class="btn" type="submit" name="status" value="draft">Save as draft</button>
+        <button class="btn quiet" type="submit" name="status" value="published">
+          Save and publish</button>`
+      : `
+        <button class="btn" type="submit" name="status" value="${esc(status)}">
+          Save changes</button>
+        ${status === 'draft'
+          ? `<button class="btn quiet" type="submit" name="status" value="published">
+              Save and publish</button>` : ''}
+        ${status === 'published'
+          ? `<button class="btn quiet" type="submit" name="status" value="draft">
+              Save and unpublish</button>` : ''}`}
+      <a class="btn quiet" href="/o/${esc(org.slug)}/events">Cancel</a>
+    </div>
+  </form>
+
+  ${isNew || status === 'cancelled' || status === 'completed' ? '' : `
+  <fieldset>
+    <legend>Call it off</legend>
+    <p class="muted">The event stays on the record as cancelled. People who have
+      it in their diary can see what happened to it.</p>
+    <form method="post"
+      action="/o/${esc(org.slug)}/events/${esc(values.slug)}/cancel">
+      <input type="hidden" name="_csrf" value="${esc(csrf ?? '')}">
+      <button class="btn quiet" type="submit">Cancel this event</button>
+    </form>
+  </fieldset>`}` });
+};
 
 export const error = ({ me, csrf, status, message }) => page({
   title: `Error ${status}`, me, csrf, body: `

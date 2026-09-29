@@ -24,6 +24,7 @@ import path from 'node:path';
 import { Grade, GradingAuthority, GradingRecord }
   from '../../core/domain/rank.mjs';
 import { OrgType } from '../../core/domain/values.mjs';
+import { Event } from '../../core/domain/calendar.mjs';
 
 export class ReadOnlyStore extends Error {
   constructor(what) {
@@ -148,6 +149,38 @@ export class JsonRanks {
     }
     return out;
   }
+}
+
+/**
+ * The calendar, read from files.
+ *
+ * Reading works; writing does not, and says so rather than appearing to
+ * succeed. A read-only deployment that accepts an event and loses it is worse
+ * than one that refuses it, because nobody finds out until the day of.
+ */
+export class JsonEvents {
+  constructor(data) { this.data = data; }
+
+  #all() {
+    return this.data.read('events').map((e) => new Event(e));
+  }
+
+  async byId(id) { return this.#all().find((e) => e.id === id) ?? null; }
+
+  async bySlug(organisationId, slug) {
+    return this.#all().find((e) => e.organisationId === organisationId
+      && String(e.slug) === String(slug)) ?? null;
+  }
+
+  async listFor(organisationId, { status = null } = {}) {
+    return this.#all()
+      .filter((e) => e.organisationId === organisationId
+        && (status == null || e.status === status))
+      .sort((a, b) => b.startsAt - a.startsAt);
+  }
+
+  async save() { throw new ReadOnlyStore('save an event'); }
+  async remove() { throw new ReadOnlyStore('delete an event'); }
 }
 
 export class JsonMembers {

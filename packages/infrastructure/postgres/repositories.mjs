@@ -613,3 +613,114 @@ export class PostgresContentEntries {
     return r.id;
   }
 }
+
+// ---------------------------------------------------------------------------
+// The calendar
+// ---------------------------------------------------------------------------
+
+import { Event } from '../../core/domain/calendar.mjs';
+
+/**
+ * A row becomes an Event by going through the constructor, which means every
+ * rule is checked on the way OUT of the database as well as on the way in.
+ *
+ * That is deliberate. A row edited by hand in a SQL console, or written by a
+ * migration, or imported from a spreadsheet, does not get a pass — if it says
+ * entries close after the event starts, reading it fails loudly here rather
+ * than producing a page that quietly contradicts itself.
+ */
+const toEvent = (r) => new Event({
+  id: r.id, organisationId: r.organisation_id, kind: r.kind, title: r.title,
+  slug: r.slug, summary: r.summary, body: r.body,
+  startsAt: r.starts_at, endsAt: r.ends_at, allDay: r.all_day,
+  venueName: r.venue_name, addressLine: r.address_line,
+  latitude: r.latitude, longitude: r.longitude,
+  visibility: r.visibility,
+  minRankOrder: r.min_rank_order, maxRankOrder: r.max_rank_order,
+  minAge: r.min_age, maxAge: r.max_age,
+  publishDown: r.publish_down, publishUp: r.publish_up,
+  publishUpState: r.publish_up_state,
+  entriesOpen: r.entries_open, entriesClose: r.entries_close,
+  capacity: r.capacity, status: r.status,
+});
+
+export class PostgresEvents {
+  constructor(pool) { this.pool = pool; }
+
+  async byId(id) {
+    const { rows: [r] } = await this.pool.query(
+      `select * from event where id = $1`, [id]);
+    return r ? toEvent(r) : null;
+  }
+
+  async bySlug(organisationId, slug) {
+    const { rows: [r] } = await this.pool.query(
+      `select * from event where organisation_id = $1 and slug = $2`,
+      [organisationId, slug]);
+    return r ? toEvent(r) : null;
+  }
+
+  /**
+   * One statement for insert and update, keyed on the entity's own id.
+   *
+   * `on conflict (id)` rather than `(organisation_id, slug)`: a save must never
+   * decide that two events are the same thing because they happen to share a
+   * web address. The use case checks for that clash and refuses it by name,
+   * which is a message somebody can act on — an upsert would silently
+   * overwrite one event with another.
+   */
+  async save(event) {
+    const { rows: [r] } = await this.pool.query(`
+      insert into event (id, organisation_id, kind, title, slug, summary, body,
+        starts_at, ends_at, all_day, venue_name, address_line,
+        latitude, longitude, visibility,
+        min_rank_order, max_rank_order, min_age, max_age,
+        publish_down, publish_up, publish_up_state,
+        entries_open, entries_close, capacity, status)
+      values (coalesce($1, uuid_generate_v4()), $2, $3, $4, $5, $6, $7::jsonb,
+        $8, $9, $10, $11, $12, $13, $14, $15,
+        $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26)
+      on conflict (id) do update set
+        kind = excluded.kind, title = excluded.title, slug = excluded.slug,
+        summary = excluded.summary, body = excluded.body,
+        starts_at = excluded.starts_at, ends_at = excluded.ends_at,
+        all_day = excluded.all_day, venue_name = excluded.venue_name,
+        address_line = excluded.address_line,
+        latitude = excluded.latitude, longitude = excluded.longitude,
+        visibility = excluded.visibility,
+        min_rank_order = excluded.min_rank_order,
+        max_rank_order = excluded.max_rank_order,
+        min_age = excluded.min_age, max_age = excluded.max_age,
+        publish_down = excluded.publish_down,
+        publish_up = excluded.publish_up,
+        publish_up_state = excluded.publish_up_state,
+        entries_open = excluded.entries_open,
+        entries_close = excluded.entries_close,
+        capacity = excluded.capacity, status = excluded.status,
+        updated_at = now()
+      returning *`,
+      [event.id, event.organisationId, event.kind, event.title,
+       String(event.slug), event.summary,
+       event.body == null ? null : JSON.stringify(event.body),
+       event.startsAt, event.endsAt, event.allDay,
+       event.venueName, event.addressLine, event.latitude, event.longitude,
+       event.visibility, event.minRankOrder, event.maxRankOrder,
+       event.minAge, event.maxAge, event.publishDown, event.publishUp,
+       event.publishUpState, event.entriesOpen, event.entriesClose,
+       event.capacity, event.status]);
+    return toEvent(r);
+  }
+
+  async listFor(organisationId, { status = null } = {}) {
+    const { rows } = await this.pool.query(`
+      select * from event
+      where organisation_id = $1
+        and ($2::text is null or status = $2)
+      order by starts_at desc`, [organisationId, status]);
+    return rows.map(toEvent);
+  }
+
+  async remove(id) {
+    await this.pool.query(`delete from event where id = $1`, [id]);
+  }
+}
