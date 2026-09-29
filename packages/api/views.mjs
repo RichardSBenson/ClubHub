@@ -127,7 +127,9 @@ export const signIn = ({ sent, error, csrf } = {}) => page({
   </form>`}`,
 });
 
-export const dashboard = ({ me, csrf, orgs }) => {
+export const dashboard = ({ me, csrf, orgs, vocabulary = {} }) => {
+  // The federation being looked at decides the words, not the deployment.
+  const V = { ...VOCABULARY, ...vocabulary };
   const clubs = orgs.filter((o) => o.type === 'club' || o.type === 'dojo');
   const parents = orgs.filter((o) => !(o.type === 'club' || o.type === 'dojo'));
   const total = clubs.reduce((n, o) => n + Number(o.members), 0);

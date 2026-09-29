@@ -10,6 +10,25 @@
 import pg from 'pg';
 
 /**
+ * A DATE is a calendar day. It has no time and no timezone, and turning it
+ * into a JS Date is how it acquires both.
+ *
+ * node-postgres parses a date column into a Date at LOCAL midnight. Read that
+ * back with toISOString anywhere east of Greenwich and the day rolls
+ * backwards: an affiliation paid to 2026-12-31 produced a membership card
+ * expiring 2026-12-30. The same shift applies to a grading date, a date of
+ * birth, an entry deadline — every calendar day in the register, silently,
+ * depending on what timezone the server happens to be in.
+ *
+ * So dates come back as the string Postgres sent: 'YYYY-MM-DD'. The domain's
+ * GradingDate already expects that shape, and a day with no timezone cannot
+ * drift into the wrong one.
+ *
+ * 1082 is DATE. Timestamps are left alone — those genuinely are instants.
+ */
+pg.types.setTypeParser(1082, (value) => value);
+
+/**
  * How the database connection is verified.
  *
  * This used to be `{ rejectUnauthorized: false }`, which encrypts the

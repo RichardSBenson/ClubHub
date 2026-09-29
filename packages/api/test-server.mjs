@@ -161,20 +161,23 @@ console.log('\nRUNNING A GRADING');
     new RegExp(`name="grade_${aroha}" value="([0-9a-f-]{36})"`))?.[1];
   ok('the next grade is pre-selected for each candidate', !!gradeId);
 
-  const bad = await req('/o/moknz/grading', { method:'POST', form:{
-    awarded_on:'2026-10-17', panel:'22222222-0000-0000-0000-000000000001',
+  // Aroha's next grade is 3rd kyu, which MOKNZ awards at the dojo. A grading
+  // still needs somebody to sit on the panel.
+  const bad = await req('/o/whanganui/grading', { method:'POST', form:{
+    awarded_on:'2026-10-17', panel:'',
     [`pass_${aroha}`]:'on', [`grade_${aroha}`]:gradeId ?? '' } });
-  ok('a panel that is too small is rejected',
+  ok('a grading with nobody on the panel is rejected',
     bad.location?.includes('error='));
   console.log('      → ' + (bad.location
     ? decodeURIComponent(bad.location.split('error=')[1] ?? bad.location)
     : `status ${bad.status}: ` + (bad.html.match(/class="bad">([^<]*)/)?.[1] ?? '')));
 
-  const good = await req('/o/moknz/grading', { method:'POST', form:{
+  const good = await req('/o/whanganui/grading', { method:'POST', form:{
     awarded_on:'2026-10-17',
-    panel:'22222222-0000-0000-0000-000000000001,22222222-0000-0000-0000-000000000003',
+    panel:'22222222-0000-0000-0000-000000000001',
     [`pass_${aroha}`]:'on', [`grade_${aroha}`]:gradeId } });
-  ok('a valid panel records it', good.location === '/o/moknz/grading?done=1');
+  ok('a valid panel records it', good.location === '/o/whanganui/grading?done=1',
+    good.location ?? `status ${good.status}`);
 
   const after = await req(`/p/${aroha}`);
   ok('and the register shows the new grade', after.html.includes('3rd kyu'));

@@ -1,14 +1,43 @@
-/** Rebuild the database from schema + seed. Tests must start from a known state. */
+/**
+ * Rebuild the database from the canonical setup file. Tests must start from a
+ * known state, and the state they should know is the one production has.
+ *
+ * This used to load schema.sql and seed-moknz.sql, which is a SUBSET: the auth
+ * tables, publishing, content types and every migration since live in their own
+ * files and are concatenated into setup-all.sql — the file that actually gets
+ * pasted into the hosted database. So the tests were running against a schema
+ * nothing else has, and a column added by a migration was missing under them
+ * while being present everywhere else.
+ */
 import { execSync } from 'node:child_process';
 import fs from 'node:fs';
 
+// -d postgres explicitly: without it psql honours PGDATABASE from the
+// environment, connects to honbu, and then cannot drop the database it is
+// sitting in. Inheriting the connection you are about to destroy is not a
+// thing to leave to whatever the shell happens to export.
 const PSQL = 'psql -h /tmp/pgrun -p 5433 -U postgres';
+const ADMIN = `${PSQL} -d postgres`;
 const run = (cmd) => execSync(cmd, { stdio: 'pipe' }).toString();
 
-for (const f of ['../../db/schema.sql', '../../db/seed-moknz.sql']) {
+const files = ['../../db/setup-all.sql'];
+if (process.env.HONBU_SEED_DEMOS) files.push('../../db/seeds/demo-federations.sql');
+
+for (const f of files) {
   fs.copyFileSync(new URL(f, import.meta.url), `/tmp/${f.split('/').pop()}`);
 }
-run(`su postgres -c "${PSQL} -c 'drop database if exists honbu' -c 'create database honbu'"`);
-run(`su postgres -c "${PSQL} -d honbu -v ON_ERROR_STOP=1 -f /tmp/schema.sql"`);
-run(`su postgres -c "${PSQL} -d honbu -v ON_ERROR_STOP=1 -f /tmp/seed-moknz.sql"`);
+
+// Two calls, not one psql with two -c flags: DROP DATABASE and CREATE
+// DATABASE cannot share a transaction, and whether psql gives them one depends
+// on the version. Separate invocations are unambiguous.
+//
+// WITH (FORCE) because a connection left open by the previous test file makes
+// an ordinary drop fail with "database is being accessed by other users", and
+// a test helper that fails intermittently is worse than no test helper.
+run(`su postgres -c "${ADMIN} -c 'drop database if exists honbu with (force)'"`);
+run(`su postgres -c "${ADMIN} -c 'create database honbu'"`);
+for (const f of files) {
+  const name = f.split('/').pop();
+  run(`su postgres -c "${PSQL} -d honbu -v ON_ERROR_STOP=1 -f /tmp/${name}"`);
+}
 console.log('database reset\n');

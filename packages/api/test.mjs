@@ -87,12 +87,14 @@ console.log('\nGRADING AUTHORITY IS ENFORCED');
   const thirdKyu = ladder.find(g => g.label === '3rd kyu');
   const eighthKyu = ladder.find(g => g.label === '8th kyu');
   const shodan = ladder.find(g => g.label === 'Shodan');
-  const DOUG_P = '22222222-0000-0000-0000-000000000001';  // Godan
+  const DOUG_P = '22222222-0000-0000-0000-000000000001';  // Hanshi, 8th dan
   const TANE_P = '22222222-0000-0000-0000-000000000003';  // Nidan
 
-  await throws('a dojo cannot award 3rd kyu (national grade)',
+  // MOKNZ's actual bands: the dojo grades to 3rd kyu, 2nd and 1st kyu need a
+  // 5th dan on the panel, and Shodan upwards is a national grading.
+  await throws('a dojo cannot award a dan grade',
     () => rank.award(DOUG, {
-      personId: AROHA, gradeId: thirdKyu.id, awardedByOrg: whanganui.id,
+      personId: AROHA, gradeId: shodan.id, awardedByOrg: whanganui.id,
       awardedOn: '2026-10-17', panel: [DOUG_P, TANE_P],
     }), Invalid);
 
@@ -108,11 +110,12 @@ console.log('\nGRADING AUTHORITY IS ENFORCED');
       awardedOn: '2026-10-17', panel: [DOUG_P, TANE_P, TANE_P],
     }), Invalid);
 
+  // 3rd kyu is the dojo's own grading, and Whanganui is where she trains.
   const awarded = await rank.award(DOUG, {
-    personId: AROHA, gradeId: thirdKyu.id, awardedByOrg: moknz.id,
-    awardedOn: '2026-10-17', panel: [DOUG_P, TANE_P],
+    personId: AROHA, gradeId: thirdKyu.id, awardedByOrg: whanganui.id,
+    awardedOn: '2026-10-17', panel: [DOUG_P],
   });
-  ok('a valid national grading is accepted', !!awarded?.id);
+  ok('a valid dojo grading is accepted', !!awarded?.id);
 
   const now = await people.record(DOUG, AROHA);
   ok('her current grade moved to 3rd kyu',

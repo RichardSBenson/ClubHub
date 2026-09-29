@@ -39,6 +39,10 @@
     {
       "source": "/p/:path*",
       "destination": "/api/index"
+    },
+    {
+      "source": "/try/:path*",
+      "destination": "/api/index"
     }
   ]
 }

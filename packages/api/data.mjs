@@ -43,6 +43,32 @@ export const orgs = {
     return one(`select * from organisation where slug = $1`, [slug]);
   },
 
+  /**
+   * What this organisation calls things.
+   *
+   * Settings are inherited down the tree, so the nearest ancestor that
+   * declares a vocabulary wins — a federation sets it once and every club
+   * under it speaks the same way, unless one of them says otherwise.
+   *
+   * The admin serves more than one federation from one deployment, so this
+   * cannot come from a settings file. A taekwondo federation reading the word
+   * "Dojo" in its own register is the whole problem in one word.
+   */
+  async vocabulary(orgId) {
+    if (!orgId) return {};
+    const row = await one(`
+      select a.settings->'vocabulary' as vocabulary
+      from organisation target
+      join organisation a on target.path <@ a.path
+      where target.id = $1
+        and a.settings ? 'vocabulary'
+      order by nlevel(a.path) desc
+      limit 1`, [orgId]);
+    const v = row?.vocabulary ?? {};
+    return Object.fromEntries(Object.entries(v)
+      .filter(([k, val]) => !k.startsWith('_') && typeof val === 'string' && val.trim()));
+  },
+
   /** The whole subtree beneath (and including) an organisation. */
   async subtree(rootId) {
     return q(`

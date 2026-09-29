@@ -80,8 +80,10 @@ console.log('\nAPPLE WALLET');
     p.barcodes[0].altText === 'NZ-0417');
   ok('brand colours converted to Apple rgb()',
     p.backgroundColor === 'rgb(28,28,30)' && p.labelColor === 'rgb(240,206,65)');
-  ok('grade and dojo on the front', 
-    p.generic.secondaryFields.map(f=>f.key).join() === 'grade,dojo');
+  // The KEY is generic; the LABEL is the federation's own word, so a BJJ
+  // academy's card says ACADEMY where MOKNZ's says DOJO.
+  ok('grade and club on the front',
+    p.generic.secondaryFields.map(f=>f.key).join() === 'grade,club');
   ok('grading history on the back',
     p.generic.backFields.some(f => f.key === 'history' && f.value.includes('4th kyu')));
 

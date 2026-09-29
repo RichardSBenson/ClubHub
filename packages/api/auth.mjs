@@ -96,8 +96,8 @@ export async function redeemLink(raw, { userAgent = null, ip = null } = {}) {
 
     const raw2 = token(48);
     const { rows: [session] } = await client.query(`
-      insert into session (account_id, token_hash, expires_at, user_agent, ip)
-      values ($1,$2, now() + ($3 || ' days')::interval, $4,$5)
+      insert into session (account_id, token_hash, expires_at, user_agent, ip, kind)
+      values ($1,$2, now() + ($3 || ' days')::interval, $4,$5,'normal')
       returning id, account_id, expires_at`,
       [link.account_id, hash(raw2), String(SESSION_TTL_DAYS), userAgent, ip]);
 
@@ -122,7 +122,7 @@ export async function currentActor(raw) {
   if (!raw) return null;
 
   const row = await one(`
-    select s.id as session_id, s.account_id, s.expires_at, s.revoked_at,
+    select s.id as session_id, s.account_id, s.expires_at, s.revoked_at, s.kind,
            a.email, p.id as person_id, p.first_name, p.last_name, p.display_number
     from session s
     join account a on a.id = s.account_id
@@ -150,6 +150,8 @@ export async function currentActor(raw) {
   return {
     accountId: row.account_id,
     sessionId: row.session_id,
+    kind: row.kind ?? 'normal',
+    isDemo: row.kind === 'demo',
     personId: row.person_id,
     email: row.email,
     name: row.first_name ? `${row.first_name} ${row.last_name}` : row.email,
@@ -283,8 +285,8 @@ export async function bootstrapSignIn(supplied, { userAgent = null, ip = null } 
 
   const raw = token(48);
   await pool.query(`
-    insert into session (account_id, token_hash, expires_at, user_agent, ip)
-    values ($1,$2, now() + ($3 || ' days')::interval, $4, $5)`,
+    insert into session (account_id, token_hash, expires_at, user_agent, ip, kind)
+    values ($1,$2, now() + ($3 || ' days')::interval, $4, $5, 'bootstrap')`,
     [account.id, hash(raw), String(BOOTSTRAP_TTL_DAYS),
      `bootstrap: ${userAgent ?? 'unknown'}`, ip]);
 
@@ -295,4 +297,69 @@ export async function bootstrapSignIn(supplied, { userAgent = null, ip = null } 
   console.warn(`BOOTSTRAP SIGN-IN used for ${account.email} from ${ip ?? 'unknown'}`);
 
   return { token: raw, account, expiresInDays: BOOTSTRAP_TTL_DAYS };
+}
+
+// ---------------------------------------------------------------------------
+// demonstration access
+// ---------------------------------------------------------------------------
+
+/**
+ * A way into a demonstration federation's register with no account at all.
+ *
+ * A federation on the other side of the world should be able to open a link
+ * and look around without booking a call. What they get is a real session
+ * against real code — the same routes, the same queries — scoped to a
+ * federation that exists only to be looked at.
+ *
+ * Three things keep it safe, and the first two are the ones that matter:
+ *
+ *  - Only a federation whose own record says demo:true can be opened this
+ *    way. MOKNZ is not one, so no URL reaches it.
+ *  - The session is marked 'demo', and the server refuses every write on a
+ *    demo session regardless of role. A route added next year inherits that.
+ *  - Visibility is by grant, and the grant is at the demo federation, so the
+ *    subtree query cannot reach anybody else's records.
+ *
+ * Short-lived, because a demo session left open in a hotel lobby should not
+ * still work tomorrow.
+ */
+const DEMO_TTL_HOURS = 8;
+
+export async function demoSignIn(slug, { userAgent = null, ip = null } = {}) {
+  const federation = await one(`
+    select id, name, slug
+    from organisation
+    where slug = $1
+      and parent_id is null
+      and coalesce((settings->>'demo')::boolean, false)`, [String(slug ?? '')]);
+
+  if (!federation)
+    throw new NotFound('There is no demonstration at that address.');
+
+  // The account that the demo signs in as. Created on first use so that
+  // seeding a demo federation is all anyone has to do.
+  const email = `demo+${federation.slug}@example.invalid`;
+
+  const account = await one(`
+    insert into account (email)
+    values ($1)
+    on conflict (email) do update set email = excluded.email
+    returning id, email`, [email]);
+
+  // Instructor, not administrator: even with the write block lifted by
+  // accident, an instructor cannot award a grade or publish a page.
+  await pool.query(`
+    insert into grant_role (account_id, organisation_id, role)
+    values ($1, $2, 'instructor')
+    on conflict (account_id, organisation_id, role) do nothing`,
+    [account.id, federation.id]);
+
+  const raw = token(48);
+  await pool.query(`
+    insert into session (account_id, token_hash, expires_at, user_agent, ip, kind)
+    values ($1, $2, now() + ($3 || ' hours')::interval, $4, $5, 'demo')`,
+    [account.id, hash(raw), String(DEMO_TTL_HOURS),
+     `demo: ${userAgent ?? 'unknown'}`, ip]);
+
+  return { token: raw, federation, expiresInHours: DEMO_TTL_HOURS };
 }

@@ -183,6 +183,25 @@ get('/bootstrap/:secret', async (ctx) => {
   }
 });
 
+/**
+ * Open a demonstration federation's register. No account, no sign-in.
+ *
+ *   /try/demo-tkd   the taekwondo federation
+ *   /try/demo-bjj   the jiu-jitsu academies
+ *
+ * Refuses any federation that is not marked as a demonstration, so this is
+ * not a second door into a real register.
+ */
+get('/try/:slug', async (ctx) => {
+  const { token, federation, expiresInHours } =
+    await auth.demoSignIn(ctx.params.slug, {
+      userAgent: ctx.req.headers['user-agent'], ip: ctx.ip });
+
+  ctx.cookie(`${SESSION_COOKIE}=${token}; HttpOnly; SameSite=Lax; Path=/; `
+    + `Max-Age=${expiresInHours * 3600}${ctx.secure ? '; Secure' : ''}`);
+  return ctx.redirect('/dashboard');
+});
+
 post('/signout', async (ctx) => {
   await ctx.form();
   if (ctx.sessionToken) await auth.signOut(ctx.sessionToken);
@@ -202,7 +221,9 @@ get('/dashboard', async (ctx) => {
     from visible_orgs($1) v
     join organisation o on o.id = v.organisation_id
     order by o.type, o.name`, [ctx.me.accountId]);
-  return ctx.send(200, V.dashboard({ me: ctx.me, orgs: rows, csrf: ctx.csrf }));
+  const vocabulary = await orgs.vocabulary(ctx.me.home?.id ?? rows[0]?.id);
+  return ctx.send(200,
+    V.dashboard({ me: ctx.me, orgs: rows, csrf: ctx.csrf, vocabulary }));
 });
 
 // ---- roster ---------------------------------------------------------------
@@ -355,6 +376,17 @@ export async function handler(req, res) {
       }
     },
   };
+
+  // A demonstration session may look at anything it can see and change
+  // nothing. Enforced here rather than in each route, so a route written next
+  // year is safe without anybody remembering this rule. Signing out is the one
+  // write allowed — a visitor must be able to leave.
+  if (ctx.me?.isDemo && req.method !== 'GET' && url.pathname !== '/signout') {
+    return ctx.send(403, V.error({ me: ctx.me, status: 403, csrf,
+      message: 'This is a demonstration. You can look at everything here and '
+        + 'change nothing — the records belong to a federation that exists '
+        + 'only to be looked at.' }));
+  }
 
   try {
     for (const r of routes) {
