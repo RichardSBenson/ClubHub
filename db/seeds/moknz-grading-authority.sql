@@ -49,41 +49,15 @@ insert into grade_authority (organisation_id, from_rank_order, to_rank_order,
 values ('11111111-1111-1111-1111-111111111111', 11, 15, 'country', 'country', 3, 14);
 
 -- ---------------------------------------------------------------------------
--- Guards
+-- No coverage guard here.
 --
--- The 2nd/1st kyu band is inserted from a select against title. If the titles
--- have not been seeded that select matches nothing, the insert quietly adds no
--- row, and the band simply ceases to exist — nobody finds out until a dojo
--- tries to grade a 1st kyu and is told no rule covers it. So check, here,
--- while there is still someone watching the migration run.
+-- There was one, and it was a trap: it asserted that every grade on the
+-- ladder falls inside a band, but the very next seed ADDS Renshi, Kyoshi and
+-- Hanshi above the top band. Correct the first time it ran, and a hard error
+-- on every run after — which is how it failed against a database that already
+-- had the later seed applied.
+--
+-- moknz-dan-ladder.sql sets the final bands and carries the guard, which is
+-- the right place for it: the file that has the last word on the ladder is the
+-- one that should check the ladder is covered.
 -- ---------------------------------------------------------------------------
-
-do $$
-declare
-  uncovered text;
-  dangling  int;
-begin
-  select string_agg(g.label, ', ' order by g.rank_order)
-    into uncovered
-  from grade g
-  where g.organisation_id = '11111111-1111-1111-1111-111111111111'
-    and not exists (
-      select 1 from grade_authority ga
-      where ga.organisation_id = g.organisation_id
-        and g.rank_order between ga.from_rank_order and ga.to_rank_order);
-
-  if uncovered is not null then
-    raise exception
-      'no grading authority covers: %. Seed the titles before this migration.',
-      uncovered;
-  end if;
-
-  select count(*) into dangling
-  from grade_authority ga
-  where ga.requires_title_id is not null
-    and not exists (select 1 from title t where t.id = ga.requires_title_id);
-
-  if dangling > 0 then
-    raise exception 'grade_authority references % title(s) that do not exist', dangling;
-  end if;
-end $$;
