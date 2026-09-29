@@ -171,12 +171,19 @@ export const dashboard = ({ me, csrf, orgs, vocabulary = {} }) => {
   </div>`).join('')}</div>` });
 };
 
-export const roster = ({ me, csrf, org, roster }) => page({
+export const roster = ({ me, csrf, org, roster, canRegister = false,
+                        done }) => page({
   title: `${org.name} roster`, me, csrf, body: `
   <h1>${esc(org.name)}</h1>
   <p class="sub">${roster.length} on the roll ·
     <a href="/o/${esc(org.slug)}/grading">Run a grading</a> ·
     <a href="/o/${esc(org.slug)}/events">Events</a></p>
+
+  ${done ? `<div class="good">${esc(done)}</div>` : ''}
+  ${canRegister ? `<p class="actions" style="margin:0 0 20px">
+    <a class="btn" href="/o/${esc(org.slug)}/members/new">Add someone</a>
+    <a class="btn quiet" href="/o/${esc(org.slug)}/members/import">Import a spreadsheet</a>
+  </p>` : ''}
   ${roster.length ? `<table>
     <thead><tr><th>Name</th><th>Grade</th><th class="hide-sm">Age</th>
       <th class="hide-sm">Role</th><th>Paid until</th></tr></thead>
@@ -191,11 +198,13 @@ export const roster = ({ me, csrf, org, roster }) => page({
     </tr>`).join('')}</tbody></table>`
     : '<div class="note">Nobody on the roll yet.</div>'}` });
 
-export const person = ({ me, csrf, person, history, affiliations, eligibility }) => page({
+export const person = ({ me, csrf, person, history, affiliations, eligibility,
+                        canEdit = false }) => page({
   title: `${person.first_name} ${person.last_name}`, me, csrf, body: `
   <h1>${esc(person.first_name)} ${esc(person.last_name)}</h1>
   <p class="sub">${esc(person.display_number ?? 'no member number')}
-    ${person.age ? ` · ${person.age} years old` : ''}</p>
+    ${person.age ? ` · ${person.age} years old` : ''}
+    ${canEdit ? ` · <a href="/p/${esc(person.id)}/edit">Correct this record</a>` : ''}</p>
 
   ${!eligibility?.next && history.length
     ? `<div class="note"><strong>Top of the ladder.</strong>
@@ -227,6 +236,275 @@ export const person = ({ me, csrf, person, history, affiliations, eligibility })
     ${a.ends ? `to ${String(new Date(a.ends).toISOString().slice(0,10))}`
              : '<span class="tag ok">current</span>'}
   </li>`).join('')}</ul>` });
+
+/**
+ * Adding somebody to the roll, and correcting what the register says later.
+ *
+ * One form for both, for the same reason the event form is one form: two would
+ * drift, and a field you can set on enrolment but never correct afterwards is
+ * how a register goes stale. The emergency contact was exactly that until now.
+ *
+ * `values` is whatever was last submitted when something was refused, so a
+ * mistake in one field does not throw away the other twelve.
+ */
+export const memberForm = ({ me, csrf, org, values = {}, error, isNew = true,
+                             person = null, vocabulary = {} }) => {
+  const V = { ...VOCABULARY, ...vocabulary };
+  const v = (k, fallback = '') => values[k] ?? fallback;
+  const action = isNew ? `/o/${org.slug}/members/new` : `/p/${person.id}/edit`;
+
+  return page({
+    title: isNew ? `Add to ${org.name}` : `Edit ${person.first_name} ${person.last_name}`,
+    me, csrf, body: `
+  <h1>${isNew ? `Add someone to ${esc(org.name)}`
+              : `${esc(person.first_name)} ${esc(person.last_name)}`}</h1>
+  <p class="sub">${isNew
+    ? `<a href="/o/${esc(org.slug)}/roster">Back to the roll</a>
+       · <a href="/o/${esc(org.slug)}/members/import">Import a spreadsheet instead</a>`
+    : `${esc(person.display_number ?? '')} ·
+       <a href="/p/${esc(person.id)}">Back to their record</a>`}</p>
+
+  ${error ? `<div class="bad">${esc(error)}</div>` : ''}
+
+  <form method="post" action="${esc(action)}">
+    <input type="hidden" name="_csrf" value="${esc(csrf ?? '')}">
+
+    <fieldset>
+      <legend>Who they are</legend>
+      <div class="row">
+        <div>
+          <label for="firstName">First name</label>
+          <input id="firstName" name="firstName" required maxlength="100"
+            value="${esc(v('firstName'))}">
+        </div>
+        <div>
+          <label for="lastName">Last name</label>
+          <input id="lastName" name="lastName" required maxlength="100"
+            value="${esc(v('lastName'))}">
+        </div>
+      </div>
+      <div class="row">
+        <div>
+          <label for="preferredName">Goes by
+            <span class="hint">If it is not their first name.</span></label>
+          <input id="preferredName" name="preferredName" maxlength="100"
+            value="${esc(v('preferredName'))}">
+        </div>
+        <div>
+          <label for="dateOfBirth">Date of birth
+            <span class="hint">Decides age divisions. Age is never stored.</span></label>
+          <input id="dateOfBirth" name="dateOfBirth" type="date" max="9999-12-31"
+            value="${esc(v('dateOfBirth'))}">
+        </div>
+      </div>
+      <label for="gender">Gender
+        <span class="hint">Free text. Used for divisions where a federation has them.</span></label>
+      <input id="gender" name="gender" maxlength="50" value="${esc(v('gender'))}">
+    </fieldset>
+
+    <fieldset>
+      <legend>How to reach them</legend>
+      <div class="row">
+        <div>
+          <label for="email">Email
+            <span class="hint">This is how they sign in. No password is ever set.</span></label>
+          <input id="email" name="email" type="email" maxlength="200"
+            value="${esc(v('email'))}">
+        </div>
+        <div>
+          <label for="phone">Phone</label>
+          <input id="phone" name="phone" maxlength="40" value="${esc(v('phone'))}">
+        </div>
+      </div>
+      <div class="row">
+        <div>
+          <label for="emergencyName">Emergency contact</label>
+          <input id="emergencyName" name="emergencyName" maxlength="100"
+            value="${esc(v('emergencyName'))}">
+        </div>
+        <div>
+          <label for="emergencyPhone">Emergency phone</label>
+          <input id="emergencyPhone" name="emergencyPhone" maxlength="40"
+            value="${esc(v('emergencyPhone'))}">
+        </div>
+      </div>
+    </fieldset>
+
+    <fieldset>
+      <legend>Their membership</legend>
+      ${isNew ? `
+      <div class="row">
+        <div>
+          <label for="role">Role</label>
+          <select id="role" name="role">
+            ${ROLE_LABELS.map(([k, label]) =>
+              option(k, label, v('role', 'member'))).join('')}
+          </select>
+        </div>
+        <div>
+          <label for="starts">Joined
+            <span class="hint">Blank means today.</span></label>
+          <input id="starts" name="starts" type="date" value="${esc(v('starts'))}">
+        </div>
+      </div>` : `
+      <label for="status">Standing</label>
+      <select id="status" name="status" style="max-width:300px">
+        ${STATUS_LABELS.map(([k, label]) =>
+          option(k, label, v('status', 'active'))).join('')}
+      </select>`}
+
+      <label for="paidUntil">Paid until
+        <span class="hint">What the ${esc(V.club.toLowerCase())} card expires on.</span></label>
+      <input id="paidUntil" name="paidUntil" type="date" value="${esc(v('paidUntil'))}"
+        style="max-width:220px">
+    </fieldset>
+
+    ${isNew ? '' : `<div class="note">Grade is not on this form and never will be.
+      A grade changes by being awarded, through the grading rules — not by
+      somebody editing a field.</div>`}
+
+    <div class="actions">
+      <button class="btn" type="submit">${isNew ? 'Add them to the roll'
+                                                : 'Save changes'}</button>
+      <a class="btn quiet" href="${isNew ? `/o/${esc(org.slug)}/roster`
+                                         : `/p/${esc(person.id)}`}">Cancel</a>
+    </div>
+  </form>` });
+};
+
+/**
+ * Bringing an existing roll in.
+ *
+ * Pasting, not a file upload. Selecting the cells in Excel, Numbers or Google
+ * Sheets and pressing copy puts tab-separated text on the clipboard, which has
+ * no quoting to get wrong, no encoding to guess and no commas hiding inside
+ * addresses — and it works from a phone. Handling a multipart upload would
+ * mean either a dependency or eighty lines of parser, for a worse result. A
+ * saved .csv pasted in works just as well.
+ */
+export const importRoll = ({ me, csrf, org, text = '', preview = null, error,
+                             vocabulary = {} }) => {
+  const V = { ...VOCABULARY, ...vocabulary };
+  return page({
+    title: `Import — ${org.name}`, me, csrf, body: `
+  <h1>Bring in an existing roll</h1>
+  <p class="sub">${esc(org.name)} ·
+    <a href="/o/${esc(org.slug)}/roster">Back to the roll</a></p>
+
+  ${error ? `<div class="bad">${esc(error)}</div>` : ''}
+
+  ${preview ? previewOf(preview, org, csrf, text) : `
+  <div class="note">
+    <strong>Open your spreadsheet, select the rows including the heading row,
+    copy, and paste below.</strong>
+    Nothing is saved until you have seen exactly what will happen to each row.
+  </div>
+
+  <p class="muted">The headings can say whatever your spreadsheet says —
+    <em>Surname</em>, <em>DOB</em>, <em>Mobile</em>, <em>Expiry</em> and most
+    other names are understood. A first and last name are the only columns
+    that must be there. Dates written <em>03/04/2015</em> are refused rather
+    than guessed at, because that is the 3rd of April here and the 4th of
+    March in America.</p>`}
+
+  <form method="post" action="/o/${esc(org.slug)}/members/import">
+    <input type="hidden" name="_csrf" value="${esc(csrf ?? '')}">
+    <label for="text">${preview ? 'Change the rows and check again'
+                                : 'Paste here'}</label>
+    <textarea id="text" name="text" style="min-height:${preview ? 140 : 220}px"
+      placeholder="First Name&#9;Last Name&#9;DOB&#9;Email&#9;Grade">${esc(text)}</textarea>
+    <div class="actions">
+      <button class="btn${preview ? ' quiet' : ''}" type="submit">
+        ${preview ? 'Check again' : 'Check what would happen'}</button>
+      ${preview ? '' : `<a class="btn quiet"
+        href="/o/${esc(org.slug)}/members/new">Add one person instead</a>`}
+    </div>
+  </form>` });
+};
+
+const ACTION_TAGS = {
+  add: ['ok', 'will be added'],
+  duplicate: ['no', 'already on the roll'],
+  refuse: ['no', 'not imported'],
+};
+
+function previewOf(p, org, csrf, text) {
+  const { counts, plan, unmapped, missing, found } = p;
+  const nothing = counts.add === 0;
+
+  return `
+  ${missing.length ? `<div class="bad">
+    <strong>This is missing a column it needs.</strong>
+    There is no ${missing.map((m) => m === 'firstName' ? 'first name' : 'last name')
+      .join(' or ')} column, so there is nobody to add. Check that the first
+    row you pasted is the heading row.</div>` : ''}
+
+  <div class="${nothing ? 'note' : 'good'}">
+    <strong>${counts.add} to add${counts.duplicate
+      ? `, ${counts.duplicate} already on the roll` : ''}${counts.refuse
+      ? `, ${counts.refuse} that cannot go in` : ''}.</strong>
+    ${nothing ? 'Nothing has been saved, and nothing would be.'
+              : 'Nothing has been saved yet.'}
+  </div>
+
+  ${found.length ? `<p class="muted">Columns understood:
+    ${found.map((f) => `<strong>${esc(FIELD_LABELS[f] ?? f)}</strong>`).join(', ')}.
+    ${unmapped.length ? `Ignored: ${unmapped.map(esc).join(', ')}.` : ''}</p>` : ''}
+
+  <table>
+    <thead><tr><th>Row</th><th>Name</th><th class="hide-sm">Born</th>
+      <th>What happens</th></tr></thead>
+    <tbody>${plan.map((r) => {
+      const [cls, label] = ACTION_TAGS[r.action];
+      return `<tr${r.action === 'refuse' ? ' class="draft"' : ''}>
+      <td class="muted">${r.line}</td>
+      <td><strong>${esc([r.values.firstName, r.values.lastName]
+        .filter(Boolean).join(' ') || '—')}</strong>
+        ${r.values.email ? `<div class="muted">${esc(r.values.email)}</div>` : ''}</td>
+      <td class="hide-sm">${esc(r.values.dateOfBirth ?? '')}</td>
+      <td><span class="tag ${cls}">${label}</span>
+        ${r.problems.length ? `<div class="muted">${
+          r.problems.map(esc).join('; ')}</div>` : ''}
+        ${r.notes.length ? `<div class="muted">${
+          r.notes.map(esc).join('; ')}</div>` : ''}
+      </td></tr>`;
+    }).join('')}</tbody>
+  </table>
+
+  ${counts.add ? `
+  <form method="post" action="/o/${esc(org.slug)}/members/import">
+    <input type="hidden" name="_csrf" value="${esc(csrf ?? '')}">
+    <input type="hidden" name="text" value="${esc(text)}">
+    <input type="hidden" name="confirm" value="yes">
+    <div class="actions">
+      <button class="btn" type="submit">Import the ${counts.add}
+        ${counts.add === 1 ? 'person' : 'people'} above</button>
+      <span class="muted">${counts.refuse
+        ? `The ${counts.refuse} marked "not imported" will be left out. `
+        : ''}${counts.duplicate
+        ? `The ${counts.duplicate} already on the roll will be skipped.` : ''}</span>
+    </div>
+  </form>` : ''}`;
+}
+
+const FIELD_LABELS = {
+  firstName: 'first name', lastName: 'last name', fullName: 'name',
+  preferredName: 'goes by', dateOfBirth: 'date of birth', gender: 'gender',
+  email: 'email', phone: 'phone', role: 'role', grade: 'grade',
+  gradedOn: 'graded on', starts: 'joined', paidUntil: 'paid until',
+  emergencyName: 'emergency contact', emergencyPhone: 'emergency phone',
+};
+
+const ROLE_LABELS = [
+  ['member', 'Member'], ['instructor', 'Instructor'],
+  ['assistant', 'Assistant instructor'], ['official', 'Official'],
+  ['supporter', 'Supporter'],
+];
+
+const STATUS_LABELS = [
+  ['active', 'Active'], ['pending', 'Pending'], ['lapsed', 'Lapsed'],
+  ['suspended', 'Suspended'], ['resigned', 'Resigned'],
+];
 
 export const grading = ({ me, csrf, org, candidates, ladder, done, error }) => {
   const byOrder = Object.fromEntries(ladder.map((g) => [g.rank_order, g]));

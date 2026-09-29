@@ -10,6 +10,8 @@
 // plenty of adapter code already imports it from this module.
 export { pool } from '../infrastructure/postgres/pool.mjs';
 import { pool } from '../infrastructure/postgres/pool.mjs';
+import { problemsWithPerson, problemsWithMembership }
+  from '../core/domain/people.mjs';
 
 const q = async (text, params = []) => (await pool.query(text, params)).rows;
 const one = async (text, params = []) => (await q(text, params))[0] ?? null;
@@ -209,7 +211,42 @@ export const people = {
       from affiliation a join organisation o on o.id = a.organisation_id
       where a.person_id = $1 order by a.starts`, [personId]);
 
-    return { person, history, affiliations };
+    // The current organisation, so callers do not have to guess which
+    // federation's ladder or vocabulary applies to this person.
+    const at = await one(`
+      select o.id, o.slug, o.name, o.type from affiliation a
+      join organisation o on o.id = a.organisation_id
+      where a.person_id = $1 and a.ends is null
+      order by case a.role when 'member' then 0 else 1 end
+      limit 1`, [personId]);
+
+    return { person, history, affiliations, at };
+  },
+
+  /**
+   * The restricted fields, behind the registrar role.
+   *
+   * Emergency contacts and medical notes are not roster data. An instructor
+   * needs to know who is in the hall; they do not need everybody's medical
+   * history to teach a class, and for a roll that includes children the
+   * difference matters.
+   */
+  async privateDetail(actor, personId) {
+    const home = await one(`
+      select organisation_id from affiliation
+      where person_id = $1 and ends is null
+      order by case role when 'member' then 0 else 1 end limit 1`, [personId]);
+    if (!home) throw new NotFound('Person');
+    await assertRole(actor, home.organisation_id, REGISTER);
+    return one('select * from person_private where person_id = $1', [personId]);
+  },
+
+  /** The membership that is running now, if there is one. */
+  async currentAffiliation(personId) {
+    return one(`
+      select * from affiliation
+      where person_id = $1 and ends is null
+      order by case role when 'member' then 0 else 1 end limit 1`, [personId]);
   },
 
   /**
@@ -230,13 +267,12 @@ export const people = {
                        emergencyPhone = null }) {
     await assertRole(actor, organisationId, REGISTER);
 
-    const problems = [];
-    if (!String(firstName ?? '').trim()) problems.push('A first name is required');
-    if (!String(lastName ?? '').trim()) problems.push('A last name is required');
-    if (!['member', 'instructor', 'assistant', 'official', 'supporter'].includes(role))
-      problems.push(`"${role}" is not a role`);
-    if (dateOfBirth && Number.isNaN(Date.parse(dateOfBirth)))
-      problems.push('Date of birth is not a date');
+    // The same rules the import applies, so a row typed into the form and a
+    // row read out of a spreadsheet are judged identically.
+    const problems = [
+      ...problemsWithPerson({ firstName, lastName, dateOfBirth, email }),
+      ...problemsWithMembership({ role, starts, paidUntil }),
+    ];
     if (problems.length) throw new Invalid(problems.join('; '));
 
     const client = await pool.connect();
@@ -282,15 +318,136 @@ export const people = {
         [person.id, organisationId, role, starts || null, paidUntil || null]);
 
       await client.query(`
-        insert into audit_log (actor_id, action, entity, entity_id, detail)
-        values ($1,'enrol','person',$2,$3)`,
-        [actor, person.id, JSON.stringify({ organisationId, role, number })]);
+        insert into audit_log (account_id, organisation_id, action, entity,
+                               entity_id, after)
+        values ($1,$2,'enrol','person',$3,$4::jsonb)`,
+        [actor, organisationId, person.id,
+         JSON.stringify({ role, number })]);
 
       await client.query('commit');
       return person;
     } catch (e) {
       await client.query('rollback'); throw e;
     } finally { client.release(); }
+  },
+
+  /**
+   * Write an agreed import.
+   *
+   * Takes the rows a person has already looked at and approved — this does not
+   * decide anything, it carries out what the preview said would happen. The
+   * planning is pure and lives in core/domain/roll-import.mjs; only the
+   * writing is here.
+   *
+   * One transaction for the whole spreadsheet. A half-imported roll is the
+   * worst outcome available: nobody can tell which eighty of their hundred
+   * members made it, and running it again to catch the rest creates duplicates
+   * of the ones that did. Either the roll is in or the club's records are
+   * exactly as they were.
+   *
+   * Member numbers are allocated here, in sequence, inside that transaction,
+   * so a second registrar importing at the same moment cannot take the same
+   * numbers.
+   */
+  async importRoll(actor, organisationId, rows = []) {
+    await assertRole(actor, organisationId, REGISTER);
+    const adding = rows.filter((r) => r.action === 'add');
+    if (!adding.length) throw new Invalid('There is nothing to import');
+
+    const client = await pool.connect();
+    try {
+      await client.query('begin');
+
+      const { rows: [fed] } = await client.query(`
+        select coalesce(f.short_name, f.slug) as prefix
+        from organisation target
+        join organisation f on target.path <@ f.path and f.parent_id is null
+        where target.id = $1`, [organisationId]);
+      const prefix = (fed?.prefix ?? 'M').toUpperCase().replace(/[^A-Z]/g, '')
+        .slice(0, 5) || 'M';
+
+      const { rows: [seq] } = await client.query(`
+        select coalesce(max(substring(display_number from '[0-9]+$')::int), 0) as last
+        from person where display_number like $1`, [`${prefix}-%`]);
+      let next = seq.last;
+
+      const created = [];
+      let graded = 0;
+
+      for (const row of adding) {
+        const v = row.values;
+        next += 1;
+        const number = `${prefix}-${String(next).padStart(4, '0')}`;
+
+        const { rows: [person] } = await client.query(`
+          insert into person (display_number, first_name, last_name,
+            preferred_name, date_of_birth, gender, email, phone)
+          values ($1,$2,$3,$4,$5,$6,$7,$8) returning id, display_number`,
+          [number, v.firstName.trim(), v.lastName.trim(),
+           v.preferredName || null, v.dateOfBirth || null, v.gender || null,
+           v.email || null, v.phone || null]);
+
+        if (v.emergencyName || v.emergencyPhone) {
+          await client.query(`
+            insert into person_private (person_id, emergency_name, emergency_phone)
+            values ($1,$2,$3)`,
+            [person.id, v.emergencyName || null, v.emergencyPhone || null]);
+        }
+
+        await client.query(`
+          insert into affiliation (person_id, organisation_id, role, starts,
+                                   status, paid_until)
+          values ($1,$2,$3,coalesce($4::date, current_date),'active',$5)`,
+          [person.id, organisationId, v.role ?? 'member',
+           v.starts || null, v.paidUntil || null]);
+
+        // A grade the club already holds is RECORDED, not awarded. It did not
+        // happen here, there was no panel, and nothing ratified it — writing
+        // it as though this system conferred it would put a fiction in the
+        // one place a federation has to be able to trust. The note says where
+        // it came from, so anybody reading the history later knows.
+        if (v.gradeId) {
+          await client.query(`
+            insert into grading_record (person_id, grade_id, awarded_on,
+              awarded_by_org, result, panel, notes)
+            values ($1,$2,coalesce($3::date, current_date),$4,'pass','[]',$5)`,
+            [person.id, v.gradeId, v.gradedOn || null, organisationId,
+             'Held on joining. Imported from the club\'s own records; not '
+             + 'graded through this system.']);
+          graded += 1;
+        }
+
+        created.push({ id: person.id, number: person.display_number,
+                       line: row.line,
+                       name: `${v.firstName} ${v.lastName}`.trim() });
+      }
+
+      await client.query(`
+        insert into audit_log (account_id, organisation_id, action, entity,
+                               entity_id, after)
+        values ($1,$2,'import','organisation',$2,$3::jsonb)`,
+        [actor, organisationId,
+         JSON.stringify({ added: created.length, graded,
+                          numbers: created.map((c) => c.number) })]);
+
+      await client.query('commit');
+      return { added: created.length, graded, created };
+    } catch (e) {
+      await client.query('rollback'); throw e;
+    } finally { client.release(); }
+  },
+
+  /** Who is already on this roll, in the shape the import planner compares. */
+  async rollFor(actor, organisationId) {
+    await assertRole(actor, organisationId, REGISTER);
+    const rows = await q(`
+      select p.id, p.first_name, p.last_name, p.email, p.date_of_birth
+      from affiliation a join person p on p.id = a.person_id
+      where a.organisation_id = $1 and a.ends is null`, [organisationId]);
+    return rows.map((r) => ({
+      id: r.id, firstName: r.first_name, lastName: r.last_name,
+      email: r.email, dateOfBirth: r.date_of_birth,
+    }));
   },
 
   /**
@@ -316,8 +473,39 @@ export const people = {
       gender: fields.gender, email: fields.email, phone: fields.phone,
     };
     const sets = Object.entries(allowed).filter(([, v]) => v !== undefined);
-    if (!sets.length && fields.paidUntil === undefined && fields.status === undefined)
+
+    const touchesPrivate = fields.emergencyName !== undefined
+      || fields.emergencyPhone !== undefined;
+    const touchesAffiliation = fields.paidUntil !== undefined
+      || fields.status !== undefined;
+
+    if (!sets.length && !touchesPrivate && !touchesAffiliation)
       throw new Invalid('Nothing to change');
+
+    // Checked on the way in, not only on enrolment. A correction is exactly
+    // where a bad date of birth gets typed, and an unvalidated update is a
+    // hole straight through rules the enrolment form enforces.
+    const problems = [
+      ...problemsWithPerson({
+        // Only what is being changed. A field left alone keeps whatever it
+        // has, so demanding a first name here would refuse every edit that
+        // is not also re-sending the name.
+        firstName: fields.firstName ?? 'unchanged',
+        lastName: fields.lastName ?? 'unchanged',
+        dateOfBirth: fields.dateOfBirth,
+        email: fields.email,
+      }),
+      ...problemsWithMembership({ status: fields.status, paidUntil: fields.paidUntil }),
+    ];
+    if (problems.length) throw new Invalid(problems.join('; '));
+
+    // What it said beforehand, so the audit log records a change rather than
+    // just an intention. Read before the transaction opens: it is a snapshot
+    // for the record, not something the write depends on.
+    const was = await one(`
+      select first_name, last_name, preferred_name, date_of_birth, gender,
+             email, phone
+      from person where id = $1`, [personId]);
 
     const client = await pool.connect();
     try {
@@ -330,7 +518,24 @@ export const people = {
           [personId, ...sets.map(([, v]) => (v === '' ? null : v))]);
       }
 
-      if (fields.paidUntil !== undefined || fields.status !== undefined) {
+      // The emergency contact was not editable at all: it could be set when
+      // somebody enrolled and never corrected afterwards. A phone number that
+      // changed two years ago is worse than no phone number, because it is
+      // the one that gets rung.
+      if (touchesPrivate) {
+        await client.query(`
+          insert into person_private (person_id, emergency_name, emergency_phone)
+          values ($1,$2,$3)
+          on conflict (person_id) do update set
+            emergency_name = coalesce($2, person_private.emergency_name),
+            emergency_phone = coalesce($3, person_private.emergency_phone),
+            updated_at = now()`,
+          [personId,
+           fields.emergencyName === undefined ? null : (fields.emergencyName || null),
+           fields.emergencyPhone === undefined ? null : (fields.emergencyPhone || null)]);
+      }
+
+      if (touchesAffiliation) {
         await client.query(`
           update affiliation
              set paid_until = coalesce($2::date, paid_until),
@@ -340,9 +545,11 @@ export const people = {
       }
 
       await client.query(`
-        insert into audit_log (actor_id, action, entity, entity_id, detail)
-        values ($1,'update','person',$2,$3)`,
-        [actor, personId, JSON.stringify(fields)]);
+        insert into audit_log (account_id, organisation_id, action, entity,
+                               entity_id, before, after)
+        values ($1,$2,'update','person',$3,$4::jsonb,$5::jsonb)`,
+        [actor, home.organisation_id, personId,
+         JSON.stringify(was ?? {}), JSON.stringify(fields)]);
 
       await client.query('commit');
     } catch (e) {

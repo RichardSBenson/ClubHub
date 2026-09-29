@@ -43,6 +43,7 @@ import { ScheduleEvent, ReviseEvent, CancelEvent, MAY_SCHEDULE }
   from '../core/application/schedule-event.mjs';
 import { repositories } from '../infrastructure/factory.mjs';
 import { toInstant, toLocalInput } from './zones.mjs';
+import { parseTable, planImport } from '../core/domain/roll-import.mjs';
 
 const SESSION_COOKIE = 'honbu_session';
 const CSRF_COOKIE = 'honbu_csrf';
@@ -238,7 +239,11 @@ get('/o/:slug/roster', async (ctx) => {
   if (!org) throw new NotFound('Organisation');
   const roster = await people.roster(ctx.me.accountId, org.id,
     { subtree: !(org.type === 'club' || org.type === 'dojo') });
-  return ctx.send(200, V.roster({ me: ctx.me, org, roster, csrf: ctx.csrf }));
+  return ctx.send(200, V.roster({
+    me: ctx.me, org, roster, csrf: ctx.csrf,
+    canRegister: await mayRegisterAt(ctx, org.id),
+    done: ctx.url.searchParams.get('done'),
+  }));
 });
 
 // ---- one person -----------------------------------------------------------
@@ -246,9 +251,189 @@ get('/o/:slug/roster', async (ctx) => {
 get('/p/:id', async (ctx) => {
   ctx.requireActor();
   const record = await people.record(ctx.me.accountId, ctx.params.id);
-  const fed = await orgs.bySlug('moknz');
-  const eligibility = await rank.eligibility(ctx.params.id, fed.id);
-  return ctx.send(200, V.person({ me: ctx.me, ...record, eligibility, csrf: ctx.csrf }));
+
+  // Was orgs.bySlug('moknz'): one federation's slug, hard-coded, on a
+  // deployment that now serves three. Somebody in the taekwondo demo was
+  // being measured against a karate syllabus. Whose ladder applies is a
+  // question about where this person trains.
+  const owner = await orgs.ladderOwnerOf(record.at?.id);
+  const eligibility = owner
+    ? await rank.eligibility(ctx.params.id, owner.id)
+    : null;
+
+  return ctx.send(200, V.person({
+    me: ctx.me, ...record, eligibility, csrf: ctx.csrf,
+    canEdit: record.at ? await mayRegisterAt(ctx, record.at.id) : false,
+  }));
+});
+
+// ---- adding and correcting a member ---------------------------------------
+
+/**
+ * Who may write to the register.
+ *
+ * Teaching and registering are different jobs. An instructor sees the roll
+ * because they need to know who is in the hall; adding somebody to it, or
+ * changing what it says, is the registrar's.
+ */
+const MAY_REGISTER = ['owner', 'administrator', 'registrar'];
+
+async function mayRegisterAt(ctx, orgId) {
+  const { authz } = await calendar();
+  return authz.hasRoleAt(ctx.me.accountId, orgId, MAY_REGISTER);
+}
+
+/** Fields shared by the add and edit forms, read out of a submitted form. */
+const memberFieldsFrom = (form) => ({
+  firstName: form.firstName?.trim() ?? '',
+  lastName: form.lastName?.trim() ?? '',
+  preferredName: form.preferredName?.trim() || null,
+  dateOfBirth: form.dateOfBirth?.trim() || null,
+  gender: form.gender?.trim() || null,
+  email: form.email?.trim() || null,
+  phone: form.phone?.trim() || null,
+  emergencyName: form.emergencyName?.trim() || null,
+  emergencyPhone: form.emergencyPhone?.trim() || null,
+  paidUntil: form.paidUntil?.trim() || null,
+});
+
+get('/o/:slug/members/new', async (ctx) => {
+  const org = await organisationFor(ctx, { toRegister: true });
+  return ctx.send(200, V.memberForm({
+    me: ctx.me, org, csrf: ctx.csrf, isNew: true,
+    vocabulary: await orgs.vocabulary(org.id),
+    values: { role: 'member' },
+  }));
+});
+
+post('/o/:slug/members/new', async (ctx) => {
+  const org = await organisationFor(ctx, { toRegister: true });
+  const form = await ctx.form();
+
+  try {
+    const person = await people.enrol(ctx.me.accountId, {
+      organisationId: org.id,
+      ...memberFieldsFrom(form),
+      role: form.role || 'member',
+      starts: form.starts?.trim() || null,
+    });
+    return ctx.redirect(`/p/${person.id}`);
+  } catch (e) {
+    return ctx.send(e.status ?? 422, V.memberForm({
+      me: ctx.me, org, csrf: ctx.csrf, isNew: true, error: e.message,
+      vocabulary: await orgs.vocabulary(org.id), values: form,
+    }));
+  }
+});
+
+// ---- bringing an existing roll in -----------------------------------------
+
+/**
+ * Plan the import from the pasted text.
+ *
+ * Re-planned on the confirm step rather than held between requests. The
+ * planning is pure and deterministic, so the same text gives the same plan,
+ * and a serverless instance that never sees the second request cannot lose
+ * somebody's half-finished import. It also means the rules are applied again
+ * at the moment of writing rather than trusted from a previous one.
+ */
+async function planFor(ctx, org, text) {
+  const grades = (await rank.ladder((await orgs.ladderOwnerOf(org.id))?.id ?? org.id))
+    .map((g) => ({ id: g.id, label: g.label, shortLabel: g.short_label,
+                   rankOrder: g.rank_order }));
+  const existing = await people.rollFor(ctx.me.accountId, org.id);
+  return planImport(parseTable(text), { existing, grades });
+}
+
+get('/o/:slug/members/import', async (ctx) => {
+  const org = await organisationFor(ctx, { toRegister: true });
+  return ctx.send(200, V.importRoll({
+    me: ctx.me, org, csrf: ctx.csrf,
+    vocabulary: await orgs.vocabulary(org.id),
+  }));
+});
+
+post('/o/:slug/members/import', async (ctx) => {
+  const org = await organisationFor(ctx, { toRegister: true });
+  const form = await ctx.form();
+  const text = form.text ?? '';
+  const vocabulary = await orgs.vocabulary(org.id);
+
+  if (!text.trim()) {
+    return ctx.send(422, V.importRoll({
+      me: ctx.me, org, csrf: ctx.csrf, vocabulary,
+      error: 'There is nothing pasted in yet.' }));
+  }
+
+  const preview = await planFor(ctx, org, text);
+
+  // Two buttons, one route. Without the confirm flag this only ever shows what
+  // would happen — the preview is not a formality to click through, it is the
+  // only thing that runs until somebody says go.
+  if (form.confirm !== 'yes') {
+    return ctx.send(200, V.importRoll({
+      me: ctx.me, org, csrf: ctx.csrf, text, preview, vocabulary }));
+  }
+
+  try {
+    const result = await people.importRoll(ctx.me.accountId, org.id, preview.plan);
+    return ctx.redirect(`/o/${org.slug}/roster?done=` + encodeURIComponent(
+      `${result.added} added to the roll`
+      + (result.graded ? `, ${result.graded} with the grade they already held` : '')
+      + '.'));
+  } catch (e) {
+    return ctx.send(e.status ?? 422, V.importRoll({
+      me: ctx.me, org, csrf: ctx.csrf, text, preview, vocabulary,
+      error: e.message }));
+  }
+});
+
+get('/p/:id/edit', async (ctx) => {
+  ctx.requireActor();
+  const { person, at } = await people.record(ctx.me.accountId, ctx.params.id);
+  if (!at) throw new NotFound('Person has no current affiliation');
+  if (!await mayRegisterAt(ctx, at.id))
+    throw new Forbidden(`You can see this record but not change it. `
+      + 'Correcting the register needs an owner, administrator or registrar role.');
+
+  const priv = await people.privateDetail(ctx.me.accountId, person.id);
+  const current = await people.currentAffiliation(person.id);
+
+  return ctx.send(200, V.memberForm({
+    me: ctx.me, org: at, person, csrf: ctx.csrf, isNew: false,
+    vocabulary: await orgs.vocabulary(at.id),
+    values: {
+      firstName: person.first_name, lastName: person.last_name,
+      preferredName: person.preferred_name ?? '',
+      dateOfBirth: person.date_of_birth ?? '',
+      gender: person.gender ?? '', email: person.email ?? '',
+      phone: person.phone ?? '',
+      emergencyName: priv?.emergency_name ?? '',
+      emergencyPhone: priv?.emergency_phone ?? '',
+      status: current?.status ?? 'active',
+      paidUntil: current?.paid_until ?? '',
+    },
+  }));
+});
+
+post('/p/:id/edit', async (ctx) => {
+  ctx.requireActor();
+  const { person, at } = await people.record(ctx.me.accountId, ctx.params.id);
+  if (!at) throw new NotFound('Person has no current affiliation');
+  const form = await ctx.form();
+
+  try {
+    await people.update(ctx.me.accountId, person.id, {
+      ...memberFieldsFrom(form),
+      status: form.status || undefined,
+    });
+    return ctx.redirect(`/p/${person.id}`);
+  } catch (e) {
+    return ctx.send(e.status ?? 422, V.memberForm({
+      me: ctx.me, org: at, person, csrf: ctx.csrf, isNew: false,
+      error: e.message, vocabulary: await orgs.vocabulary(at.id), values: form,
+    }));
+  }
 });
 
 // ---- grading --------------------------------------------------------------
@@ -257,7 +442,8 @@ get('/o/:slug/grading', async (ctx) => {
   ctx.requireActor();
   const org = await orgs.bySlug(ctx.params.slug);
   if (!org) throw new NotFound('Organisation');
-  const fed = await orgs.bySlug('moknz');
+  // Whose syllabus this club grades on, rather than one federation's slug.
+  const fed = await orgs.ladderOwnerOf(org.id) ?? org;
   const roster = await people.roster(ctx.me.accountId, org.id,
     { subtree: !(org.type === 'club' || org.type === 'dojo') });
 
@@ -337,7 +523,8 @@ async function calendar() {
  * rendered for somebody whose submission will be refused. The answer comes from
  * the same list the use case uses, not a copy of it.
  */
-async function organisationFor(ctx, { toSchedule = false } = {}) {
+async function organisationFor(ctx, { toSchedule = false,
+                                      toRegister = false } = {}) {
   ctx.requireActor();
   const org = await orgs.bySlug(ctx.params.slug);
   if (!org) throw new NotFound('Organisation');
@@ -349,6 +536,13 @@ async function organisationFor(ctx, { toSchedule = false } = {}) {
     throw new Forbidden(
       `You can see ${org.name}'s calendar but not change it. `
       + 'Adding and editing events needs an owner, administrator or '
+      + 'registrar role there.');
+  }
+
+  if (toRegister && !await mayRegisterAt(ctx, org.id)) {
+    throw new Forbidden(
+      `You can see ${org.name}'s roll but not change it. `
+      + 'Adding and editing members needs an owner, administrator or '
       + 'registrar role there.');
   }
   return org;
