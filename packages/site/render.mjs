@@ -399,6 +399,86 @@ export function eventPage({ ev, federation, origin, fonts, nav,
 }
 
 /**
+ * Every event, and every article, on a page of their own.
+ *
+ * These did not exist. The navigation offered /events and the home page linked
+ * to /news/<slug>, and neither was ever built — so the one link in the menu
+ * that a visitor is most likely to press went to a 404, on every federation
+ * including MOKNZ. A menu that offers a page which is not there is worse than
+ * a menu with one fewer item.
+ */
+export function eventsPage({ events, federation, origin, fonts, nav,
+                             base = '', vocabulary = {} }) {
+  const at = (p) => `${base}${p}`;
+  const body = `
+<div class="hero"><div class="wrap">
+  <h1>Events</h1>
+  <p>${events.length
+    ? `${events.length} coming up.`
+    : 'Nothing on the calendar at the moment.'}</p>
+</div></div>
+<section><div class="wrap narrow">
+  ${events.length ? `<ul class="list">${events.map((e) => `<li>
+    <h3><a href="${at(`/events/${esc(e.slug)}`)}">${esc(e.title)}</a></h3>
+    <p class="muted">${esc(date(e.starts_at))}${
+      e.venue_name ? ' · ' + esc(e.venue_name) : ''}</p>
+    ${e.summary ? `<p>${esc(e.summary)}</p>` : ''}
+  </li>`).join('')}</ul>`
+  : '<p>Check back closer to the season.</p>'}
+</div></section>`;
+
+  return layout({
+    title: `Events — ${federation.name}`,
+    description: `Gradings, tournaments, camps and seminars run by ${federation.name}.`,
+    canonical: `${origin}${at('/events')}`,
+    federation, fonts, nav, base, vocabulary, body,
+  });
+}
+
+export function newsPage({ articles, federation, origin, fonts, nav,
+                           base = '', vocabulary = {} }) {
+  const at = (p) => `${base}${p}`;
+  const body = `
+<div class="hero"><div class="wrap">
+  <h1>News</h1>
+</div></div>
+<section><div class="wrap narrow">
+  ${articles.length ? `<ul class="list">${articles.map((a) => `<li>
+    <h3><a href="${at(`/news/${esc(a.slug)}`)}">${esc(a.title)}</a></h3>
+    ${a.published_at ? `<p class="muted">${esc(date(a.published_at))}${
+      a.about_org ? ' · ' + esc(a.about_org) : ''}</p>` : ''}
+    ${a.summary ? `<p>${esc(a.summary)}</p>` : ''}
+  </li>`).join('')}</ul>` : '<p>Nothing published yet.</p>'}
+</div></section>`;
+
+  return layout({
+    title: `News — ${federation.name}`,
+    description: `News from ${federation.name}.`,
+    canonical: `${origin}${at('/news')}`,
+    federation, fonts, nav, base, vocabulary, body,
+  });
+}
+
+export function articlePage({ article, html, federation, origin, fonts, nav,
+                              base = '', vocabulary = {} }) {
+  const at = (p) => `${base}${p}`;
+  const body = `
+<div class="hero"><div class="wrap">
+  <h1>${esc(article.title)}</h1>
+  ${article.published_at ? `<p>${esc(date(article.published_at))}${
+    article.about_org ? ' · ' + esc(article.about_org) : ''}</p>` : ''}
+</div></div>
+<section><div class="wrap narrow">${html}</div></section>`;
+
+  return layout({
+    title: `${article.title} — ${federation.name}`,
+    description: article.summary ?? article.title,
+    canonical: `${origin}${at(`/news/${article.slug}`)}`,
+    federation, fonts, nav, base, vocabulary, body,
+  });
+}
+
+/**
  * The hero copy comes from settings. It used to be written here, which made
  * data/settings.json a liar: it offered heroHeading, heroText and heroButton
  * and nothing read them. The defaults below are MOKNZ's words, kept only so an

@@ -127,17 +127,16 @@ for (const target of SITES) {
   const tokens = { ...(brand?.tokens ?? {}), ...(atRoot ? rootSettings.tokens : {}) };
   const fonts = { ...(brand?.fonts ?? {}), ...(atRoot ? rootSettings.fonts : {}) };
 
-  const nav = atRoot && rootSettings.navigation.length
+  // The plural, because "Find a academy" is the kind of detail that makes a
+  // demo feel machine-made.
+  const navFor = (v) => (atRoot && rootSettings.navigation.length
     ? rootSettings.navigation
-    // The plural, because "Find a academy" is the kind of detail that makes a
-    // demo feel machine-made.
     : NAV.map((n) => (n.href === '/find-a-dojo'
-        ? { ...n, label: clubsWord }
-        : n));
+        ? { ...n, label: v.clubPlural ?? v.club ?? 'Clubs' }
+        : n)));
 
   const base = target.base;
   const at = (p) => `${base}${p}`;
-  const shared = { federation, fonts, nav, base, vocabulary, origin: ORIGIN };
 
   const written = [];
   const write = async (rel, html) => {
@@ -148,8 +147,6 @@ for (const target of SITES) {
     return rel;
   };
 
-  await write('theme.css', R.themeCss(tokens, fonts));
-
   const dojos = (await site.dojos(target.slug)).map((d) => ({
     ...d,
     venue_name: d.venue_name ?? d.venueName ?? null,
@@ -159,6 +156,28 @@ for (const target of SITES) {
     sessions: d.sessions ?? [],
   }));
 
+  const evs = await site.eventsFor(target.slug);
+  const articles = await site.articles(federation.id);
+  const authored = await site.pages(federation.id);
+
+  // What this federation will actually have a page for. Decided before
+  // anything is rendered, because the menu is rendered into every page and a
+  // menu item pointing at a page that was never built sends a visitor to a
+  // 404 from the one link they are most likely to press.
+  const willExist = new Set([
+    '/', '/find-a-dojo', '/events', '/news',
+    ...authored.map((pg) => `/${pg.slug}`),
+  ]);
+  const nav = navFor(vocabulary).filter((n) => {
+    if (willExist.has(n.href)) return true;
+    console.log(`     nav: dropped ${n.href} — this federation has no such page`);
+    return false;
+  });
+
+  const shared = { federation, fonts, nav, base, vocabulary, origin: ORIGIN };
+
+  await write('theme.css', R.themeCss(tokens, fonts));
+
   for (const dojo of dojos) {
     const dojoEvents = await site.eventsFor(dojo.slug);
     await write(`${dojo.slug}/index.html`,
@@ -167,12 +186,11 @@ for (const target of SITES) {
 
   await write('find-a-dojo/index.html', R.findADojoPage({ dojos, ...shared }));
 
-  const evs = await site.eventsFor(target.slug);
   for (const ev of evs) {
     await write(`events/${ev.slug}/index.html`, R.eventPage({ ev, ...shared }));
   }
+  await write('events/index.html', R.eventsPage({ events: evs, ...shared }));
 
-  const authored = await site.pages(federation.id);
   for (const pg of authored) {
     const html = renderBlocks(pg.body, { dojos, events: evs },
       { origin: ORIGIN + base });
@@ -188,7 +206,15 @@ for (const target of SITES) {
     }));
   }
 
-  const articles = await site.articles(federation.id);
+  await write('news/index.html', R.newsPage({ articles, ...shared }));
+  for (const article of articles) {
+    const body = article.body
+      ? renderBlocks(article.body, { dojos, events: evs }, { origin: ORIGIN + base })
+      : '';
+    await write(`news/${article.slug}/index.html`,
+      R.articlePage({ article, html: body, ...shared }));
+  }
+
   await write('index.html', R.homePage({
     dojos, events: evs, articles,
     homeCopy: atRoot ? (rootSettings.homePage ?? {}) : strip(orgSettings.homePage ?? {}),

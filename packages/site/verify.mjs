@@ -38,7 +38,11 @@ console.log('\nURLS AND META');
   const desc = wh.match(/name="description" content="(.*?)"/)[1];
   ok('title names the town', title.startsWith('Kyokushin karate in Whanganui'), title);
   ok('description is specific to this dojo', desc.includes('Whanganui') && desc.length > 80);
-  ok('canonical is set', wh.includes('rel="canonical" href="https://www.kyokushinkarate.co.nz/whanganui"'));
+  // Asserts the shape, not one federation's domain: the origin now comes from
+  // the deployment and changes when the DNS is finally pointed.
+  const canonical = wh.match(/rel="canonical" href="([^"]+)"/)?.[1] ?? '';
+  ok('canonical is set and points at this page',
+    /^https?:\/\/[^/]+\/whanganui$/.test(canonical), canonical);
 
   const ch = html('christchurch/index.html');
   const chDesc = ch.match(/name="description" content="(.*?)"/)[1];
@@ -111,6 +115,57 @@ console.log('\nTHEME FROM BRAND TOKENS');
   ok('accent only ever used on dark surfaces',
     css.includes('color:var(--accent)') && !css.includes('background:var(--accent);color:var(--canvas)'));
   ok('fonts come from the record', css.includes('Shippori Mincho'));
+}
+
+console.log('\nEVERY INTERNAL LINK GOES SOMEWHERE');
+{
+  // The navigation offered /events and the home page linked to /news/<slug>,
+  // and neither page was ever built. Every visitor who pressed Events got a
+  // 404, on every federation. A link check is cheap and that was not.
+  const walk = (dir) => fs.readdirSync(dir, { withFileTypes: true })
+    .flatMap((e) => (e.isDirectory()
+      ? walk(path.join(dir, e.name))
+      : [path.join(dir, e.name)]));
+
+  const files = walk(OUT);
+  const at = (f) => '/' + path.relative(OUT, f).split(path.sep).join('/');
+  const served = new Set();
+  for (const f of files) {
+    const rel = at(f);
+    served.add(rel);
+    if (rel.endsWith('/index.html')) {
+      served.add(rel.slice(0, -'/index.html'.length) || '/');
+    }
+  }
+
+  const broken = [];
+  for (const f of files.filter((f) => f.endsWith('.html'))) {
+    const body = fs.readFileSync(f, 'utf8');
+    for (const [, href] of body.matchAll(/href="(\/[^"#]*)"/g)) {
+      const clean = href.split('?')[0].replace(/\/$/, '') || '/';
+      if (served.has(clean) || served.has(`${clean}/index.html`)) continue;
+      broken.push(`${href}  <-  ${at(f)}`);
+    }
+  }
+
+  ok(`no internal link points at a page that was not built`,
+    broken.length === 0, broken.slice(0, 5).join(' | '));
+  console.log(`      → ${served.size} paths, every link resolves`);
+
+  // And no federation may link into another's pages.
+  const strays = [];
+  for (const f of files.filter((f) => f.endsWith('.html'))) {
+    const rel = at(f);
+    const owner = rel.startsWith('/demo/') ? rel.split('/').slice(0, 3).join('/') : '';
+    const body = fs.readFileSync(f, 'utf8');
+    for (const [, href] of body.matchAll(/href="(\/[^"#]*)"/g)) {
+      const theirs = href.startsWith('/demo/')
+        ? href.split('/').slice(0, 3).join('/') : '';
+      if (theirs !== owner) strays.push(`${rel} -> ${href}`);
+    }
+  }
+  ok('no federation links into another federation', strays.length === 0,
+    strays.slice(0, 3).join(' | '));
 }
 
 console.log(`\n${pass} passed, ${fail} failed\n`);
