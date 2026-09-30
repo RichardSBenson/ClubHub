@@ -102,6 +102,8 @@ export class Event {
     minAge = null, maxAge = null,
     publishDown = false, publishUp = false, publishUpState = 'none',
     entriesOpen = null, entriesClose = null, capacity = null,
+    guardianUnder = null, consentVersion = null, consentText = null,
+    guestsAllowed = false,
     status = 'draft',
   } = {}) {
     if (!organisationId) throw new DomainError('An event belongs to an organisation');
@@ -134,6 +136,15 @@ export class Event {
     this.publishUp = !!publishUp;
     this.publishUpState = publishUpState;
     this.status = status;
+
+    // Entry settings. The Kokoro Cup wants a parent or guardian to sign for
+    // anyone under SIXTEEN; plenty of events say eighteen. Nobody's threshold
+    // belongs in the code, so the event carries its own and an event that has
+    // not set one asks for nobody's guardian rather than guessing a number.
+    this.guardianUnder = smallint(guardianUnder, 'The guardian age');
+    this.consentVersion = consentVersion?.trim() || null;
+    this.consentText = consentText ?? null;
+    this.guestsAllowed = !!guestsAllowed;
 
     this.startsAt = instant(startsAt, 'The start');
     if (!this.startsAt) throw new DomainError('An event needs a start');
@@ -184,6 +195,15 @@ export class Event {
         && this.minRankOrder == null && this.maxRankOrder == null)
       out.push('a by-grade event needs a lowest or highest grade');
 
+    if (this.guardianUnder != null
+        && (this.guardianUnder < 1 || this.guardianUnder > 30))
+      out.push('the age a guardian must sign below should be between 1 and 30');
+
+    // A version with nothing behind it records agreement to a document that
+    // does not exist, which is worse than recording nothing.
+    if (this.consentVersion && !String(this.consentText ?? '').trim())
+      out.push('a declaration version needs the declaration text to go with it');
+
     // own_org means "mine only", so sending it down the tree contradicts it.
     if (this.visibility === 'own_org' && this.publishDown)
       out.push('an event for this organisation only cannot also publish downwards');
@@ -226,6 +246,8 @@ export class Event {
       publishDown: this.publishDown, publishUp: this.publishUp,
       publishUpState: this.publishUpState, entriesOpen: this.entriesOpen,
       entriesClose: this.entriesClose, capacity: this.capacity,
+      guardianUnder: this.guardianUnder, consentVersion: this.consentVersion,
+      consentText: this.consentText, guestsAllowed: this.guestsAllowed,
       status: this.status,
     };
   }

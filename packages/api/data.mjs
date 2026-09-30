@@ -167,7 +167,14 @@ export const people = {
 
     return q(`
       select p.id, p.display_number, p.first_name, p.last_name,
+             -- Age TODAY, which is what a roster wants to show, and the
+             -- date of birth, which is what anything deciding an age
+             -- division needs. Only the derived age used to come back, so a
+             -- tournament entry could not tell how old somebody would be on
+             -- the day: every competitor in an age division silently failed
+             -- to place, and no under-16 was ever asked for a guardian.
              date_part('year', age(p.date_of_birth))::int as age,
+             p.date_of_birth, p.gender,
              cg.label as grade, cg.rank_order, cg.is_dan, cg.awarded_on as graded_on,
              a.role, a.status, a.paid_until,
              o.name as dojo, o.slug as dojo_slug
@@ -788,6 +795,268 @@ export const events = {
 // ---------------------------------------------------------------------------
 // money
 // ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
+// competition
+//
+// The queries behind the entry engine. The RULES are in
+// core/domain/competition.mjs and none of them are here: this reads the
+// organiser's configuration out and writes entries back, and would give the
+// same answers if the tournament were BJJ.
+// ---------------------------------------------------------------------------
+
+export const competition = {
+  /** An event's disciplines with their divisions, ready for the engine. */
+  async setupFor(eventId) {
+    const disciplines = await q(`
+      select * from event_discipline where event_id = $1
+      order by sort_order, name`, [eventId]);
+
+    const divisions = await q(`
+      select d.* from event_division d
+      join event_discipline ed on ed.id = d.discipline_id
+      where ed.event_id = $1
+      order by d.sort_order, d.label`, [eventId]);
+
+    const prices = await q(`
+      select * from entry_price where event_id = $1 order by for_count`,
+      [eventId]);
+
+    const byDiscipline = {};
+    for (const d of disciplines) byDiscipline[d.id] = [];
+    for (const d of divisions) (byDiscipline[d.discipline_id] ??= []).push(d);
+
+    return { disciplines, divisions, byDiscipline, prices };
+  },
+
+  async addDiscipline(actor, eventId, { name, summary = null, sortOrder = 0 }) {
+    const ev = await one('select organisation_id from event where id = $1', [eventId]);
+    if (!ev) throw new NotFound('Event');
+    await assertRole(actor, ev.organisation_id, REGISTER);
+    if (!String(name ?? '').trim()) throw new Invalid('A discipline needs a name');
+
+    return one(`
+      insert into event_discipline (event_id, name, summary, sort_order)
+      values ($1,$2,$3,$4)
+      on conflict (event_id, name) do update set
+        summary = excluded.summary, sort_order = excluded.sort_order
+      returning *`, [eventId, name.trim(), summary || null, sortOrder]);
+  },
+
+  async addDivision(actor, disciplineId, fields = {}) {
+    const d = await one(`
+      select e.organisation_id from event_discipline ed
+      join event e on e.id = ed.event_id where ed.id = $1`, [disciplineId]);
+    if (!d) throw new NotFound('Discipline');
+    await assertRole(actor, d.organisation_id, REGISTER);
+    if (!String(fields.label ?? '').trim())
+      throw new Invalid('A division needs a label');
+
+    return one(`
+      insert into event_division (discipline_id, label, summary,
+        min_rank_order, max_rank_order, min_age, max_age,
+        min_weight_kg, max_weight_kg, gender,
+        min_years_training, max_years_training,
+        min_prior_events, max_prior_events, options, sort_order, capacity)
+      values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15::jsonb,$16,$17)
+      on conflict (discipline_id, label) do update set
+        summary = excluded.summary,
+        min_rank_order = excluded.min_rank_order,
+        max_rank_order = excluded.max_rank_order,
+        min_age = excluded.min_age, max_age = excluded.max_age,
+        min_weight_kg = excluded.min_weight_kg,
+        max_weight_kg = excluded.max_weight_kg,
+        gender = excluded.gender,
+        min_years_training = excluded.min_years_training,
+        max_years_training = excluded.max_years_training,
+        min_prior_events = excluded.min_prior_events,
+        max_prior_events = excluded.max_prior_events,
+        options = excluded.options, sort_order = excluded.sort_order,
+        capacity = excluded.capacity
+      returning *`,
+      [disciplineId, fields.label.trim(), fields.summary || null,
+       blank(fields.minRankOrder), blank(fields.maxRankOrder),
+       blank(fields.minAge), blank(fields.maxAge),
+       blank(fields.minWeightKg), blank(fields.maxWeightKg),
+       fields.gender || null,
+       blank(fields.minYearsTraining), blank(fields.maxYearsTraining),
+       blank(fields.minPriorEvents), blank(fields.maxPriorEvents),
+       JSON.stringify(fields.options ?? {}),
+       fields.sortOrder ?? 0, blank(fields.capacity)]);
+  },
+
+  async setPrice(actor, eventId, { forCount, amountCents, membersOnly = false,
+                                   label = null }) {
+    const ev = await one('select organisation_id from event where id = $1', [eventId]);
+    if (!ev) throw new NotFound('Event');
+    await assertRole(actor, ev.organisation_id, REGISTER);
+    return one(`
+      insert into entry_price (event_id, for_count, amount_cents, members_only, label)
+      values ($1,$2,$3,$4,$5)
+      on conflict (event_id, for_count, members_only) do update set
+        amount_cents = excluded.amount_cents, label = excluded.label
+      returning *`, [eventId, forCount, amountCents, membersOnly, label]);
+  },
+
+  /**
+   * Who is already entered, with the division each one landed in.
+   *
+   * The unplaced come back too, and deliberately first: "If no match
+   * available, your instructor will be advised" is printed on the form, so an
+   * entry list that quietly omits them is the one thing it must not do.
+   */
+  async entriesFor(actor, eventId) {
+    const ev = await one('select organisation_id from event where id = $1', [eventId]);
+    if (!ev) throw new NotFound('Event');
+    await assertRole(actor, ev.organisation_id, TEACH);
+
+    const entries = await q(`
+      select e.*, p.first_name, p.last_name, p.display_number, p.date_of_birth,
+             p.gender as person_gender, o.name as entered_for,
+             cg.label as grade, cg.rank_order,
+             (select count(*)::int from entry_consent c where c.entry_id = e.id)
+               as consents
+      from event_entry e
+      left join person p on p.id = e.person_id
+      left join organisation o on o.id = e.entered_for_org
+      left join person_current_grade cg on cg.person_id = p.id
+      where e.event_id = $1
+      order by p.last_name, p.first_name`, [eventId]);
+
+    const selections = await q(`
+      select s.*, ed.name as discipline, dv.label as division
+      from entry_selection s
+      join event_discipline ed on ed.id = s.discipline_id
+      left join event_division dv on dv.id = s.division_id
+      join event_entry e on e.id = s.entry_id
+      where e.event_id = $1
+      order by ed.sort_order, ed.name`, [eventId]);
+
+    const byEntry = {};
+    for (const s of selections) (byEntry[s.entry_id] ??= []).push(s);
+
+    return entries.map((e) => ({ ...e, selections: byEntry[e.id] ?? [] }));
+  },
+
+  /**
+   * Enter one competitor, with everything they are entering.
+   *
+   * One transaction: an entry whose selections half-wrote is a competitor who
+   * turns up expecting to fight in two divisions and is in the draw for one.
+   *
+   * `placements` comes from the engine and is written as given — this does not
+   * re-decide anything. Where the organiser has moved somebody by hand, the
+   * placement arrives marked 'assigned' and stays that way.
+   */
+  async enterCompetitor(actor, eventId, {
+    personId = null, guest = null, enteredForOrg = null,
+    weightKg = null, heightCm = null, yearsTraining = null, priorEvents = null,
+    declaredGrade = null, clubName = null, placements = [],
+    amountCents = null, currency = 'NZD', consent = null, notes = null,
+  }) {
+    const ev = await one('select organisation_id from event where id = $1', [eventId]);
+    if (!ev) throw new NotFound('Event');
+    // A club enters its own people, so the role is checked where they are
+    // being entered FROM, not at the host organisation — a dojo sensei has no
+    // grant at the federation running the tournament.
+    await assertRole(actor, enteredForOrg ?? ev.organisation_id, REGISTER);
+
+    if (!personId && !guest)
+      throw new Invalid('An entry needs either a person or a guest');
+    if (!placements.length)
+      throw new Invalid('Nothing has been entered');
+
+    const client = await pool.connect();
+    try {
+      await client.query('begin');
+
+      const { rows: [entry] } = await client.query(`
+        insert into event_entry (event_id, person_id, guest, entered_by,
+          entered_for_org, weight_kg, height_cm, years_training, prior_events,
+          declared_grade, club_name, amount_cents, currency, notes, status)
+        values ($1,$2,$3::jsonb,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,'entered')
+        returning *`,
+        [eventId, personId, guest ? JSON.stringify(guest) : null, actor,
+         enteredForOrg, weightKg, heightCm, yearsTraining, priorEvents,
+         declaredGrade, clubName, amountCents, currency, notes]);
+
+      for (const p of placements) {
+        await client.query(`
+          insert into entry_selection (entry_id, discipline_id, division_id,
+            placed_by, placed_note, options)
+          values ($1,$2,$3,$4,$5,$6::jsonb)`,
+          [entry.id, p.disciplineId, p.divisionId ?? null,
+           p.placedBy ?? 'calculated', p.note ?? null,
+           JSON.stringify(p.options ?? {})]);
+      }
+
+      if (consent) {
+        await client.query(`
+          insert into entry_consent (entry_id, version, document_hash,
+            accepted_name, accepted_by, accepted_ip, guardian)
+          values ($1,$2,$3,$4,$5,$6,$7::jsonb)`,
+          [entry.id, consent.version, consent.documentHash ?? null,
+           consent.acceptedName, actor, consent.ip ?? null,
+           consent.guardian ? JSON.stringify(consent.guardian) : null]);
+      }
+
+      await client.query(`
+        insert into audit_log (account_id, organisation_id, action, entity,
+                               entity_id, after)
+        values ($1,$2,'enter','event_entry',$3,$4::jsonb)`,
+        [actor, enteredForOrg ?? ev.organisation_id, entry.id,
+         JSON.stringify({ personId, placements: placements.length, amountCents })]);
+
+      await client.query('commit');
+      return entry;
+    } catch (e) {
+      await client.query('rollback');
+      // The unique index, in words somebody can act on.
+      if (e.code === '23505' && String(e.constraint ?? '').includes('one_per_person'))
+        throw new Invalid('That person is already entered in this event');
+      throw e;
+    } finally { client.release(); }
+  },
+
+  /**
+   * Move somebody to a different division.
+   *
+   * "ALL divisions subject to change" is printed on the form. A placement
+   * moved by hand is marked 'assigned' so that nothing recalculates it back —
+   * the organiser looked at two competitors and made a judgement the rules
+   * could not.
+   */
+  async assignDivision(actor, selectionId, divisionId, note = null) {
+    const s = await one(`
+      select e.organisation_id from entry_selection s
+      join event_entry en on en.id = s.entry_id
+      join event e on e.id = en.event_id
+      where s.id = $1`, [selectionId]);
+    if (!s) throw new NotFound('Entry');
+    await assertRole(actor, s.organisation_id, REGISTER);
+
+    return one(`
+      update entry_selection
+         set division_id = $2, placed_by = 'assigned', placed_note = $3
+       where id = $1 returning *`, [selectionId, divisionId || null, note]);
+  },
+
+  async withdraw(actor, entryId, reason = null) {
+    const e = await one(`
+      select ev.organisation_id, en.entered_for_org from event_entry en
+      join event ev on ev.id = en.event_id where en.id = $1`, [entryId]);
+    if (!e) throw new NotFound('Entry');
+    await assertRole(actor, e.entered_for_org ?? e.organisation_id, REGISTER);
+    // Withdrawn, not deleted: they paid, and a federation has to be able to
+    // say somebody pulled out rather than that they never entered.
+    return one(`
+      update event_entry set status = 'withdrawn', notes = coalesce($2, notes),
+             updated_at = now()
+       where id = $1 returning *`, [entryId, reason]);
+  },
+};
+
+const blank = (v) => (v === '' || v === undefined ? null : v);
 
 export const billing = {
   /**

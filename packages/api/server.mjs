@@ -32,8 +32,8 @@
 
 import crypto from 'node:crypto';
 import { URL } from 'node:url';
-import { pool, orgs, people, rank, events, Forbidden, NotFound, Invalid }
-  from './data.mjs';
+import { pool, orgs, people, rank, events, competition,
+         Forbidden, NotFound, Invalid } from './data.mjs';
 import * as auth from './auth.mjs';
 import * as V from './views.mjs';
 import { currentStore } from '../infrastructure/factory.mjs';
@@ -44,6 +44,9 @@ import { ScheduleEvent, ReviseEvent, CancelEvent, MAY_SCHEDULE }
 import { repositories } from '../infrastructure/factory.mjs';
 import { toInstant, toLocalInput } from './zones.mjs';
 import { parseTable, planImport } from '../core/domain/roll-import.mjs';
+import { Competitor, Division, placeEntry, priceFor, consentNeeded,
+         problemsWithConsent } from '../core/domain/competition.mjs';
+import { ageOn } from '../core/domain/people.mjs';
 
 const SESSION_COOKIE = 'honbu_session';
 const CSRF_COOKIE = 'honbu_csrf';
@@ -326,6 +329,294 @@ post('/o/:slug/members/new', async (ctx) => {
   }
 });
 
+// ---- competition ----------------------------------------------------------
+
+/** The event named in the path, on an organisation the actor may be at. */
+async function eventFor(ctx, { toSchedule = false } = {}) {
+  const org = await organisationFor(ctx, { toSchedule });
+  const { repo } = await calendar();
+  const event = await repo.bySlug(org.id, ctx.params.eventSlug);
+  if (!event) throw new NotFound('Event');
+  return { org, event };
+}
+
+/** The day the event runs, as a calendar day in the organisation's zone. */
+const dayOf = (event, zone) => toLocalInput(event.startsAt, zone).slice(0, 10);
+
+/** The organiser's configuration, turned into what the engine takes. */
+async function engineSetupFor(eventId) {
+  const setup = await competition.setupFor(eventId);
+  const byDiscipline = {};
+  for (const [id, rows] of Object.entries(setup.byDiscipline)) {
+    byDiscipline[id] = rows.map((d) => new Division({
+      id: d.id, disciplineId: d.discipline_id, label: d.label, summary: d.summary,
+      minRankOrder: d.min_rank_order, maxRankOrder: d.max_rank_order,
+      minAge: d.min_age, maxAge: d.max_age,
+      minWeightKg: d.min_weight_kg, maxWeightKg: d.max_weight_kg,
+      gender: d.gender,
+      minYearsTraining: d.min_years_training, maxYearsTraining: d.max_years_training,
+      minPriorEvents: d.min_prior_events, maxPriorEvents: d.max_prior_events,
+      options: d.options, sortOrder: d.sort_order, capacity: d.capacity,
+    }));
+  }
+  const prices = setup.prices.map((p) => ({ forCount: p.for_count,
+    amountCents: p.amount_cents, membersOnly: p.members_only,
+    currency: p.currency }));
+  return { ...setup, engineDivisions: byDiscipline, enginePrices: prices };
+}
+
+get('/o/:slug/events/:eventSlug/setup', async (ctx) => {
+  const { org, event } = await eventFor(ctx, { toSchedule: true });
+  const setup = await competition.setupFor(event.id);
+  return ctx.send(200, V.eventSetup({
+    me: ctx.me, org, event, csrf: ctx.csrf,
+    disciplines: setup.disciplines, byDiscipline: setup.byDiscipline,
+    prices: setup.prices, grades: await gradesFor(org),
+    done: ctx.url.searchParams.get('done'),
+    error: ctx.url.searchParams.get('error'),
+  }));
+});
+
+post('/o/:slug/events/:eventSlug/setup/discipline', async (ctx) => {
+  const { org, event } = await eventFor(ctx, { toSchedule: true });
+  const form = await ctx.form();
+  const back = `/o/${org.slug}/events/${event.slug}/setup`;
+  try {
+    const d = await competition.addDiscipline(ctx.me.accountId, event.id, {
+      name: form.name, summary: form.summary?.trim() || null,
+      sortOrder: +(form.sortOrder ?? 0) || 0 });
+    return ctx.redirect(`${back}?done=${encodeURIComponent(`${d.name} added.`)}`);
+  } catch (e) {
+    return ctx.redirect(`${back}?error=${encodeURIComponent(e.message)}`);
+  }
+});
+
+post('/o/:slug/events/:eventSlug/setup/division', async (ctx) => {
+  const { org, event } = await eventFor(ctx, { toSchedule: true });
+  const form = await ctx.form();
+  const back = `/o/${org.slug}/events/${event.slug}/setup`;
+  try {
+    const d = await competition.addDivision(ctx.me.accountId, form.disciplineId, {
+      label: form.label, summary: form.summary?.trim() || null,
+      minRankOrder: form.minRankOrder, maxRankOrder: form.maxRankOrder,
+      minAge: form.minAge, maxAge: form.maxAge,
+      minWeightKg: form.minWeightKg, maxWeightKg: form.maxWeightKg,
+      gender: form.gender?.trim() || null,
+      sortOrder: +(form.sortOrder ?? 0) || 0 });
+    return ctx.redirect(`${back}?done=${encodeURIComponent(`${d.label} added.`)}`);
+  } catch (e) {
+    return ctx.redirect(`${back}?error=${encodeURIComponent(e.message)}`);
+  }
+});
+
+post('/o/:slug/events/:eventSlug/setup/price', async (ctx) => {
+  const { org, event } = await eventFor(ctx, { toSchedule: true });
+  const form = await ctx.form();
+  const back = `/o/${org.slug}/events/${event.slug}/setup`;
+  try {
+    // Typed in dollars because that is what the form says; stored in cents
+    // because money in a float is how a total comes out a penny wrong.
+    const amountCents = Math.round(Number(form.amount) * 100);
+    if (!Number.isFinite(amountCents) || amountCents < 0)
+      throw new Invalid('That is not a price');
+    await competition.setPrice(ctx.me.accountId, event.id, {
+      forCount: +form.forCount, amountCents, membersOnly: !!form.membersOnly });
+    return ctx.redirect(`${back}?done=${encodeURIComponent('Price set.')}`);
+  } catch (e) {
+    return ctx.redirect(`${back}?error=${encodeURIComponent(e.message)}`);
+  }
+});
+
+// ---- entering a club's own competitors -------------------------------------
+
+/**
+ * The event may belong to somebody else.
+ *
+ * A dojo enters its people in the federation's tournament, and it has no role
+ * at the federation. So the organisation in the path is the CLUB doing the
+ * entering — checked for the registrar role there — and the event is found by
+ * looking up the tree from it. Requiring a grant at the host would mean only
+ * the federation could ever enter anybody.
+ */
+async function entryContextFor(ctx) {
+  const org = await organisationFor(ctx, { toRegister: true });
+  const host = await one_(`
+    select o.* from event e join organisation o on o.id = e.organisation_id
+    join organisation me on me.id = $1
+    where e.slug = $2 and me.path <@ o.path`, [org.id, ctx.params.eventSlug]);
+  if (!host) throw new NotFound('Event');
+
+  const { repo } = await calendar();
+  const event = await repo.bySlug(host.id, ctx.params.eventSlug);
+  if (!event) throw new NotFound('Event');
+  return { org, host, event };
+}
+
+const one_ = async (text, params) => (await pool.query(text, params)).rows[0] ?? null;
+
+get('/o/:slug/events/:eventSlug/enter', async (ctx) => {
+  const { org, host, event } = await entryContextFor(ctx);
+  const setup = await competition.setupFor(event.id);
+  const eventDate = dayOf(event, host.timezone);
+
+  const roster = (await people.roster(ctx.me.accountId, org.id, {
+    subtree: !(org.type === 'club' || org.type === 'dojo') }))
+    .filter((p) => p.status === 'active')
+    .map((p) => ({ ...p, ageOnDay: ageOn(p.date_of_birth, eventDate) }));
+
+  return ctx.send(200, V.enterCompetitors({
+    me: ctx.me, org, host, event, csrf: ctx.csrf,
+    disciplines: setup.disciplines, roster, eventDate,
+    consent: { version: event.consentVersion ?? null,
+               text: event.consentText ?? null,
+               guardianUnder: event.guardianUnder ?? null },
+  }));
+});
+
+post('/o/:slug/events/:eventSlug/enter', async (ctx) => {
+  const { org, host, event } = await entryContextFor(ctx);
+  const form = await ctx.form();
+  const setup = await engineSetupFor(event.id);
+  const eventDate = dayOf(event, host.timezone);
+
+  const roster = await people.roster(ctx.me.accountId, org.id, {
+    subtree: !(org.type === 'club' || org.type === 'dojo') });
+  const byId = new Map(roster.map((p) => [p.id, p]));
+
+  // Which boxes were ticked, per person. A person with none ticked is simply
+  // not competing, which is the normal case for most of a roll.
+  const wanted = new Map();
+  for (const key of Object.keys(form)) {
+    const m = key.match(/^enter_([0-9a-f-]{36})_([0-9a-f-]{36})$/);
+    if (m && byId.has(m[1])) {
+      if (!wanted.has(m[1])) wanted.set(m[1], []);
+      wanted.get(m[1]).push(m[2]);
+    }
+  }
+
+  const backToForm = (error) => ctx.send(422, V.enterCompetitors({
+    me: ctx.me, org, host, event, csrf: ctx.csrf,
+    disciplines: setup.disciplines, eventDate, error, values: form,
+    roster: roster.map((p) => ({ ...p, ageOnDay: ageOn(p.date_of_birth, eventDate) })),
+    consent: { version: event.consentVersion ?? null,
+               text: event.consentText ?? null,
+               guardianUnder: event.guardianUnder ?? null },
+  }));
+
+  if (!wanted.size) return backToForm('Nobody has been ticked to enter.');
+
+  const consentProblems = event.consentVersion
+    ? problemsWithConsent({ accepted: !!form.accepted,
+        acceptedName: form.acceptedName, version: event.consentVersion }, {})
+    : [];
+  if (consentProblems.length) return backToForm(consentProblems.join('; '));
+
+  // Worked out, not written. Nothing is saved until somebody has read it.
+  const rows = [];
+  for (const [personId, disciplineIds] of wanted) {
+    const p = byId.get(personId);
+    const weightKg = form[`weight_${personId}`]?.trim() || null;
+    const heightCm = form[`height_${personId}`]?.trim() || null;
+
+    const competitor = new Competitor({
+      personId, name: `${p.first_name} ${p.last_name}`,
+      dateOfBirth: p.date_of_birth, gender: p.gender ?? p.person_gender,
+      rankOrder: p.rank_order, weightKg, heightCm, clubName: org.name,
+      isMember: true,
+    });
+
+    const placed = placeEntry({ disciplines: setup.disciplines,
+      divisionsByDiscipline: setup.engineDivisions }, competitor,
+      { eventDate, wanted: disciplineIds });
+
+    const price = priceFor(disciplineIds.length, setup.enginePrices,
+      { isMember: true });
+
+    rows.push({ personId, name: competitor.name, weightKg, heightCm,
+      ready: placed.ready, placements: placed.placements,
+      amountCents: price.amountCents,
+      needsGuardian: consentNeeded(competitor,
+        { eventDate, guardianUnder: event.guardianUnder ?? null }).guardian });
+  }
+
+  const ready = rows.filter((r) => r.ready);
+  const total = ready.reduce((n, r) => n + (r.amountCents ?? 0), 0);
+
+  if (form.confirm !== 'yes') {
+    // Everything needed to repeat this decision, so the confirm step is the
+    // same calculation rather than a stored one.
+    const text = Object.fromEntries(Object.entries(form)
+      .filter(([k]) => k !== '_csrf' && k !== 'confirm'));
+    return ctx.send(200, V.entryPreview({
+      me: ctx.me, org, event, csrf: ctx.csrf, rows, text, total,
+      currency: setup.prices[0]?.currency ?? 'NZD' }));
+  }
+
+  if (!ready.length) return backToForm('Nobody is ready to enter yet.');
+
+  let entered = 0;
+  const failures = [];
+  for (const r of ready) {
+    try {
+      await competition.enterCompetitor(ctx.me.accountId, event.id, {
+        personId: r.personId, enteredForOrg: org.id,
+        weightKg: r.weightKg, heightCm: r.heightCm, clubName: org.name,
+        amountCents: r.amountCents,
+        currency: setup.prices[0]?.currency ?? 'NZD',
+        placements: r.placements.map((p) => ({
+          disciplineId: p.discipline.id, divisionId: p.division?.id ?? null,
+          placedBy: 'calculated',
+          options: p.division?.options ?? {} })),
+        consent: event.consentVersion ? {
+          version: event.consentVersion, acceptedName: form.acceptedName,
+          ip: ctx.ip,
+          guardian: r.needsGuardian
+            ? { name: form.acceptedName, relationship: 'entered by club',
+                contact: ctx.me.email }
+            : null,
+        } : null,
+      });
+      entered += 1;
+    } catch (e) {
+      // One competitor already entered must not lose the other nineteen.
+      failures.push(`${r.name}: ${e.message}`);
+    }
+  }
+
+  const done = `${entered} entered`
+    + (failures.length ? `. Not entered — ${failures.join('; ')}` : '.');
+  return ctx.redirect(`/o/${org.slug}/events/${event.slug}/entries?`
+    + (failures.length ? 'error=' : 'done=') + encodeURIComponent(done));
+});
+
+// ---- the entry list --------------------------------------------------------
+
+get('/o/:slug/events/:eventSlug/entries', async (ctx) => {
+  const { org, host, event } = await entryContextFor(ctx);
+  const setup = await competition.setupFor(event.id);
+  return ctx.send(200, V.entryList({
+    me: ctx.me, org: host, event, csrf: ctx.csrf,
+    entries: await competition.entriesFor(ctx.me.accountId, event.id),
+    divisions: setup.divisions,
+    canAssign: await mayScheduleAt(ctx, host.id),
+    done: ctx.url.searchParams.get('done'),
+    error: ctx.url.searchParams.get('error'),
+  }));
+});
+
+post('/o/:slug/events/:eventSlug/entries/assign', async (ctx) => {
+  const { org, event } = await eventFor(ctx, { toSchedule: true });
+  const form = await ctx.form();
+  const back = `/o/${org.slug}/events/${event.slug}/entries`;
+  try {
+    await competition.assignDivision(ctx.me.accountId, form.selectionId,
+      form.divisionId || null, 'Placed by the organiser');
+    return ctx.redirect(`${back}?done=${encodeURIComponent('Placed.')}`);
+  } catch (e) {
+    return ctx.redirect(`${back}?error=${encodeURIComponent(e.message)}`);
+  }
+});
+
 // ---- bringing an existing roll in -----------------------------------------
 
 /**
@@ -532,7 +823,7 @@ async function organisationFor(ctx, { toSchedule = false,
   if (!ctx.me.scope?.some((o) => o.id === org.id))
     throw new Forbidden(`You do not have access to ${org.name}.`);
 
-  if (toSchedule && !await mayScheduleAt(ctx, org)) {
+  if (toSchedule && !await mayScheduleAt(ctx, org.id)) {
     throw new Forbidden(
       `You can see ${org.name}'s calendar but not change it. `
       + 'Adding and editing events needs an owner, administrator or '
@@ -548,10 +839,19 @@ async function organisationFor(ctx, { toSchedule = false,
   return org;
 }
 
-/** Whether this actor may put something on that calendar. */
-async function mayScheduleAt(ctx, org) {
+/**
+ * Whether this actor may put something on that calendar.
+ *
+ * Takes an organisation ID, exactly as mayRegisterAt does. It used to take an
+ * organisation OBJECT, and its sibling took an id — so a call that passed an
+ * id read `org.id` off a string, got undefined, and quietly answered "no".
+ * That is how the entry list stopped offering the organiser any way to place
+ * an unplaced competitor, with no error anywhere. Two helpers this alike need
+ * the same signature.
+ */
+async function mayScheduleAt(ctx, orgId) {
   const { authz } = await calendar();
-  return authz.hasRoleAt(ctx.me.accountId, org.id, MAY_SCHEDULE);
+  return authz.hasRoleAt(ctx.me.accountId, orgId, MAY_SCHEDULE);
 }
 
 /**
@@ -598,6 +898,10 @@ function eventFieldsFrom(form, zone) {
     capacity: number('capacity'),
     publishDown: !!form.publishDown,
     publishUp: !!form.publishUp,
+    guardianUnder: number('guardianUnder'),
+    consentVersion: text('consentVersion'),
+    consentText: text('consentText'),
+    guestsAllowed: !!form.guestsAllowed,
   };
 }
 
@@ -614,6 +918,9 @@ const eventAsForm = (e, zone) => ({
   minAge: e.minAge == null ? '' : String(e.minAge),
   maxAge: e.maxAge == null ? '' : String(e.maxAge),
   capacity: e.capacity == null ? '' : String(e.capacity),
+  guardianUnder: e.guardianUnder == null ? '' : String(e.guardianUnder),
+  consentVersion: e.consentVersion ?? '',
+  consentText: e.consentText ?? '',
 });
 
 get('/o/:slug/events', async (ctx) => {
@@ -630,7 +937,7 @@ get('/o/:slug/events', async (ctx) => {
 
   return ctx.send(200, V.events({
     me: ctx.me, org, own, inherited, zone: org.timezone, csrf: ctx.csrf,
-    canSchedule: await mayScheduleAt(ctx, org),
+    canSchedule: await mayScheduleAt(ctx, org.id),
     done: ctx.url.searchParams.get('done'),
     error: ctx.url.searchParams.get('error'),
   }));

@@ -580,7 +580,10 @@ export const events = ({ me, csrf, org, own = [], inherited = [], zone,
       <td class="hide-sm">${esc(kindLabel(e.kind))}</td>
       <td>${statusTag(e.status)}</td>
       <td>${canSchedule ? `<a class="btn quiet"
-        href="/o/${esc(org.slug)}/events/${esc(String(e.slug))}/edit">Edit</a>` : ''}</td>
+        href="/o/${esc(org.slug)}/events/${esc(String(e.slug))}/edit">Edit</a>` : ''}
+        ${ENTERABLE.has(e.kind) ? `<a class="btn quiet"
+          href="/o/${esc(org.slug)}/events/${esc(String(e.slug))}/entries">Entries</a>`
+        : ''}</td>
     </tr>`).join('')}</tbody></table>`
     : '<div class="note">Nothing on this calendar yet.</div>'}
 
@@ -594,6 +597,15 @@ export const events = ({ me, csrf, org, own = [], inherited = [], zone,
       <td>${esc(e.title)}</td>
       <td class="hide-sm">${esc(e.from_org ?? '')}</td>
     </tr>`).join('')}</tbody></table>` : ''}` });
+
+/**
+ * The kinds people enter rather than just turn up to.
+ *
+ * A guess about which events want an entry list, so the link is offered where
+ * it is wanted and not on a social. Only a link — any event can have entries
+ * if somebody navigates to them.
+ */
+const ENTERABLE = new Set(['tournament', 'grading', 'fight_night', 'seminar', 'camp']);
 
 const KIND_LABELS = {
   grading: 'Grading', tournament: 'Tournament', camp: 'Camp',
@@ -798,6 +810,32 @@ export const eventForm = ({ me, csrf, org, values = {}, zone, error,
     </fieldset>
 
     <fieldset>
+      <legend>Entries and the declaration</legend>
+      <p class="hint">Only needed for an event people enter — a tournament or
+        a grading. Leave blank otherwise.</p>
+      <div class="row">
+        <div>
+          <label for="guardianUnder">A parent or guardian signs for anyone under
+            <span class="hint">16 at the Kokoro Cup. 18 at plenty of others.
+              Blank asks for nobody's guardian.</span></label>
+          <input id="guardianUnder" name="guardianUnder" type="number" min="1"
+            max="30" value="${esc(v('guardianUnder'))}" style="max-width:140px">
+        </div>
+        <div>
+          <label for="consentVersion">Declaration version
+            <span class="hint">Change it when the wording changes. Entries keep
+              the version they agreed to.</span></label>
+          <input id="consentVersion" name="consentVersion" maxlength="40"
+            value="${esc(v('consentVersion'))}" placeholder="2026.1">
+        </div>
+      </div>
+      <label for="consentText">The declaration itself</label>
+      <textarea id="consentText" name="consentText">${esc(v('consentText'))}</textarea>
+      ${checkbox('guestsAllowed', 'People who are not on any roll may enter',
+        !!v('guestsAllowed'), 'An open championship. Leave off for members only.')}
+    </fieldset>
+
+    <fieldset>
       <legend>Where it appears</legend>
       ${checkbox('publishDown', 'Show on the calendars below this organisation',
         !!v('publishDown'), 'Every club under it sees it on their own page.')}
@@ -834,6 +872,411 @@ export const eventForm = ({ me, csrf, org, values = {}, zone, error,
       <button class="btn quiet" type="submit">Cancel this event</button>
     </form>
   </fieldset>`}` });
+};
+
+// ---------------------------------------------------------------------------
+// competition
+// ---------------------------------------------------------------------------
+
+const cents = (c, currency = 'NZD') => c == null ? '—'
+  : new Intl.NumberFormat('en-NZ', { style: 'currency', currency }).format(c / 100);
+
+/** A division's bounds, in words rather than a row of nullable numbers. */
+function boundsOf(d, gradeLabels = {}) {
+  const parts = [];
+  const band = (min, max, unit, name) => {
+    if (min == null && max == null) return;
+    if (min != null && max != null) parts.push(`${name} ${min}–${max}${unit}`);
+    else if (min != null) parts.push(`${name} ${min}${unit} and over`);
+    else parts.push(`${name} up to ${max}${unit}`);
+  };
+
+  if (d.min_rank_order != null || d.max_rank_order != null) {
+    const lo = gradeLabels[d.min_rank_order] ?? d.min_rank_order;
+    const hi = gradeLabels[d.max_rank_order] ?? d.max_rank_order;
+    if (d.min_rank_order != null && d.max_rank_order != null)
+      parts.push(`${lo} to ${hi}`);
+    else if (d.min_rank_order != null) parts.push(`${lo} and above`);
+    else parts.push(`up to ${hi}`);
+  }
+  band(d.min_age, d.max_age, '', 'age');
+  band(d.min_weight_kg, d.max_weight_kg, ' kg', 'weight');
+  if (d.gender) parts.push(String(d.gender));
+  band(d.min_years_training, d.max_years_training, ' yrs', 'training');
+  band(d.min_prior_events, d.max_prior_events, '', 'previous events');
+
+  return parts.length ? parts.join(' · ') : 'open to anybody';
+}
+
+/**
+ * Setting a tournament up: what it runs, who may be in which division, and
+ * what it costs.
+ *
+ * Everything on this page is the organiser's words. Nothing here — and
+ * nothing behind it — knows what a kata is, which is the only reason the same
+ * screen sets up a BJJ open or a taekwondo championship.
+ */
+export const eventSetup = ({ me, csrf, org, event, disciplines = [],
+                             byDiscipline = {}, prices = [], grades = [],
+                             done, error }) => {
+  const gradeLabels = Object.fromEntries(grades.map((g) => [g.rankOrder, g.label]));
+  const gradeOptions = (selected) =>
+    option('', 'no limit', selected)
+    + grades.map((g) => option(String(g.rankOrder), g.label, selected)).join('');
+
+  return page({
+    title: `Set up — ${event.title}`, me, csrf, body: `
+  <h1>${esc(event.title)}</h1>
+  <p class="sub">${esc(org.name)} ·
+    <a href="/o/${esc(org.slug)}/events/${esc(event.slug)}/edit">Edit the event</a> ·
+    <a href="/o/${esc(org.slug)}/events/${esc(event.slug)}/entries">Entries</a></p>
+
+  ${done ? `<div class="good">${esc(done)}</div>` : ''}
+  ${error ? `<div class="bad">${esc(error)}</div>` : ''}
+
+  <h2>What this event runs</h2>
+  ${disciplines.length ? disciplines.map((d) => `
+    <fieldset>
+      <legend>${esc(d.name)}</legend>
+      ${d.summary ? `<p class="muted">${esc(d.summary)}</p>` : ''}
+      ${(byDiscipline[d.id] ?? []).length ? `<table>
+        <thead><tr><th>Division</th><th>Who is in it</th></tr></thead>
+        <tbody>${byDiscipline[d.id].map((v) => `<tr>
+          <td><strong>${esc(v.label)}</strong>
+            ${v.summary ? `<div class="muted">${esc(v.summary)}</div>` : ''}</td>
+          <td class="muted">${esc(boundsOf(v, gradeLabels))}</td>
+        </tr>`).join('')}</tbody></table>`
+        : `<div class="note">No divisions yet. Until there is at least one,
+             nobody can be placed in ${esc(d.name)}.</div>`}
+
+      <details>
+        <summary class="muted" style="cursor:pointer;margin:14px 0 0">
+          Add a division to ${esc(d.name)}</summary>
+        <form method="post"
+          action="/o/${esc(org.slug)}/events/${esc(event.slug)}/setup/division">
+          <input type="hidden" name="_csrf" value="${esc(csrf ?? '')}">
+          <input type="hidden" name="disciplineId" value="${esc(d.id)}">
+          <div class="row">
+            <div><label>Name it</label>
+              <input name="label" required maxlength="100"
+                placeholder="Development Kata"></div>
+            <div><label>Describe it <span class="hint">Shown to competitors.</span></label>
+              <input name="summary" maxlength="200"
+                placeholder="White/orange/blue belt to 7th kyu"></div>
+          </div>
+          <p class="hint" style="margin:16px 0 0">Leave a bound blank for no
+            limit. A division with no bounds at all is an open.</p>
+          <div class="row">
+            <div><label>Lowest grade</label>
+              <select name="minRankOrder">${gradeOptions('')}</select></div>
+            <div><label>Highest grade</label>
+              <select name="maxRankOrder">${gradeOptions('')}</select></div>
+          </div>
+          <div class="row">
+            <div><label>Youngest age <span class="hint">On the day.</span></label>
+              <input name="minAge" type="number" min="0" max="120"></div>
+            <div><label>Oldest age</label>
+              <input name="maxAge" type="number" min="0" max="120"></div>
+            <div><label>Gender <span class="hint">Blank for any.</span></label>
+              <input name="gender" maxlength="30" placeholder="male"></div>
+          </div>
+          <div class="row">
+            <div><label>Lightest (kg)</label>
+              <input name="minWeightKg" type="number" step="0.01" min="0"></div>
+            <div><label>Heaviest (kg)</label>
+              <input name="maxWeightKg" type="number" step="0.01" min="0"></div>
+          </div>
+          <div class="actions">
+            <button class="btn" type="submit">Add this division</button>
+          </div>
+        </form>
+      </details>
+    </fieldset>`).join('')
+    : '<div class="note">Nothing is set up yet. Add what this event runs below.</div>'}
+
+  <fieldset>
+    <legend>Add a discipline</legend>
+    <form method="post"
+      action="/o/${esc(org.slug)}/events/${esc(event.slug)}/setup/discipline">
+      <input type="hidden" name="_csrf" value="${esc(csrf ?? '')}">
+      <div class="row">
+        <div><label>Name</label>
+          <input name="name" required maxlength="100"
+            placeholder="Full-Contact Kumite"></div>
+        <div><label>Describe it</label>
+          <input name="summary" maxlength="200"></div>
+      </div>
+      <div class="actions"><button class="btn" type="submit">Add it</button></div>
+    </form>
+  </fieldset>
+
+  <h2>What it costs</h2>
+  <p class="muted">A price for how many disciplines somebody enters, not a
+    price each. Set one for each number: one event $60, any two $70, all
+    three $80.</p>
+  ${prices.length ? `<table>
+    <thead><tr><th>Disciplines entered</th><th>Price</th><th>Who</th></tr></thead>
+    <tbody>${prices.map((p) => `<tr>
+      <td>${p.for_count}</td>
+      <td><strong>${esc(cents(p.amount_cents, p.currency))}</strong></td>
+      <td class="muted">${p.members_only ? 'members only' : 'anybody'}</td>
+    </tr>`).join('')}</tbody></table>`
+    : '<div class="note">No prices set. Nobody can be charged until there are.</div>'}
+
+  <form method="post" action="/o/${esc(org.slug)}/events/${esc(event.slug)}/setup/price">
+    <input type="hidden" name="_csrf" value="${esc(csrf ?? '')}">
+    <div class="row">
+      <div><label>For entering this many</label>
+        <input name="forCount" type="number" min="1" max="20" required value="1"></div>
+      <div><label>Price <span class="hint">In dollars.</span></label>
+        <input name="amount" type="number" step="0.01" min="0" required></div>
+    </div>
+    ${checkbox('membersOnly', 'Members only', false,
+      'A separate price for people affiliated to this federation.')}
+    <div class="actions"><button class="btn" type="submit">Set this price</button></div>
+  </form>
+
+  <h2>The declaration</h2>
+  <p class="muted">What every competitor agrees to, recorded against their
+    entry with who agreed and when. Set on
+    <a href="/o/${esc(org.slug)}/events/${esc(event.slug)}/edit">the event
+    itself</a>, along with the age below which a parent or guardian must sign.</p>
+  <ul class="plain">
+    <li>Declaration version:
+      <strong>${esc(event.consent_version ?? 'not set')}</strong></li>
+    <li>Guardian signs for anyone under:
+      <strong>${event.guardian_under ?? 'not set'}</strong></li>
+  </ul>` });
+};
+
+/**
+ * Entering your own club's people.
+ *
+ * Their names, dates of birth and grades are already in the register, so this
+ * does not ask for them again — only for what changes between tournaments and
+ * what this event needs: weight, height, which disciplines. That is the whole
+ * point of having a register.
+ */
+export const enterCompetitors = ({ me, csrf, org, host, event, disciplines = [],
+                                   roster = [], eventDate, consent = {},
+                                   error, values = {} }) => page({
+  title: `Enter — ${event.title}`, me, csrf, body: `
+  <h1>Enter ${esc(org.name)}</h1>
+  <p class="sub">${esc(event.title)} · ${esc(host.name)} ·
+    <a href="/o/${esc(org.slug)}/events">Back</a></p>
+
+  ${error ? `<div class="bad">${esc(error)}</div>` : ''}
+
+  ${!disciplines.length ? `<div class="note">
+    This event has no disciplines set up yet, so there is nothing to enter.
+  </div>` : !roster.length ? `<div class="note">
+    Nobody is on ${esc(org.name)}'s roll yet.
+    <a href="/o/${esc(org.slug)}/members/import">Bring your roll in</a> first.
+  </div>` : `
+
+  <div class="note">Tick who is competing and what they are entering. Their
+    age and grade come from the register — you only need the things that
+    change: weight and height on the day.</div>
+
+  <form method="post" action="${esc(`/o/${org.slug}/events/${event.slug}/enter`)}">
+    <input type="hidden" name="_csrf" value="${esc(csrf ?? '')}">
+
+    <table>
+      <thead><tr>
+        <th>Competitor</th>
+        <th class="hide-sm">Age on the day</th>
+        <th class="hide-sm">Grade</th>
+        <th>Weight (kg)</th>
+        <th>Height (cm)</th>
+        ${disciplines.map((d) => `<th>${esc(d.name)}</th>`).join('')}
+      </tr></thead>
+      <tbody>${roster.map((p) => `<tr>
+        <td><strong>${esc(p.first_name)} ${esc(p.last_name)}</strong>
+          <div class="muted">${esc(p.display_number ?? '')}</div></td>
+        <td class="hide-sm">${p.ageOnDay ?? '<span class="tag no">no date of birth</span>'}</td>
+        <td class="hide-sm">${p.grade ? esc(p.grade)
+          : '<span class="tag no">ungraded</span>'}</td>
+        <td><input name="weight_${esc(p.id)}" type="number" step="0.01" min="0"
+          max="400" style="max-width:110px" value="${esc(values[`weight_${p.id}`] ?? '')}"></td>
+        <td><input name="height_${esc(p.id)}" type="number" min="0" max="280"
+          style="max-width:110px" value="${esc(values[`height_${p.id}`] ?? '')}"></td>
+        ${disciplines.map((d) => `<td style="text-align:center">
+          <input type="checkbox" name="enter_${esc(p.id)}_${esc(d.id)}" value="1"
+            style="width:auto"${values[`enter_${p.id}_${d.id}`] ? ' checked' : ''}>
+        </td>`).join('')}
+      </tr>`).join('')}</tbody>
+    </table>
+
+    <fieldset>
+      <legend>The declaration</legend>
+      ${consent.version ? `
+        <p class="muted">Version ${esc(consent.version)}.
+          ${consent.guardianUnder
+            ? `A parent or guardian must sign for anyone under
+               ${consent.guardianUnder} on the day — this form records you as
+               having their authority to enter them.`
+            : 'This event has not set an age below which a guardian must sign.'}</p>
+        ${consent.text ? `<div class="note" style="max-height:220px;overflow:auto">
+          ${esc(consent.text)}</div>` : ''}
+        ${checkbox('accepted',
+          'I confirm every competitor above, or their parent or guardian, has '
+          + 'agreed to this declaration', !!values.accepted)}
+        <label for="acceptedName">Your name</label>
+        <input id="acceptedName" name="acceptedName" required maxlength="100"
+          value="${esc(values.acceptedName ?? me.name ?? '')}" style="max-width:340px">`
+      : `<div class="note">This event has no declaration set, so none will be
+          recorded against these entries.</div>`}
+    </fieldset>
+
+    <div class="actions">
+      <button class="btn" type="submit">See what this would enter</button>
+    </div>
+  </form>`}` });
+
+/**
+ * What the rules worked out, before anything is written.
+ *
+ * Nobody is entered until this has been looked at. The unplaced are listed
+ * first and in full: "If no match available, your instructor will be advised"
+ * is on the real form, and a screen that buried them would be worse than the
+ * paper it replaces.
+ */
+export const entryPreview = ({ me, csrf, org, event, rows = [], text,
+                               total = null, currency = 'NZD', error }) => {
+  const ready = rows.filter((r) => r.ready);
+  const stuck = rows.filter((r) => !r.ready);
+
+  return page({
+    title: `Check — ${event.title}`, me, csrf, body: `
+  <h1>Before anybody is entered</h1>
+  <p class="sub">${esc(event.title)} · ${esc(org.name)}</p>
+
+  ${error ? `<div class="bad">${esc(error)}</div>` : ''}
+
+  <div class="${ready.length ? 'good' : 'note'}">
+    <strong>${ready.length} ready to enter${stuck.length
+      ? `, ${stuck.length} needing attention` : ''}.</strong>
+    Nothing has been saved yet.
+    ${total != null ? ` Total ${esc(cents(total, currency))}.` : ''}
+  </div>
+
+  ${stuck.length ? `<h2>These cannot go in yet</h2>
+  <table>
+    <thead><tr><th>Competitor</th><th>What is wrong</th></tr></thead>
+    <tbody>${stuck.map((r) => `<tr class="draft">
+      <td><strong>${esc(r.name)}</strong></td>
+      <td>${r.placements.map((p) => p.outcome === 'placed' ? ''
+        : `<div><strong>${esc(p.discipline.name)}</strong> —
+           <span class="muted">${esc(p.reasons.join('; '))}</span></div>`)
+        .join('')}</td>
+    </tr>`).join('')}</tbody>
+  </table>
+  <p class="muted">Fix these by recording the missing detail — a weight, a
+    date of birth, a grade — or by entering them and moving them yourself once
+    the entry list is up.</p>` : ''}
+
+  ${ready.length ? `<h2>These are ready</h2>
+  <table>
+    <thead><tr><th>Competitor</th><th>Entering</th>
+      <th class="hide-sm">Fee</th></tr></thead>
+    <tbody>${ready.map((r) => `<tr>
+      <td><strong>${esc(r.name)}</strong>
+        <div class="muted">${r.weightKg ? `${r.weightKg} kg` : ''}</div></td>
+      <td>${r.placements.map((p) => `<div>${esc(p.discipline.name)} —
+        <span class="tag ok">${esc(p.division.label)}</span></div>`).join('')}</td>
+      <td class="hide-sm">${esc(cents(r.amountCents, currency))}</td>
+    </tr>`).join('')}</tbody>
+  </table>
+
+  <form method="post" action="/o/${esc(org.slug)}/events/${esc(event.slug)}/enter">
+    <input type="hidden" name="_csrf" value="${esc(csrf ?? '')}">
+    ${Object.entries(text).map(([k, v]) =>
+      `<input type="hidden" name="${esc(k)}" value="${esc(v)}">`).join('')}
+    <input type="hidden" name="confirm" value="yes">
+    <div class="actions">
+      <button class="btn" type="submit">Enter these ${ready.length}</button>
+      <a class="btn quiet"
+        href="/o/${esc(org.slug)}/events/${esc(event.slug)}/enter">Go back</a>
+    </div>
+  </form>` : ''}` });
+};
+
+/** Who is entered, by division, with the unplaced impossible to miss. */
+export const entryList = ({ me, csrf, org, event, entries = [],
+                            divisions = [], canAssign = false, done, error }) => {
+  const unplaced = entries.flatMap((e) =>
+    e.selections.filter((s) => !s.division_id).map((s) => ({ entry: e, s })));
+
+  const byDivision = {};
+  for (const e of entries) {
+    for (const s of e.selections) {
+      if (!s.division_id) continue;
+      (byDivision[s.division_id] ??= { label: s.division, discipline: s.discipline,
+        people: [] }).people.push({ e, s });
+    }
+  }
+
+  return page({
+    title: `Entries — ${event.title}`, me, csrf, body: `
+  <h1>Entries</h1>
+  <p class="sub">${esc(event.title)} · ${esc(org.name)} ·
+    <a href="/o/${esc(org.slug)}/events/${esc(event.slug)}/setup">Divisions and fees</a></p>
+
+  ${done ? `<div class="good">${esc(done)}</div>` : ''}
+  ${error ? `<div class="bad">${esc(error)}</div>` : ''}
+
+  <div class="note"><strong>${entries.length} entered</strong>
+    across ${Object.keys(byDivision).length}
+    division${Object.keys(byDivision).length === 1 ? '' : 's'}${unplaced.length
+      ? `, with ${unplaced.length} still to place` : ''}.</div>
+
+  ${unplaced.length ? `
+  <h2>Nobody has a division for these yet</h2>
+  <p class="muted">The form says an instructor will be advised where there is
+    no match. These are those.</p>
+  <table>
+    <thead><tr><th>Competitor</th><th>Discipline</th>
+      <th class="hide-sm">Club</th><th>Put them in</th></tr></thead>
+    <tbody>${unplaced.map(({ entry, s }) => `<tr class="draft">
+      <td><strong>${esc(entry.first_name ?? '')} ${esc(entry.last_name ?? '')}</strong>
+        <div class="muted">${entry.date_of_birth ? `born ${esc(entry.date_of_birth)}` : ''}
+          ${entry.weight_kg ? ` · ${entry.weight_kg} kg` : ''}
+          ${entry.grade ? ` · ${esc(entry.grade)}` : ''}</div></td>
+      <td>${esc(s.discipline)}</td>
+      <td class="hide-sm">${esc(entry.entered_for ?? entry.club_name ?? '')}</td>
+      <td>${canAssign ? `<form method="post"
+        action="/o/${esc(org.slug)}/events/${esc(event.slug)}/entries/assign">
+        <input type="hidden" name="_csrf" value="${esc(csrf ?? '')}">
+        <input type="hidden" name="selectionId" value="${esc(s.id)}">
+        <select name="divisionId" style="max-width:220px">
+          <option value="">leave unplaced</option>
+          ${divisions.filter((d) => d.discipline_id === s.discipline_id)
+            .map((d) => `<option value="${esc(d.id)}">${esc(d.label)}</option>`).join('')}
+        </select>
+        <button class="btn quiet" type="submit">Place</button>
+      </form>` : ''}</td>
+    </tr>`).join('')}</tbody>
+  </table>` : ''}
+
+  ${Object.entries(byDivision).map(([id, d]) => `
+  <h2>${esc(d.discipline)} — ${esc(d.label)}</h2>
+  <table>
+    <thead><tr><th>Competitor</th><th class="hide-sm">Club</th>
+      <th class="hide-sm">Grade</th><th>Weight</th><th>How</th></tr></thead>
+    <tbody>${d.people.map(({ e, s }) => `<tr>
+      <td><strong>${esc(e.first_name ?? '')} ${esc(e.last_name ?? '')}</strong>
+        ${e.status !== 'entered'
+          ? ` <span class="tag no">${esc(e.status)}</span>` : ''}
+        ${e.consents ? '' : ' <span class="tag no">no declaration</span>'}</td>
+      <td class="hide-sm">${esc(e.entered_for ?? e.club_name ?? '')}</td>
+      <td class="hide-sm">${esc(e.grade ?? '')}</td>
+      <td>${e.weight_kg ?? '—'}</td>
+      <td class="muted">${s.placed_by === 'assigned'
+        ? '<span class="tag dan">moved by hand</span>' : esc(s.placed_by)}</td>
+    </tr>`).join('')}</tbody>
+  </table>`).join('')}
+
+  ${entries.length ? '' : `<div class="note">Nobody has entered yet.</div>`}` });
 };
 
 export const error = ({ me, csrf, status, message }) => page({

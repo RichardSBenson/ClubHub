@@ -642,6 +642,8 @@ const toEvent = (r) => new Event({
   publishUpState: r.publish_up_state,
   entriesOpen: r.entries_open, entriesClose: r.entries_close,
   capacity: r.capacity, status: r.status,
+  guardianUnder: r.guardian_under, consentVersion: r.consent_version,
+  consentText: r.consent_text, guestsAllowed: r.guests_allowed,
 });
 
 export class PostgresEvents {
@@ -676,10 +678,12 @@ export class PostgresEvents {
         latitude, longitude, visibility,
         min_rank_order, max_rank_order, min_age, max_age,
         publish_down, publish_up, publish_up_state,
-        entries_open, entries_close, capacity, status)
+        entries_open, entries_close, capacity, status,
+        guardian_under, consent_version, consent_text, guests_allowed)
       values (coalesce($1, uuid_generate_v4()), $2, $3, $4, $5, $6, $7::jsonb,
         $8, $9, $10, $11, $12, $13, $14, $15,
-        $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26)
+        $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26,
+        $27, $28, $29, $30)
       on conflict (id) do update set
         kind = excluded.kind, title = excluded.title, slug = excluded.slug,
         summary = excluded.summary, body = excluded.body,
@@ -697,6 +701,10 @@ export class PostgresEvents {
         entries_open = excluded.entries_open,
         entries_close = excluded.entries_close,
         capacity = excluded.capacity, status = excluded.status,
+        guardian_under = excluded.guardian_under,
+        consent_version = excluded.consent_version,
+        consent_text = excluded.consent_text,
+        guests_allowed = excluded.guests_allowed,
         updated_at = now()
       returning *`,
       [event.id, event.organisationId, event.kind, event.title,
@@ -707,7 +715,9 @@ export class PostgresEvents {
        event.visibility, event.minRankOrder, event.maxRankOrder,
        event.minAge, event.maxAge, event.publishDown, event.publishUp,
        event.publishUpState, event.entriesOpen, event.entriesClose,
-       event.capacity, event.status]);
+       event.capacity, event.status,
+       event.guardianUnder, event.consentVersion, event.consentText,
+       event.guestsAllowed]);
     return toEvent(r);
   }
 
