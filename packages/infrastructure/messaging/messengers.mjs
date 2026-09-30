@@ -10,19 +10,30 @@
  * The system runs today on the first. Adding a provider later means setting
  * two environment variables — nothing above this file changes.
  *
- * Why HTTP and not SMTP: a serverless function stops once it responds, and
- * SMTP needs DNS, TCP, TLS, auth and transfer to complete on one socket before
- * that happens. An HTTP send is a single awaited request.
+ *   SmtpMessenger     talks to a mailbox the federation already owns
+ *
+ * This file used to say SMTP was unsuitable because "a serverless function
+ * stops once it responds, and SMTP needs DNS, TCP, TLS, auth and transfer to
+ * complete on one socket before that happens".
+ *
+ * The premise is right and the conclusion was wrong. SendSignInLink AWAITS
+ * delivery before the route responds — deliberately, because responding
+ * before the message is away is how sign-in links vanish while the logs stay
+ * clean. The function cannot stop first. SMTP costs latency, a second or two,
+ * on a route that already waits.
+ *
+ * And the cost of being wrong about it was the whole system: every hosted
+ * provider wants an account, a domain and a verification step, so nobody
+ * could be sent a sign-in link, so HONBU_BOOTSTRAP existed as a door left
+ * open in the environment variables because there was no other way in.
+ *
+ * A federation with a mailbox can now send from it. See smtp.mjs.
  */
 
-export class MessengerError extends Error {
-  constructor(message, { status = null, provider = null } = {}) {
-    super(message);
-    this.name = 'MessengerError';
-    this.status = status;
-    this.provider = provider;
-  }
-}
+import { SmtpMessenger } from './smtp.mjs';
+import { MessengerError } from './errors.mjs';
+
+export { MessengerError };
 
 // ---------------------------------------------------------------------------
 
@@ -171,6 +182,22 @@ export function messengerFrom(env = process.env) {
 
   if (!provider || provider === 'log') return new LogMessenger();
   if (provider === 'none') return new MemoryMessenger();
+
+  if (provider === 'smtp') {
+    return new SmtpMessenger({
+      host: env.SMTP_HOST,
+      port: env.SMTP_PORT ?? 587,
+      user: env.SMTP_USER ?? null,
+      pass: env.SMTP_PASS ?? null,
+      from: env.SMTP_FROM ?? env.MESSENGER_FROM,
+      name: env.SMTP_FROM_NAME ?? null,
+      // The same shape as PGSSL=insecure in pool.mjs, and the same warning:
+      // a way out when a server's certificate cannot be verified, not
+      // something to set and forget.
+      rejectUnauthorized: env.SMTP_TLS !== 'insecure',
+      secure: env.SMTP_SECURE ? env.SMTP_SECURE === 'true' : null,
+    });
+  }
 
   return new HttpMessenger({
     provider,
