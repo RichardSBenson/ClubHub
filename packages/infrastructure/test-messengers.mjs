@@ -124,6 +124,37 @@ console.log('\nCHOSEN BY ENVIRONMENT, READ AT CALL TIME');
     MESSENGER_API_KEY:'k', MESSENGER_FROM:'a@b.nz' });
   ok('a provider plus credentials gives the http messenger',
     http instanceof HttpMessenger && http.provider === 'resend');
+
+  // An operator who configured SMTP and then moved to an HTTP provider keeps
+  // their own address without renaming a variable. The from address belongs to
+  // the federation; the transport is an implementation detail underneath it.
+  const kept = messengerFrom({ MESSENGER_PROVIDER:'resend',
+    MESSENGER_API_KEY:'k', SMTP_FROM:'karate@moknz.nz' });
+  ok('an http provider accepts SMTP_FROM as the sender',
+    kept.from === 'karate@moknz.nz');
+
+  const both = messengerFrom({ MESSENGER_PROVIDER:'resend',
+    MESSENGER_API_KEY:'k', MESSENGER_FROM:'new@moknz.nz',
+    SMTP_FROM:'old@moknz.nz' });
+  ok('the messenger name wins when both are set',
+    both.from === 'new@moknz.nz');
+
+  const smtp = messengerFrom({ MESSENGER_PROVIDER:'smtp',
+    SMTP_HOST:'mail.example.nz', MESSENGER_FROM:'karate@moknz.nz' });
+  ok('and smtp accepts MESSENGER_FROM, the other way round',
+    smtp.from === 'karate@moknz.nz');
+
+  // The same courtesy for the secret: an operator moving from SMTP to an HTTP
+  // provider changes the value in place rather than learning a second name.
+  const reused = messengerFrom({ MESSENGER_PROVIDER:'resend',
+    SMTP_PASS:'re_abc', SMTP_FROM:'karate@moknz.nz' });
+  ok('an http provider accepts SMTP_PASS as the api key',
+    reused.apiKey === 're_abc');
+
+  const preferred = messengerFrom({ MESSENGER_PROVIDER:'resend',
+    MESSENGER_API_KEY:'re_new', SMTP_PASS:'old', SMTP_FROM:'k@moknz.nz' });
+  ok('and the messenger name wins there too',
+    preferred.apiKey === 're_new');
 }
 
 console.log(`\n${pass} passed, ${fail} failed\n`);

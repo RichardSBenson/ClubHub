@@ -102,6 +102,12 @@ console.log('\nSIGN OUT EVERYWHERE');
   const { rows:[acct] } = await pool.query(
     `select id from account where email=$1`, [DOUG_EMAIL]);
   await pool.query(`delete from login_attempt`);
+
+  // Start from nothing. Counting sessions is a claim about the whole account,
+  // and Doug may well have signed in during another suite — this one does not
+  // own him. Clearing first is what makes the count below mean anything.
+  await auth.signOutAll(acct.id);
+
   const tokens = [];
   for (let i = 0; i < 3; i++) {
     const { token } = await auth.requestLink(DOUG_EMAIL);

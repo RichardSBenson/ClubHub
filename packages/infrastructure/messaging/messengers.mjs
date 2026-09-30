@@ -183,14 +183,25 @@ export function messengerFrom(env = process.env) {
   if (!provider || provider === 'log') return new LogMessenger();
   if (provider === 'none') return new MemoryMessenger();
 
+  // Three things are the federation's, not the transport's: who the mail is
+  // from, the name shown beside that address, and the secret that proves we may
+  // send it. Which protocol carries the mail is an implementation detail
+  // underneath all three, so an operator who configured SMTP and later moved to
+  // an HTTP provider keeps their settings without renaming anything. The
+  // MESSENGER_ names are the ones to reach for in a fresh install; the SMTP_
+  // names keep working for anyone who arrived the other way round.
+  const from = env.MESSENGER_FROM ?? env.SMTP_FROM;
+  const name = env.MESSENGER_FROM_NAME ?? env.SMTP_FROM_NAME ?? null;
+  const secret = env.MESSENGER_API_KEY ?? env.SMTP_PASS ?? null;
+
   if (provider === 'smtp') {
     return new SmtpMessenger({
       host: env.SMTP_HOST,
       port: env.SMTP_PORT ?? 587,
       user: env.SMTP_USER ?? null,
-      pass: env.SMTP_PASS ?? null,
-      from: env.SMTP_FROM ?? env.MESSENGER_FROM,
-      name: env.SMTP_FROM_NAME ?? null,
+      pass: secret,
+      from,
+      name,
       // The same shape as PGSSL=insecure in pool.mjs, and the same warning:
       // a way out when a server's certificate cannot be verified, not
       // something to set and forget.
@@ -201,8 +212,8 @@ export function messengerFrom(env = process.env) {
 
   return new HttpMessenger({
     provider,
-    apiKey: env.MESSENGER_API_KEY,
-    from: env.MESSENGER_FROM,
+    apiKey: secret,
+    from,
     stream: env.MESSENGER_STREAM ?? null,
   });
 }
