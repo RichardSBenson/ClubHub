@@ -32,7 +32,7 @@
 
 import crypto from 'node:crypto';
 import { URL } from 'node:url';
-import { pool, orgs, people, rank, events, competition,
+import { pool, orgs, people, rank, events, competition, pages,
          Forbidden, NotFound, Invalid } from './data.mjs';
 import * as auth from './auth.mjs';
 import * as V from './views.mjs';
@@ -47,6 +47,11 @@ import { parseTable, planImport } from '../core/domain/roll-import.mjs';
 import { Competitor, Division, placeEntry, priceFor, consentNeeded,
          problemsWithConsent } from '../core/domain/competition.mjs';
 import { ageOn } from '../core/domain/people.mjs';
+import { documentFromForm, formFromDocument, applyOperation, looksEmpty }
+  from '../content/page-form.mjs';
+import { renderBlocks, excerpt } from '../content/blocks.mjs';
+import * as R from '../site/render.mjs';
+import { requestRebuild } from '../infrastructure/publishing/rebuild.mjs';
 
 const SESSION_COOKIE = 'honbu_session';
 const CSRF_COOKIE = 'honbu_csrf';
@@ -328,6 +333,257 @@ post('/o/:slug/members/new', async (ctx) => {
     }));
   }
 });
+
+// ---- the website ----------------------------------------------------------
+
+/**
+ * Who may put a page in front of the public.
+ *
+ * Writing and publishing are separate on purpose. A contributor is somebody
+ * trusted to write and correct; deciding what the organisation says publicly
+ * is the organisation's.
+ */
+const MAY_PUBLISH = ['owner', 'administrator'];
+
+const mayPublishAt = async (ctx, orgId) => {
+  const { authz } = await calendar();
+  return authz.hasRoleAt(ctx.me.accountId, orgId, MAY_PUBLISH);
+};
+
+/** A title becomes a web address when nobody typed one. */
+const slugify = (text) => String(text ?? '').toLowerCase().trim()
+  .replace(/['']/g, '')
+  .replace(/[^a-z0-9]+/g, '-')
+  .replace(/^-+|-+$/g, '')
+  .slice(0, 120);
+
+get('/o/:slug/pages', async (ctx) => {
+  const org = await organisationFor(ctx, { toWrite: true });
+  return ctx.send(200, V.pageList({
+    me: ctx.me, org, csrf: ctx.csrf,
+    pages: await pages.list(ctx.me.accountId, org.id),
+    canPublish: await mayPublishAt(ctx, org.id),
+    done: ctx.url.searchParams.get('done'),
+    error: ctx.url.searchParams.get('error'),
+    rebuild: ctx.url.searchParams.get('rebuild'),
+  }));
+});
+
+get('/o/:slug/pages/new', async (ctx) => {
+  const org = await organisationFor(ctx, { toWrite: true });
+  const doc = { blocks: [] };
+  return ctx.send(200, V.pageEditor({
+    me: ctx.me, org, csrf: ctx.csrf, blocks: doc.blocks,
+    values: { ...formFromDocument(doc) },
+    canPublish: await mayPublishAt(ctx, org.id),
+  }));
+});
+
+/**
+ * One handler for every button on the editor.
+ *
+ * Moving a block, removing one, adding one, saving, publishing — all of them
+ * post the whole form, because the page has no JavaScript to do it any other
+ * way. The structural operations re-render without touching the database;
+ * only save, publish and unpublish write.
+ */
+async function editorPost(ctx, { org, page = null }) {
+  const form = await ctx.form();
+  const op = String(form.op ?? 'save');
+  const canPublish = await mayPublishAt(ctx, org.id);
+
+  // Whatever is in the form right now, with the button applied to it.
+  const submitted = documentFromForm(form);
+  const structural = op.startsWith('up:') || op.startsWith('down:')
+    || op.startsWith('remove:') || op === 'add';
+  const doc = applyOperation(submitted,
+    op === 'add' ? `add:${form.addType}` : op);
+
+  const title = String(form.title ?? '').trim();
+  const slug = slugify(form.slug || title);
+
+  const render = (extra = {}) => ctx.send(extra.status ?? 200, V.pageEditor({
+    me: ctx.me, org, page, csrf: ctx.csrf, blocks: doc.blocks, canPublish,
+    values: { ...formFromDocument(doc), title, slug,
+              metaDescription: form.metaDescription ?? '' },
+    ...extra,
+  }));
+
+  // Rearranging is not saving. Somebody who moved a block and then changed
+  // their mind should be able to leave without having written anything.
+  if (structural) return render();
+
+  if (!title) return render({ status: 422, error: 'The page needs a title.' });
+  if (!slug) return render({ status: 422,
+    error: 'The page needs a web address. Give it a title with some letters '
+      + 'in it, or type one.' });
+
+  // Said before the save rather than after, so a half-written page comes back
+  // with everything still in it instead of being refused by the database.
+  if (looksEmpty(doc)) {
+    return render({ status: 422,
+      error: 'There is nothing on this page yet. Add something and type into '
+        + 'it before saving.' });
+  }
+
+  try {
+    const { page: saved, dropped } = await pages.save(ctx.me.accountId, {
+      pageId: page?.id ?? null,
+      organisationId: page ? null : org.id,
+      slug, title, body: doc,
+      metaTitle: null,
+      metaDescription: form.metaDescription?.trim() || null,
+      note: page ? null : 'Created',
+    });
+
+    if (op === 'publish' || op === 'unpublish') {
+      if (!canPublish) {
+        return render({ status: 403, page: saved,
+          error: 'Your changes are saved. Putting a page in front of the '
+            + 'public needs an owner or administrator.' });
+      }
+      if (op === 'publish') await pages.publish(ctx.me.accountId, saved.id);
+      else await pages.unpublish(ctx.me.accountId, saved.id);
+
+      // Saved first, rebuild asked for second, and the answer is passed on
+      // whatever it is. Reporting "published" while the site is unchanged is
+      // worse than not publishing at all.
+      const rebuild = await requestRebuild({
+        reason: `${op} ${org.slug}/${slug}` });
+
+      return ctx.redirect(`/o/${org.slug}/pages?done=`
+        + encodeURIComponent(op === 'publish'
+          ? `"${saved.title}" is published.` : `"${saved.title}" is off the site.`)
+        + '&rebuild=' + encodeURIComponent(rebuild.detail));
+    }
+
+    if (dropped.length) {
+      return render({ page: saved, dropped,
+        done: 'Saved as a draft.' });
+    }
+    return ctx.redirect(`/o/${org.slug}/pages/${saved.id}?done=`
+      + encodeURIComponent('Saved as a draft.'));
+  } catch (e) {
+    return render({ status: e.status ?? 422, error: e.message });
+  }
+}
+
+post('/o/:slug/pages/new', async (ctx) => {
+  const org = await organisationFor(ctx, { toWrite: true });
+  return editorPost(ctx, { org });
+});
+
+get('/o/:slug/pages/:pageId', async (ctx) => {
+  const org = await organisationFor(ctx, { toWrite: true });
+  const pg = await pages.byId(ctx.me.accountId, ctx.params.pageId);
+  const doc = pg.body ?? { blocks: [] };
+
+  return ctx.send(200, V.pageEditor({
+    me: ctx.me, org, page: pg, csrf: ctx.csrf, blocks: doc.blocks,
+    values: { ...formFromDocument(doc), title: pg.title, slug: pg.slug,
+              metaDescription: pg.meta_description ?? '' },
+    revisions: await pages.revisions(ctx.me.accountId, pg.id),
+    canPublish: await mayPublishAt(ctx, org.id),
+    done: ctx.url.searchParams.get('done'),
+  }));
+});
+
+post('/o/:slug/pages/:pageId', async (ctx) => {
+  const org = await organisationFor(ctx, { toWrite: true });
+  const pg = await pages.byId(ctx.me.accountId, ctx.params.pageId);
+  return editorPost(ctx, { org, page: pg });
+});
+
+post('/o/:slug/pages/:pageId/restore', async (ctx) => {
+  const org = await organisationFor(ctx, { toWrite: true });
+  const form = await ctx.form();
+  const back = `/o/${org.slug}/pages/${ctx.params.pageId}`;
+  try {
+    await pages.restore(ctx.me.accountId, form.revisionId);
+    return ctx.redirect(`${back}?done=`
+      + encodeURIComponent('Put back to that version. It is a draft until you '
+        + 'publish it again.'));
+  } catch (e) {
+    return ctx.redirect(`${back}?done=${encodeURIComponent(e.message)}`);
+  }
+});
+
+/**
+ * The page as a visitor will see it.
+ *
+ * Rendered by the SAME function the published site uses, with the same blocks,
+ * the same layout, the same live data pulled in. A preview that renders a
+ * second way is a preview of something nobody will ever see, and it drifts —
+ * the only question is when somebody notices.
+ *
+ * This is also what makes a static site bearable to edit: the published page
+ * takes a minute to rebuild, and nobody waits on it, because this is exact.
+ */
+get('/o/:slug/pages/:pageId/preview', async (ctx) => {
+  const org = await organisationFor(ctx, { toWrite: true });
+  const pg = await pages.byId(ctx.me.accountId, ctx.params.pageId);
+
+  const { repositories } = await import('../infrastructure/factory.mjs');
+  const { site } = await repositories();
+
+  // The federation whose site this page belongs to, and its own words for
+  // things — a taekwondo club's preview must not say "dojo".
+  const root = await one_(`
+    select o.* from organisation o join organisation me on me.path <@ o.path
+    where me.id = $1 and o.parent_id is null`, [org.id]);
+  const federation = root ?? org;
+
+  const [brand, dojos, evs] = await Promise.all([
+    site.brand(federation.id),
+    site.dojos(federation.slug),
+    site.eventsFor(federation.slug),
+  ]);
+
+  const origin = process.env.VERCEL_PROJECT_PRODUCTION_URL
+    ? `https://${process.env.VERCEL_PROJECT_PRODUCTION_URL}`
+    : `${ctx.secure ? 'https' : 'http'}://${ctx.req.headers.host}`;
+
+  const html = renderBlocks(pg.body, { dojos, events: evs }, { origin });
+
+  const body = R.authoredPage({
+    page: pg, html, federation,
+    origin, base: '',
+    fonts: brand?.fonts ?? { display: 'Bitter', body: 'Source Sans 3' },
+    nav: [],
+    vocabulary: await orgs.vocabulary(org.id),
+    description: excerpt(pg.body),
+  });
+
+  // The preview is the real page, so it must never be mistaken for the real
+  // page by anything that indexes or caches.
+  ctx.res.writeHead(200, {
+    'content-type': 'text/html; charset=utf-8',
+    'x-robots-tag': 'noindex, nofollow',
+    'cache-control': 'no-store',
+    'x-frame-options': 'SAMEORIGIN',
+  });
+  return ctx.res.end(previewBanner(org, pg) + body);
+});
+
+/**
+ * A strip across the top saying this is a preview.
+ *
+ * Added after the page rather than inside the renderer, because the renderer
+ * must produce exactly what gets published and nothing else. Somebody looking
+ * at a draft that is indistinguishable from the live site will eventually
+ * tell their club a page is up when it is not.
+ */
+const previewBanner = (org, pg) => `
+<div style="position:sticky;top:0;z-index:99;background:#161617;color:#F5F5F5;
+  font:14px/1.5 system-ui,sans-serif;padding:10px 18px;display:flex;
+  gap:16px;align-items:center;flex-wrap:wrap">
+  <strong>Preview</strong>
+  <span style="color:#BDBDBF">${pg.status === 'published'
+    ? 'This page is live. You are seeing your unsaved draft of it.'
+    : 'This page is a draft. Nobody else can see it.'}</span>
+  <a href="/o/${org.slug}/pages/${pg.id}"
+    style="margin-left:auto;color:#F0CE41">Back to editing</a>
+</div>`;
 
 // ---- competition ----------------------------------------------------------
 
@@ -815,7 +1071,8 @@ async function calendar() {
  * the same list the use case uses, not a copy of it.
  */
 async function organisationFor(ctx, { toSchedule = false,
-                                      toRegister = false } = {}) {
+                                      toRegister = false,
+                                      toWrite = false } = {}) {
   ctx.requireActor();
   const org = await orgs.bySlug(ctx.params.slug);
   if (!org) throw new NotFound('Organisation');
@@ -828,6 +1085,12 @@ async function organisationFor(ctx, { toSchedule = false,
       `You can see ${org.name}'s calendar but not change it. `
       + 'Adding and editing events needs an owner, administrator or '
       + 'registrar role there.');
+  }
+
+  if (toWrite && !await mayWriteAt(ctx, org.id)) {
+    throw new Forbidden(
+      `You do not have permission to write ${org.name}'s website. `
+      + 'That needs an owner, administrator or contributor role there.');
   }
 
   if (toRegister && !await mayRegisterAt(ctx, org.id)) {
@@ -849,6 +1112,14 @@ async function organisationFor(ctx, { toSchedule = false,
  * an unplaced competitor, with no error anywhere. Two helpers this alike need
  * the same signature.
  */
+/** Who may write the website. Publishing is a separate question. */
+const MAY_WRITE = ['owner', 'administrator', 'contributor'];
+
+async function mayWriteAt(ctx, orgId) {
+  const { authz } = await calendar();
+  return authz.hasRoleAt(ctx.me.accountId, orgId, MAY_WRITE);
+}
+
 async function mayScheduleAt(ctx, orgId) {
   const { authz } = await calendar();
   return authz.hasRoleAt(ctx.me.accountId, orgId, MAY_SCHEDULE);

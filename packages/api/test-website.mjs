@@ -1,0 +1,355 @@
+/**
+ * Can somebody who runs a dojo write a page and put it on their website?
+ *
+ * Driven the way a browser with JavaScript switched off drives it: every
+ * button is a form post of the whole page, and nothing here runs a script.
+ * That is the actual constraint — these get used in halls with bad reception
+ * — so a test that poked an API would prove the wrong thing.
+ */
+
+import './reset.mjs';
+import http from 'node:http';
+import handler from './server.mjs';
+import { pool } from './data.mjs';
+import * as auth from './auth.mjs';
+
+process.env.HONBU_STORE = 'postgres';
+
+const server = http.createServer(handler);
+await new Promise((r) => server.listen(0, r));
+const base = `http://localhost:${server.address().port}`;
+
+let pass = 0, fail = 0;
+const ok = (n, c, d = '') => c ? (pass++, console.log(`  ✓ ${n}`))
+                               : (fail++, console.log(`  ✗ ${n}  ${d}`));
+
+const jar = {};
+async function req(path, { method = 'GET', form } = {}) {
+  const headers = {};
+  const c = Object.entries(jar).map(([k, v]) => `${k}=${v}`).join('; ');
+  if (c) headers.cookie = c;
+  if (form) headers['content-type'] = 'application/x-www-form-urlencoded';
+  const res = await fetch(base + path, {
+    method, headers, redirect: 'manual',
+    body: form ? new URLSearchParams({ _csrf: jar.honbu_csrf ?? '', ...form }).toString()
+               : undefined,
+  });
+  for (const sc of res.headers.getSetCookie?.() ?? []) {
+    const [k, v] = sc.split(';')[0].split('=');
+    if (v === '') delete jar[k]; else jar[k] = v;
+  }
+  return { status: res.status, location: res.headers.get('location'),
+           headers: res.headers, html: await res.text() };
+}
+
+const one = async (sql, a = []) => (await pool.query(sql, a)).rows[0] ?? null;
+const count = async (sql, a = []) => (await pool.query(sql, a)).rows[0].n;
+const said = (loc) => decodeURIComponent(
+  new URL(loc ?? '/', base).searchParams.get('done') ?? '');
+
+/** Everything the editor form would send, as a browser sends it. */
+const PAGE = {
+  title: 'About our dojo', slug: 'about',
+  metaDescription: 'Kyokushin karate in Whanganui since 1965.',
+  blockCount: '3',
+  b0_type: 'heading', b0_text: 'Who we are', b0_level: '2',
+  b1_type: 'paragraph',
+  b1_text: 'Founded by **Hanshi Doug** in 1965. See [our classes](/classes).',
+  b2_type: 'list', b2_items: 'Tuesdays 6pm\nThursdays 6pm',
+};
+
+// ---------------------------------------------------------------------------
+
+console.log('\nTHE WEBSITE IS BEHIND SIGN-IN');
+{
+  ok('the page list redirects when signed out',
+    (await req('/o/whanganui/pages')).status === 302);
+  ok('so does the editor', (await req('/o/whanganui/pages/new')).status === 302);
+}
+
+console.log('\nSIGNED IN');
+{
+  await req('/signin');
+  const { token } = await auth.requestLink('doug@example.nz');
+  ok('the session is live', (await req(`/signin/${token}`)).status === 302);
+
+  const list = await req('/o/whanganui/pages');
+  ok('the website page opens', list.status === 200);
+  ok('with somewhere to start', list.html.includes('/pages/new'));
+}
+
+console.log('\nTHE EDITOR NEEDS NO JAVASCRIPT AT ALL');
+{
+  const f = await req('/o/whanganui/pages/new');
+  ok('it renders', f.status === 200);
+  ok('there is not a single script tag',
+    !/<script/i.test(f.html), 'a script tag is present');
+  ok('nor an inline event handler',
+    !/\son(click|change|input|submit)=/i.test(f.html), 'inline handler present');
+  ok('every block type is on the menu',
+    f.html.includes('value="paragraph"') && f.html.includes('value="dojoList"'));
+  ok('and the shorthand is explained rather than being a secret',
+    f.html.includes('**bold**'), 'no shorthand help');
+}
+
+console.log('\nWRITING A PAGE');
+{
+  const r = await req('/o/whanganui/pages/new',
+    { method: 'POST', form: { ...PAGE, op: 'save' } });
+  ok('it saves and goes to the editor',
+    r.status === 302 && /\/pages\/[0-9a-f-]{36}/.test(r.location ?? ''),
+    r.location);
+  ok('saying what happened', said(r.location).includes('draft'), said(r.location));
+
+  const pg = await one(`select p.* from page p join organisation o
+    on o.id = p.organisation_id where o.slug='whanganui' and p.slug='about'`);
+  ok('the row is there', !!pg);
+  ok('as a draft, not live', pg?.status === 'draft');
+  ok('with its title', pg?.title === 'About our dojo');
+
+  ok('the blocks are stored as structure, never as HTML',
+    Array.isArray(pg.body.blocks) && pg.body.blocks.length === 3,
+    JSON.stringify(pg.body).slice(0, 120));
+  ok('the bold is a mark on a run, not a tag',
+    pg.body.blocks[1].text.some((r) => r.marks?.includes('strong')),
+    JSON.stringify(pg.body.blocks[1].text));
+  ok('the link carries its address',
+    pg.body.blocks[1].text.some((r) => r.href === '/classes'));
+  ok('and both list items came through',
+    pg.body.blocks[2].items.length === 2);
+
+  ok('the first save left a revision',
+    await count(`select count(*)::int n from page_revision where page_id=$1`,
+      [pg.id]) === 1);
+
+  globalThis.__id = pg.id;
+}
+
+console.log('\nOPENING IT AGAIN SHOWS WHAT WAS TYPED');
+{
+  const r = await req(`/o/whanganui/pages/${globalThis.__id}`);
+  ok('the editor fills in', r.status === 200);
+  ok('the title', r.html.includes('value="About our dojo"'));
+  ok('the address', r.html.includes('value="about"'));
+  ok('and the shorthand comes back exactly as it was typed, not as HTML',
+    r.html.includes('Founded by **Hanshi Doug** in 1965.')
+    && r.html.includes('[our classes](/classes)'),
+    'shorthand did not round-trip');
+  ok('the list is still one item per line',
+    r.html.includes('Tuesdays 6pm\nThursdays 6pm'), 'list did not round-trip');
+}
+
+console.log('\nTHE BUTTONS THAT MOVE THINGS DO NOT SAVE ANYTHING');
+{
+  const before = await count(
+    `select count(*)::int n from page_revision where page_id=$1`,
+    [globalThis.__id]);
+
+  const r = await req(`/o/whanganui/pages/${globalThis.__id}`,
+    { method: 'POST', form: { ...PAGE, op: 'down:0' } });
+  ok('the editor comes straight back', r.status === 200);
+  ok('with the blocks in the new order',
+    r.html.indexOf('Founded by') < r.html.indexOf('Who we are'),
+    'order unchanged in the form');
+
+  ok('nothing was written', await count(
+    `select count(*)::int n from page_revision where page_id=$1`,
+    [globalThis.__id]) === before);
+
+  const stored = await one('select body from page where id=$1', [globalThis.__id]);
+  ok('and the stored page is untouched',
+    stored.body.blocks[0].type === 'heading', stored.body.blocks[0].type);
+}
+
+console.log('\nADDING AND REMOVING BLOCKS');
+{
+  const added = await req(`/o/whanganui/pages/${globalThis.__id}`,
+    { method: 'POST', form: { ...PAGE, op: 'add', addType: 'dojoList' } });
+  ok('a live clubs block is added to the form',
+    added.html.includes('b3_type" value="dojoList"'), 'not added');
+  ok('with four blocks now', added.html.includes('name="blockCount" value="4"'));
+
+  const removed = await req(`/o/whanganui/pages/${globalThis.__id}`,
+    { method: 'POST', form: { ...PAGE, op: 'remove:2' } });
+  ok('removing leaves two', removed.html.includes('name="blockCount" value="2"'));
+  ok('and still nothing is saved until Save is pressed',
+    (await one('select body from page where id=$1', [globalThis.__id]))
+      .body.blocks.length === 3);
+}
+
+console.log('\nWHAT THE EDITOR WILL NOT SAVE');
+{
+  const noTitle = await req('/o/whanganui/pages/new',
+    { method: 'POST', form: { ...PAGE, title: '', slug: '', op: 'save' } });
+  ok('a page with no title is refused', noTitle.status === 422);
+  ok('and says so', noTitle.html.includes('needs a title'));
+
+  const empty = await req('/o/whanganui/pages/new', { method: 'POST', form: {
+    title: 'Nothing here', blockCount: '1',
+    b0_type: 'heading', b0_text: '', b0_level: '2', op: 'save' } });
+  ok('a page with nothing typed on it is refused', empty.status === 422);
+  ok('before the database refuses it, so the form comes back filled in',
+    empty.html.includes('value="Nothing here"'), 'title lost');
+
+  const clash = await req('/o/whanganui/pages/new',
+    { method: 'POST', form: { ...PAGE, op: 'save' } });
+  ok('two pages cannot share an address', clash.status === 422);
+  ok('and it says which one', clash.html.includes('already has a page at'),
+    'no clash message');
+}
+
+console.log('\nPREVIEW IS THE REAL PAGE, RENDERED BY THE REAL RENDERER');
+{
+  const r = await req(`/o/whanganui/pages/${globalThis.__id}/preview`);
+  ok('it renders', r.status === 200);
+  ok('as a whole page, not a fragment', r.html.includes('<!DOCTYPE html>'));
+
+  ok('the heading is there', r.html.includes('Who we are'));
+  ok('the bold rendered as emphasis, not as asterisks',
+    r.html.includes('<strong>Hanshi Doug</strong>') && !r.html.includes('**Hanshi'),
+    'shorthand not rendered');
+  ok('the link is a link', r.html.includes('href="/classes"'));
+  ok('and the list is a list', r.html.includes('Tuesdays 6pm'));
+
+  ok('it says plainly that it is a preview', r.html.includes('Preview'));
+  ok('and that this one is not live yet',
+    r.html.includes('draft'), 'does not say it is a draft');
+
+  ok('search engines are told to stay away',
+    r.headers.get('x-robots-tag')?.includes('noindex'),
+    r.headers.get('x-robots-tag'));
+  ok('and nothing caches it', r.headers.get('cache-control') === 'no-store');
+}
+
+console.log('\nPUBLISHING');
+{
+  const r = await req(`/o/whanganui/pages/${globalThis.__id}`,
+    { method: 'POST', form: { ...PAGE, op: 'publish' } });
+  ok('it redirects to the website list', r.status === 302, String(r.status));
+  ok('saying the page is published',
+    said(r.location).includes('published'), said(r.location));
+
+  const pg = await one('select * from page where id=$1', [globalThis.__id]);
+  ok('the page is live', pg.status === 'published');
+  ok('and stamped with when', !!pg.published_at);
+
+  // No rebuild hook is set here, and the one thing this must never do is
+  // claim the site changed when it did not.
+  const rebuild = decodeURIComponent(
+    new URL(r.location, base).searchParams.get('rebuild') ?? '');
+  ok('it does NOT claim the live site updated',
+    !/is rebuilding/.test(rebuild), rebuild);
+  ok('it says the change is saved but not yet visible',
+    rebuild.includes('will not show it'), rebuild);
+  ok('and names what would fix it', rebuild.includes('REBUILD_HOOK_URL'), rebuild);
+
+  const list = await req('/o/whanganui/pages');
+  ok('the list shows it as live', list.html.includes('Live'));
+}
+
+console.log('\nTAKING IT DOWN KEEPS IT');
+{
+  const r = await req(`/o/whanganui/pages/${globalThis.__id}`,
+    { method: 'POST', form: { ...PAGE, op: 'unpublish' } });
+  ok('it comes off', r.status === 302 && said(r.location).includes('off the site'),
+    said(r.location));
+
+  const pg = await one('select * from page where id=$1', [globalThis.__id]);
+  ok('back to a draft, not deleted', pg.status === 'draft');
+  ok('with the words still there', pg.body.blocks.length === 3);
+  ok('and its address kept', pg.slug === 'about');
+}
+
+console.log('\nEVERY SAVE KEEPS A VERSION, AND ANY OF THEM CAN COME BACK');
+{
+  await req(`/o/whanganui/pages/${globalThis.__id}`, { method: 'POST',
+    form: { ...PAGE, title: 'About us', b0_text: 'Changed', op: 'save' } });
+
+  const editor = await req(`/o/whanganui/pages/${globalThis.__id}`);
+  ok('earlier versions are listed', editor.html.includes('Earlier versions'));
+  ok('with who saved them', editor.html.includes('Doug Holloway'));
+
+  const revisions = (await pool.query(
+    `select id, title from page_revision where page_id=$1 order by saved_at`,
+    [globalThis.__id])).rows;
+  ok('there is more than one', revisions.length >= 2, String(revisions.length));
+
+  const r = await req(`/o/whanganui/pages/${globalThis.__id}/restore`,
+    { method: 'POST', form: { revisionId: revisions[0].id } });
+  ok('an older one can be restored', r.status === 302);
+
+  const pg = await one('select * from page where id=$1', [globalThis.__id]);
+  ok('the page is as it was', pg.title === 'About our dojo', pg.title);
+  ok('and it is a draft again until somebody publishes it',
+    pg.status === 'draft');
+}
+
+console.log('\nRENAMING A PAGE RATHER THAN REWRITING IT');
+{
+  const r = await req(`/o/whanganui/pages/${globalThis.__id}`, { method: 'POST',
+    form: { ...PAGE, slug: 'about-us', op: 'save' } });
+  ok('it saves', r.status === 302, String(r.status));
+  const pg = await one('select * from page where id=$1', [globalThis.__id]);
+  ok('the address changed', pg.slug === 'about-us', pg.slug);
+  ok('and the revisions came with it', await count(
+    `select count(*)::int n from page_revision where page_id=$1`,
+    [globalThis.__id]) >= 3);
+}
+
+console.log('\nNOTHING PASTED IN CAN BECOME MARKUP ON THE LIVE SITE');
+{
+  const r = await req('/o/whanganui/pages/new', { method: 'POST', form: {
+    title: 'Pasted', slug: 'pasted', blockCount: '2',
+    b0_type: 'heading', b0_text: '<img src=x onerror=alert(1)>', b0_level: '2',
+    b1_type: 'paragraph',
+    b1_text: 'Click [here](javascript:alert(1)) <script>alert(1)</script>',
+    op: 'save' } });
+  ok('it saves without complaint', r.status === 302, String(r.status));
+
+  const pg = await one(`select p.* from page p join organisation o
+    on o.id=p.organisation_id where o.slug='whanganui' and p.slug='pasted'`);
+  const preview = await req(`/o/whanganui/pages/${pg.id}/preview`);
+
+  ok('the image tag is escaped, not rendered',
+    !preview.html.includes('<img src=x') && preview.html.includes('&lt;img'),
+    'img not escaped');
+  ok('the script tag too',
+    !preview.html.includes('<script>alert'), 'script rendered');
+  ok('and the javascript: address never became a link',
+    !preview.html.includes('href="javascript:'), 'javascript href present');
+}
+
+console.log('\nWRITING SOMEBODY ELSE\'S WEBSITE');
+{
+  const saved = { ...jar };
+  for (const k of Object.keys(jar)) delete jar[k];
+  await req('/signin');
+  const { token } = await auth.requestLink('tane@example.nz');
+  await req(`/signin/${token}`);
+
+  ok('another club\'s website is refused',
+    (await req('/o/whanganui/pages')).status === 403);
+  ok('so is its editor',
+    (await req(`/o/whanganui/pages/${globalThis.__id}`)).status === 403);
+  ok('and so is its preview — a draft is not public',
+    (await req(`/o/whanganui/pages/${globalThis.__id}/preview`)).status === 403);
+
+  const before = await count(
+    `select count(*)::int n from page_revision where page_id=$1`,
+    [globalThis.__id]);
+  const p = await req(`/o/whanganui/pages/${globalThis.__id}`,
+    { method: 'POST', form: { ...PAGE, title: 'Snuck in', op: 'save' } });
+  ok('posting to it writes nothing', p.status === 403 && await count(
+    `select count(*)::int n from page_revision where page_id=$1`,
+    [globalThis.__id]) === before, String(p.status));
+
+  for (const k of Object.keys(jar)) delete jar[k];
+  Object.assign(jar, saved);
+}
+
+// ---------------------------------------------------------------------------
+
+console.log(`\n${pass} passed, ${fail} failed\n`);
+server.close();
+await pool.end();
+process.exit(fail ? 1 : 0);

@@ -1106,6 +1106,13 @@ export const billing = {
 
 import { validate, excerpt, toText } from '../content/blocks.mjs';
 
+/**
+ * Writing a page and publishing one are different jobs. A contributor is
+ * somebody trusted to write; putting words in front of the public is the
+ * organisation's decision.
+ */
+const WRITE_PAGES = ['owner', 'administrator', 'contributor'];
+
 export const pages = {
   async published(orgId, slug) {
     return one(`select * from page
@@ -1115,6 +1122,27 @@ export const pages = {
   async listPublished(orgId) {
     return q(`select slug, title, meta_description, published_at from page
       where organisation_id=$1 and status='published' order by title`, [orgId]);
+  },
+
+  /** Every page an editor may work on, drafts included. */
+  async list(actor, orgId) {
+    await assertRole(actor, orgId, WRITE_PAGES);
+    return q(`
+      select p.id, p.slug, p.title, p.status, p.published_at, p.updated_at,
+             per.first_name || ' ' || per.last_name as updated_by,
+             (select count(*)::int from page_revision r where r.page_id = p.id)
+               as revisions
+      from page p
+      left join person per on per.id = p.updated_by
+      where p.organisation_id = $1
+      order by p.status, p.title`, [orgId]);
+  },
+
+  async byId(actor, pageId) {
+    const page = await one('select * from page where id = $1', [pageId]);
+    if (!page) throw new NotFound('Page');
+    await assertRole(actor, page.organisation_id, WRITE_PAGES);
+    return page;
   },
 
   /**
@@ -1127,7 +1155,7 @@ export const pages = {
     const orgId = organisationId ??
       (await one('select organisation_id from page where id=$1', [pageId]))?.organisation_id;
     if (!orgId) throw new NotFound('Page');
-    await assertRole(actor, orgId, ['owner', 'administrator', 'contributor']);
+    await assertRole(actor, orgId, WRITE_PAGES);
 
     const { doc, dropped } = validate(body);
     if (!toText(doc).trim()) throw new Invalid('The page has no content');
@@ -1138,12 +1166,16 @@ export const pages = {
       await client.query('begin');
       let page;
       if (pageId) {
+        // The address can change. A page whose web address is fixed at
+        // creation is one somebody has to delete and rewrite to rename, and
+        // they will — losing its revisions with it.
         ({ rows: [page] } = await client.query(`
           update page set title=$2, body=$3, meta_title=$4, meta_description=$5,
+                          slug=coalesce($7, slug),
                           updated_by=$6, updated_at=now()
           where id=$1 returning *`,
           [pageId, title, doc, metaTitle, metaDescription ?? excerpt(doc),
-           person?.person_id]));
+           person?.person_id, slug || null]));
       } else {
         ({ rows: [page] } = await client.query(`
           insert into page (organisation_id, slug, title, body, meta_title,
@@ -1162,11 +1194,22 @@ export const pages = {
 
       await client.query('commit');
       return { page, dropped };
-    } catch (e) { await client.query('rollback'); throw e; }
+    } catch (e) {
+      await client.query('rollback');
+      if (e.code === '23505')
+        throw new Invalid(`This organisation already has a page at "${slug}".`);
+      throw e;
+    }
     finally { client.release(); }
   },
 
-  /** Publishing is a separate permission from writing. */
+  /**
+   * Publishing is a separate permission from writing.
+   *
+   * A contributor can write and correct; putting something in front of the
+   * public is the organisation's decision, not the author's. Which is also
+   * why unpublishing is here rather than a status field on the form.
+   */
   async publish(actor, pageId) {
     const page = await one('select * from page where id=$1', [pageId]);
     if (!page) throw new NotFound('Page');
@@ -1175,10 +1218,24 @@ export const pages = {
       where id=$1 returning *`, [pageId]);
   },
 
+  /**
+   * Take it down without losing it.
+   *
+   * Back to a draft, not deleted: the words, the revisions and the address
+   * all stay, so a page pulled for a correction can go back up as it was.
+   */
+  async unpublish(actor, pageId) {
+    const page = await one('select * from page where id=$1', [pageId]);
+    if (!page) throw new NotFound('Page');
+    await assertRole(actor, page.organisation_id, MANAGE);
+    return one(`update page set status='draft', updated_at=now()
+      where id=$1 returning *`, [pageId]);
+  },
+
   async revisions(actor, pageId) {
     const page = await one('select organisation_id from page where id=$1', [pageId]);
     if (!page) throw new NotFound('Page');
-    await assertRole(actor, page.organisation_id, ['owner','administrator','contributor']);
+    await assertRole(actor, page.organisation_id, WRITE_PAGES);
     return q(`select r.id, r.title, r.saved_at, r.note,
                      p.first_name || ' ' || p.last_name as saved_by
               from page_revision r

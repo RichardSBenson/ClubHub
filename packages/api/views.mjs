@@ -1,5 +1,8 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import { BLOCKS } from '../content/blocks.mjs';
+import { BLOCK_MENU } from '../content/page-form.mjs';
+import { SHORTHAND_HELP } from '../content/marks.mjs';
 /**
  * HONBU — admin views
  *
@@ -161,7 +164,8 @@ export const dashboard = ({ me, csrf, orgs, vocabulary = {} }) => {
     <h3>${esc(o.name)}</h3>
     <p>${esc(o.type)} · <a href="/o/${esc(o.slug)}/roster">Members</a>
        · <a href="/o/${esc(o.slug)}/events">Events</a>
-       · <a href="/o/${esc(o.slug)}/grading">Grading</a></p>
+       · <a href="/o/${esc(o.slug)}/grading">Grading</a>
+       · <a href="/o/${esc(o.slug)}/pages">Website</a></p>
   </div>`).join('')}
 
   <h2>${esc(V.clubPlural)}</h2>
@@ -177,7 +181,8 @@ export const roster = ({ me, csrf, org, roster, canRegister = false,
   <h1>${esc(org.name)}</h1>
   <p class="sub">${roster.length} on the roll ·
     <a href="/o/${esc(org.slug)}/grading">Run a grading</a> ·
-    <a href="/o/${esc(org.slug)}/events">Events</a></p>
+    <a href="/o/${esc(org.slug)}/events">Events</a> ·
+    <a href="/o/${esc(org.slug)}/pages">Website</a></p>
 
   ${done ? `<div class="good">${esc(done)}</div>` : ''}
   ${canRegister ? `<p class="actions" style="margin:0 0 20px">
@@ -1278,6 +1283,235 @@ export const entryList = ({ me, csrf, org, event, entries = [],
 
   ${entries.length ? '' : `<div class="note">Nobody has entered yet.</div>`}` });
 };
+
+// ---------------------------------------------------------------------------
+// the website
+// ---------------------------------------------------------------------------
+
+/** Every page this organisation has, drafts and all. */
+export const pageList = ({ me, csrf, org, pages = [], canPublish = false,
+                           rebuild = null, done, error }) => page({
+  title: `Website — ${org.name}`, me, csrf, body: `
+  <h1>Website</h1>
+  <p class="sub">${esc(org.name)} ·
+    <a href="/o/${esc(org.slug)}/roster">Back to the roll</a></p>
+
+  ${done ? `<div class="good">${esc(done)}</div>` : ''}
+  ${error ? `<div class="bad">${esc(error)}</div>` : ''}
+  ${rebuild ? `<div class="note">${esc(rebuild)}</div>` : ''}
+
+  <p><a class="btn" href="/o/${esc(org.slug)}/pages/new">Write a new page</a></p>
+
+  ${pages.length ? `<table>
+    <thead><tr><th>Page</th><th class="hide-sm">Address</th><th>Status</th>
+      <th class="hide-sm">Last changed</th><th></th></tr></thead>
+    <tbody>${pages.map((p) => `<tr${p.status === 'draft' ? ' class="draft"' : ''}>
+      <td><strong>${esc(p.title)}</strong>
+        ${p.revisions > 1 ? `<div class="muted">${p.revisions} versions</div>` : ''}</td>
+      <td class="hide-sm"><code>/${esc(p.slug)}</code></td>
+      <td>${p.status === 'published'
+        ? '<span class="tag ok">Live</span>'
+        : '<span class="tag no">Draft</span>'}</td>
+      <td class="hide-sm muted">${p.updated_at
+        ? esc(new Date(p.updated_at).toISOString().slice(0, 10)) : ''}
+        ${p.updated_by ? `<div>${esc(p.updated_by)}</div>` : ''}</td>
+      <td>
+        <a class="btn quiet" href="/o/${esc(org.slug)}/pages/${esc(p.id)}">Edit</a>
+        <a class="btn quiet" href="/o/${esc(org.slug)}/pages/${esc(p.id)}/preview">View</a>
+      </td>
+    </tr>`).join('')}</tbody></table>`
+    : `<div class="note">No pages yet. The parts of the site that come from the
+        register — ${esc(VOCABULARY.clubPlural.toLowerCase())}, events, news —
+        are there already; these are the pages somebody writes.</div>`}
+
+  ${canPublish ? '' : `<p class="muted">You can write and change pages here.
+    Putting one in front of the public needs an owner or administrator.</p>`}` });
+
+const FIELD_LABELS_PAGE = {
+  text: 'Text', level: 'Heading level', items: 'One per line',
+  ordered: 'Numbered', attribution: 'Who said it', assetId: 'Image reference',
+  caption: 'Caption', alt: 'Describe the image for somebody who cannot see it',
+  tone: 'Tone', provider: 'Where the video is', id: 'Video reference',
+  heading: 'Heading', kind: 'Only this kind', limit: 'How many at most',
+  award: 'Which award',
+};
+
+const BLOCK_NAMES = Object.fromEntries(BLOCK_MENU);
+
+/**
+ * The page editor.
+ *
+ * No drag and drop, no editing surface, no script of any kind. Every block is
+ * a fieldset and every structural change is a button that submits the form —
+ * because these get used in halls with bad reception, and an editor that needs
+ * a script to load is an editor that does not work where the people using it
+ * are. It also means every change leaves a revision.
+ */
+export const pageEditor = ({ me, csrf, org, page: pg, values = {},
+                             blocks = [], dropped = [], revisions = [],
+                             canPublish = false, done, error, warning }) => {
+  const isNew = !pg;
+  const action = isNew
+    ? `/o/${org.slug}/pages/new`
+    : `/o/${org.slug}/pages/${pg.id}`;
+
+  return page({
+    title: isNew ? `New page — ${org.name}` : `${pg.title} — ${org.name}`,
+    me, csrf, body: `
+  <h1>${isNew ? 'Write a page' : esc(pg.title)}</h1>
+  <p class="sub">${esc(org.name)} ·
+    <a href="/o/${esc(org.slug)}/pages">Back to the website</a>
+    ${isNew ? '' : ` · ${pg.status === 'published'
+      ? '<span class="tag ok">Live</span>' : '<span class="tag no">Draft</span>'}
+      · <a href="/o/${esc(org.slug)}/pages/${esc(pg.id)}/preview">See it as a
+        visitor would</a>`}</p>
+
+  ${done ? `<div class="good">${esc(done)}</div>` : ''}
+  ${error ? `<div class="bad">${esc(error)}</div>` : ''}
+  ${warning ? `<div class="note">${esc(warning)}</div>` : ''}
+  ${dropped.length ? `<div class="note"><strong>Some of that could not be
+    kept.</strong> ${dropped.map(esc).join('; ')}</div>` : ''}
+
+  <form method="post" action="${esc(action)}">
+    <input type="hidden" name="_csrf" value="${esc(csrf ?? '')}">
+    <input type="hidden" name="blockCount" value="${blocks.length}">
+
+    <fieldset>
+      <legend>The page itself</legend>
+      <div class="row">
+        <div>
+          <label for="title">Title</label>
+          <input id="title" name="title" required maxlength="200"
+            value="${esc(values.title ?? '')}">
+        </div>
+        <div>
+          <label for="slug">Web address
+            <span class="hint">It will live at /${esc(values.slug ?? '…')}</span></label>
+          <input id="slug" name="slug" maxlength="120"
+            pattern="[a-z0-9]+(-[a-z0-9]+)*" value="${esc(values.slug ?? '')}">
+        </div>
+      </div>
+      <label for="metaDescription">What search engines show
+        <span class="hint">One sentence. Left blank, the first words of the
+          page are used.</span></label>
+      <input id="metaDescription" name="metaDescription" maxlength="300"
+        value="${esc(values.metaDescription ?? '')}" style="max-width:560px">
+    </fieldset>
+
+    <h2>What is on it</h2>
+    <p class="muted">${esc(SHORTHAND_HELP)} — anywhere you can type a sentence.</p>
+
+    ${blocks.map((b, i) => blockFieldset(b, i, values)).join('')}
+
+    ${blocks.length ? '' : `<div class="note">Nothing on this page yet.
+      Add something below.</div>`}
+
+    <fieldset>
+      <legend>Add something</legend>
+      <div class="row">
+        <div>
+          <select name="addType" style="max-width:280px">
+            ${BLOCK_MENU.map(([t, label]) => option(t, label, 'paragraph')).join('')}
+          </select>
+        </div>
+        <div>
+          <button class="btn quiet" type="submit" name="op" value="add">
+            Add it to the page</button>
+        </div>
+      </div>
+      <p class="hint">The three marked "live" fill themselves in from the
+        register — add the clubs block once and it stays right as clubs come
+        and go.</p>
+    </fieldset>
+
+    <div class="actions">
+      <button class="btn" type="submit" name="op" value="save">
+        ${isNew ? 'Create this page' : 'Save changes'}</button>
+      ${isNew || !canPublish ? '' : (pg.status === 'published'
+        ? `<button class="btn quiet" type="submit" name="op" value="unpublish">
+            Take it off the site</button>`
+        : `<button class="btn quiet" type="submit" name="op" value="publish">
+            Save and put it live</button>`)}
+      <a class="btn quiet" href="/o/${esc(org.slug)}/pages">Cancel</a>
+    </div>
+  </form>
+
+  ${revisions.length ? `<h2>Earlier versions</h2>
+  <p class="muted">Every save keeps one. Nothing anybody does to a page is
+    unrecoverable.</p>
+  <table>
+    <thead><tr><th>Saved</th><th class="hide-sm">By</th><th>Title then</th>
+      <th></th></tr></thead>
+    <tbody>${revisions.slice(0, 20).map((r, i) => `<tr>
+      <td>${esc(new Date(r.saved_at).toISOString().slice(0, 16).replace('T', ' '))}</td>
+      <td class="hide-sm muted">${esc(r.saved_by ?? '')}</td>
+      <td>${esc(r.title)}</td>
+      <td>${i === 0 ? '<span class="muted">current</span>' : (canPublish
+        ? `<form method="post" action="/o/${esc(org.slug)}/pages/${esc(pg.id)}/restore">
+            <input type="hidden" name="_csrf" value="${esc(csrf ?? '')}">
+            <input type="hidden" name="revisionId" value="${esc(r.id)}">
+            <button class="btn quiet" type="submit">Go back to this</button>
+          </form>` : '')}</td>
+    </tr>`).join('')}</tbody></table>` : ''}` });
+};
+
+/** One block, as a set of inputs somebody can actually fill in. */
+function blockFieldset(block, i, values) {
+  const spec = BLOCKS[block.type];
+  if (!spec) return '';
+  const v = (name) => values[`b${i}_${name}`] ?? '';
+
+  const input = (name, kind) => {
+    const id = `b${i}_${name}`;
+    const label = FIELD_LABELS_PAGE[name] ?? name;
+
+    if (kind === 'rich[]') {
+      return `<label for="${id}">${esc(label)}</label>
+        <textarea id="${id}" name="${id}">${esc(v(name))}</textarea>`;
+    }
+    if (kind === 'rich') {
+      return `<label for="${id}">${esc(label)}</label>
+        <textarea id="${id}" name="${id}">${esc(v(name))}</textarea>`;
+    }
+    if (kind === 'boolean') {
+      return `<div class="check">
+        <input type="checkbox" id="${id}" name="${id}" value="1"${v(name) ? ' checked' : ''}>
+        <label for="${id}" style="margin:0;font-weight:400">${esc(label)}</label></div>`;
+    }
+    if (kind === 'number') {
+      return `<label for="${id}">${esc(label)}</label>
+        <input id="${id}" name="${id}" type="number" min="1" max="6"
+          value="${esc(v(name))}" style="max-width:120px">`;
+    }
+    if (kind.startsWith('enum:')) {
+      const choices = kind.slice(5).split(',');
+      return `<label for="${id}">${esc(label)}</label>
+        <select id="${id}" name="${id}" style="max-width:240px">
+          ${choices.map((c) => option(c, c, v(name))).join('')}
+        </select>`;
+    }
+    return `<label for="${id}">${esc(label)}</label>
+      <input id="${id}" name="${id}" maxlength="300" value="${esc(v(name))}"
+        style="max-width:560px">`;
+  };
+
+  return `
+  <fieldset>
+    <legend>${esc(BLOCK_NAMES[block.type] ?? block.type)}</legend>
+    <input type="hidden" name="b${i}_type" value="${esc(block.type)}">
+    ${Object.entries(spec.fields).map(([name, kind]) => input(name, kind)).join('')}
+    ${Object.keys(spec.fields).length ? '' :
+      '<p class="muted">A line across the page. Nothing to fill in.</p>'}
+    <div class="actions" style="margin-top:14px">
+      <button class="btn quiet" type="submit" name="op" value="up:${i}"
+        title="Move up"${i === 0 ? ' disabled' : ''}>↑</button>
+      <button class="btn quiet" type="submit" name="op" value="down:${i}"
+        title="Move down">↓</button>
+      <button class="btn quiet right" type="submit" name="op" value="remove:${i}"
+        title="Remove this block">Remove</button>
+    </div>
+  </fieldset>`;
+}
 
 export const error = ({ me, csrf, status, message }) => page({
   title: `Error ${status}`, me, csrf, body: `

@@ -341,6 +341,29 @@ export function dojoPage({ dojo, federation, events, origin, fonts, nav,
   });
 }
 
+/**
+ * A page somebody wrote, as opposed to one projected from the register.
+ *
+ * Pulled out of build.mjs so that the admin's preview and the published site
+ * are the same function. A preview that renders a page a second way is a
+ * preview of something nobody will ever see, and it will drift — the only
+ * question is when somebody notices.
+ */
+export function authoredPage({ page, html, federation, origin, fonts, nav,
+                               base = '', vocabulary = {}, description }) {
+  const at = (p) => `${base}${p}`;
+  return layout({
+    title: page.meta_title ?? `${page.title} — ${federation.name}`,
+    description: page.meta_description ?? description ?? '',
+    canonical: `${origin}${at('/' + page.slug)}`,
+    federation, fonts, nav, base, vocabulary,
+    body: `<section><div class="wrap narrow">
+      <h1 style="font-family:var(--display);font-size:clamp(30px,5vw,46px);margin:0 0 20px">${esc(page.title)}</h1>
+      ${html}
+    </div></section>`,
+  });
+}
+
 export function findADojoPage({ dojos, federation, origin, fonts, nav,
                                 base = '', vocabulary = {} }) {
   const at = (p) => `${base}${p}`;

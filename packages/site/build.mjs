@@ -194,15 +194,8 @@ for (const target of SITES) {
   for (const pg of authored) {
     const html = renderBlocks(pg.body, { dojos, events: evs },
       { origin: ORIGIN + base });
-    await write(`${pg.slug}/index.html`, R.layout({
-      title: pg.meta_title ?? `${pg.title} — ${federation.name}`,
-      description: pg.meta_description ?? excerpt(pg.body),
-      canonical: `${ORIGIN}${at('/' + pg.slug)}`,
-      federation, fonts, nav, base, vocabulary,
-      body: `<section><div class="wrap narrow">
-        <h1 style="font-family:var(--display);font-size:clamp(30px,5vw,46px);margin:0 0 20px">${pg.title}</h1>
-        ${html}
-      </div></section>`,
+    await write(`${pg.slug}/index.html`, R.authoredPage({
+      page: pg, html, description: excerpt(pg.body), ...shared,
     }));
   }
 
