@@ -166,6 +166,23 @@ export class PostgresAuthorisation {
 }
 
 /** The same port, backed by SQL. */
+/**
+ * A query that failed because the database is behind the code.
+ *
+ * Deploying a build that expects a table nobody has created yet is an
+ * ordinary thing to do — the code ships on push and the migration is run by
+ * hand. What should not be ordinary is finding out through a stack trace in a
+ * deploy log at ten to eleven on a Thursday.
+ */
+export class MigrationNeeded extends Error {
+  constructor(migration, cause) {
+    super(`This database has not had db/${migration}.sql applied.`);
+    this.name = 'MigrationNeeded';
+    this.migration = migration;
+    this.cause = cause;
+  }
+}
+
 export class PostgresSiteContent {
   constructor(pool) { this.pool = pool; }
 
@@ -184,16 +201,26 @@ export class PostgresSiteContent {
    * is about to be published anyway.
    */
   async assets(rootSlug) {
-    const { rows } = await this.pool.query(`
-      select a.id, a.mime, a.filename, a.alt_text as "altText",
-             a.width, a.height, b.bytes
-      from asset a
-      join asset_blob b on b.asset_id = a.id
-      join organisation o on o.id = a.organisation_id
-      join organisation root on o.path <@ root.path
-      where root.slug = $1
-      order by a.created_at`, [rootSlug]);
-    return rows;
+    try {
+      const { rows } = await this.pool.query(`
+        select a.id, a.mime, a.filename, a.alt_text as "altText",
+               a.width, a.height, b.bytes
+        from asset a
+        join asset_blob b on b.asset_id = a.id
+        join organisation o on o.id = a.organisation_id
+        join organisation root on o.path <@ root.path
+        where root.slug = $1
+        order by a.created_at`, [rootSlug]);
+      return rows;
+    } catch (e) {
+      // 42P01 is "relation does not exist" — this database has not had
+      // db/016 applied. A federation whose images are not migrated yet should
+      // get a site without images and a warning naming the migration, not a
+      // stack trace that takes the whole deployment down. Anything else is a
+      // real fault and is left alone.
+      if (e.code === '42P01') throw new MigrationNeeded('016-asset-bytes', e);
+      throw e;
+    }
   }
 
   async brand(federationId) {

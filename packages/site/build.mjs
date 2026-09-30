@@ -169,7 +169,20 @@ for (const target of SITES) {
    * Vercel checks the filesystem before applying a rewrite is not something to
    * find out in production. Two prefixes, no overlap, no question.
    */
-  const assetRows = site.assets ? await site.assets(target.slug) : [];
+  let assetRows = [];
+  try {
+    assetRows = site.assets ? await site.assets(target.slug) : [];
+  } catch (e) {
+    // A database that is behind the code should cost a federation its images,
+    // loudly, not its whole website silently — or worse, its whole deployment
+    // with a stack trace. This exact case took production down: the build
+    // shipped on push, db/016 had not been run, and the deploy failed on a
+    // missing table with no indication of which one or why.
+    if (e.name !== 'MigrationNeeded') throw e;
+    console.warn(`\n  ⚠ ${e.message}`);
+    console.warn('    Images will be missing from this site until it is run.');
+    console.warn('    Everything else builds normally.\n');
+  }
   const assets = {};
   for (const a of assetRows) {
     if (!a.bytes?.length) continue;
