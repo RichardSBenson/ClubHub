@@ -105,7 +105,21 @@ const SECURITY_HEADERS = {
 // routing
 // ---------------------------------------------------------------------------
 
-const routes = [];
+/**
+ * Every route, exported so it can be enumerated.
+ *
+ * Exported for one reason: the tenant-isolation test walks this table and
+ * probes every entry as somebody with no business at the organisation in the
+ * path. A test that listed routes by hand would prove only that the routes
+ * somebody remembered are safe, and the hole it found — /o/:slug/events,
+ * readable by any signed-in member of any club — was in a route nobody
+ * thought to check.
+ *
+ * Walking the real table means a route added next year is probed the day it
+ * is written, and the test fails on any route that is in neither the public
+ * list nor the protected one, so nobody can add one without deciding which.
+ */
+export const routes = [];
 const get = (pattern, handler) => routes.push({ method: 'GET', pattern, handler });
 const post = (pattern, handler) => routes.push({ method: 'POST', pattern, handler });
 
@@ -986,9 +1000,10 @@ post('/p/:id/edit', async (ctx) => {
 // ---- grading --------------------------------------------------------------
 
 get('/o/:slug/grading', async (ctx) => {
-  ctx.requireActor();
-  const org = await orgs.bySlug(ctx.params.slug);
-  if (!org) throw new NotFound('Organisation');
+  // The same role the submission needs. Showing somebody a grading sheet
+  // they will not be allowed to submit is the form-you-cannot-send problem,
+  // and it was relying on people.roster to refuse rather than saying so.
+  const org = await organisationFor(ctx, { toRegister: true });
   // Whose syllabus this club grades on, rather than one federation's slug.
   const fed = await orgs.ladderOwnerOf(org.id) ?? org;
   const roster = await people.roster(ctx.me.accountId, org.id,
@@ -1008,9 +1023,18 @@ get('/o/:slug/grading', async (ctx) => {
 });
 
 post('/o/:slug/grading', async (ctx) => {
-  ctx.requireActor();
-  const org = await orgs.bySlug(ctx.params.slug);
-  if (!org) throw new NotFound('Organisation');
+  // Checked HERE, not left to rank.award.
+  //
+  // This route used to rely entirely on award() refusing, which it does —
+  // but only when it is called. Submitted with nobody ticked, the loop never
+  // ran, nothing refused anything, and a stranger got back "done=0" as though
+  // their grading had been recorded. And a real attempt came back as a 302
+  // with an error in the query string rather than a refusal, so the route
+  // could not tell the difference between "not allowed" and "did not work".
+  //
+  // Exactly the shape of the /o/:slug/events hole: a route trusting a lower
+  // layer that is not always reached.
+  const org = await organisationFor(ctx, { toRegister: true });
   const form = await ctx.form();
   const panel = (form.panel ?? '').split(',').map((s) => s.trim()).filter(Boolean);
   const passed = Object.keys(form).filter((k) => k.startsWith('pass_'))
