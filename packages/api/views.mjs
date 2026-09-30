@@ -18,9 +18,11 @@ import { SHORTHAND_HELP } from '../content/marks.mjs';
  * Read once, and neutral if the file is missing or unreadable — the admin
  * failing to load because somebody mistyped a label would be a poor trade.
  */
+const NEUTRAL = Object.freeze({ club: 'Club', clubPlural: 'Clubs',
+                                grading: 'Grading', grade: 'Grade' });
+
 const VOCABULARY = (() => {
-  const fallback = { club: 'Club', clubPlural: 'Clubs', grading: 'Grading',
-                     grade: 'Grade' };
+  const fallback = NEUTRAL;
   try {
     const dir = process.env.HONBU_DATA
       ?? new URL('../../data/', import.meta.url).pathname;
@@ -149,12 +151,36 @@ export const signIn = ({ sent, error, csrf } = {}) => page({
   </form>`}`,
 });
 
-export const dashboard = ({ me, csrf, orgs, vocabulary = {} }) => {
-  // The federation being looked at decides the words, not the deployment.
-  const V = { ...VOCABULARY, ...vocabulary };
-  const clubs = orgs.filter((o) => o.type === 'club' || o.type === 'dojo');
-  const parents = orgs.filter((o) => !(o.type === 'club' || o.type === 'dojo'));
-  const total = clubs.reduce((n, o) => n + Number(o.members), 0);
+/**
+ * The one screen that can show several federations at once, so the one screen
+ * where a single vocabulary is wrong. Each group carries its own words.
+ */
+export const dashboard = ({ me, csrf, orgs, parents = [], groups = [] }) => {
+  const total = groups.reduce((n, g) =>
+    n + g.clubs.reduce((m, o) => m + Number(o.members), 0), 0);
+
+  // Which words to fall back on when a federation defines none of its own.
+  //
+  // On a single-federation install — the ordinary case — data/settings.json is
+  // that federation's own settings, hand-edited in GitHub, and falling back to
+  // it is right. As soon as two federations share a screen it stops being
+  // anybody's in particular: it is the deployment's, and it belongs to
+  // whichever federation was installed first. Falling back to it there would
+  // hand MOKNZ's words to a jiu-jitsu academy, which is the bug this function
+  // exists to fix, one level further down. So with several federations on the
+  // page, a federation that has said nothing gets the neutral words.
+  const base = groups.length > 1 ? NEUTRAL : VOCABULARY;
+
+  // With one federation the heading is just its word for a club, as it always
+  // was. With several, each needs saying whose clubs these are — otherwise
+  // there are two headings on the page and no way to tell them apart.
+  const heading = (group) => {
+    const V = { ...base, ...(group.vocabulary ?? {}) };
+    return groups.length > 1 && group.federation
+      ? `${esc(group.federation.name)} — ${esc(V.clubPlural.toLowerCase())}`
+      : esc(V.clubPlural);
+  };
+
   return page({ title: 'Dashboard', me, csrf, body: `
   <h1>${esc(me.name)}</h1>
   <p class="sub">${orgs.length} organisation${orgs.length === 1 ? '' : 's'},
@@ -168,11 +194,12 @@ export const dashboard = ({ me, csrf, orgs, vocabulary = {} }) => {
        · <a href="/o/${esc(o.slug)}/pages">Website</a></p>
   </div>`).join('')}
 
-  <h2>${esc(V.clubPlural)}</h2>
-  <div class="grid">${clubs.map((o) => `<div class="card">
+  ${groups.map((group) => `
+  <h2>${heading(group)}</h2>
+  <div class="grid">${group.clubs.map((o) => `<div class="card">
     <h3><a href="/o/${esc(o.slug)}/roster">${esc(o.name)}</a></h3>
     <p>${o.members} member${Number(o.members) === 1 ? '' : 's'}</p>
-  </div>`).join('')}</div>` });
+  </div>`).join('')}</div>`).join('')}` });
 };
 
 export const roster = ({ me, csrf, org, roster, canRegister = false,

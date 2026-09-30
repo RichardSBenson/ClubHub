@@ -111,6 +111,58 @@ console.log('\nTHE DASHBOARD');
   ok('shows every organisation in scope', r.html.includes('Whanganui')
     && r.html.includes('Mas Oyama Karate New Zealand'));
   ok('and a sign-out button', r.html.includes('Sign out'));
+  // "Dojo", not "Dojos": 道場 does not inflect and MOKNZ kept that in
+  // English. The word is theirs to choose, which is the point.
+  ok('one federation, so the heading is just its word',
+    /<h2>Dojo<\/h2>/.test(r.html), r.html.match(/<h2>[^<]*<\/h2>/g));
+}
+
+console.log('\nONE ACCOUNT, TWO ARTS');
+{
+  // The dashboard is the only screen that can show several federations at
+  // once, and so the only one where a single vocabulary is wrong. Doug helps
+  // out at a jiu-jitsu academy; his dojos must not become academies, and the
+  // academy must not become a dojo.
+  const { rows:[acct] } = await pool.query(
+    `select id from account where email='doug@example.nz'`);
+
+  await pool.query(`
+    insert into organisation (type, name, slug, path, country_code, settings)
+    values ('country', 'Southern Cross Jiu-Jitsu', 'scjj', 'scjj', 'NZ',
+            '{"vocabulary":{"clubSingular":"Academy","clubPlural":"Academies"}}')
+    on conflict do nothing`);
+  await pool.query(`
+    insert into organisation (type, name, slug, path, country_code, parent_id)
+    select 'club', 'Tauranga Academy', 'tauranga', 'scjj.tauranga', 'NZ', id
+    from organisation where path = 'scjj'
+    on conflict do nothing`);
+  await pool.query(`
+    insert into grant_role (account_id, organisation_id, role)
+    select $1, id, 'administrator' from organisation where path = 'scjj'
+    on conflict do nothing`, [acct.id]);
+
+  const r = await req('/dashboard');
+  ok('both federations appear', r.html.includes('Mas Oyama Karate New Zealand')
+    && r.html.includes('Southern Cross Jiu-Jitsu'));
+
+  const headings = [...r.html.matchAll(/<h2>([^<]*)<\/h2>/g)].map(m => m[1]);
+  ok('the karate clubs are dojos',
+    headings.some(h => /Mas Oyama.*dojo/i.test(h)), headings);
+  ok('the jiu-jitsu club is an academy',
+    headings.some(h => /Southern Cross.*academies/i.test(h)), headings);
+  ok('and neither word is applied to the other',
+    headings.filter(h => /dojo/i.test(h)).length === 1
+    && headings.filter(h => /academ/i.test(h)).length === 1, headings);
+
+  ok('Tauranga is listed under its own federation',
+    r.html.indexOf('Tauranga Academy')
+      > r.html.indexOf(headings.find(h => /academies/i.test(h))));
+
+  // Leave the database as it was found — later suites count Doug's orgs.
+  await pool.query(`delete from grant_role where account_id = $1
+    and organisation_id in (select id from organisation where path <@ 'scjj')`,
+    [acct.id]);
+  await pool.query(`delete from organisation where path <@ 'scjj'`);
 }
 
 console.log('\nROSTER AND PERSON');

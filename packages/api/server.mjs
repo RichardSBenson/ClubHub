@@ -241,16 +241,43 @@ post('/signout', async (ctx) => {
 get('/dashboard', async (ctx) => {
   ctx.requireActor();
   const { rows } = await pool.query(`
-    select o.id, o.name, o.slug, o.type,
+    select o.id, o.name, o.slug, o.type, o.path::text as path,
            (select count(*) from affiliation a
              where a.organisation_id = o.id and a.ends is null
                and a.role = 'member' and a.status = 'active') as members
     from visible_orgs($1) v
     join organisation o on o.id = v.organisation_id
     order by o.type, o.name`, [ctx.me.accountId]);
-  const vocabulary = await orgs.vocabulary(ctx.me.home?.id ?? rows[0]?.id);
+
+  // Every other screen looks at one federation, so one vocabulary does. This
+  // one does not: an account can span federations in different arts, and a
+  // karate dojo and a jiu-jitsu academy can appear on the same screen. Taking
+  // the home federation's words and applying them to everybody calls the
+  // academies dojos, which is exactly the thing configuration-over-code is
+  // supposed to make impossible.
+  const clubs = rows.filter((o) => o.type === 'club');
+  const parents = rows.filter((o) => o.type !== 'club');
+  const rootOf = (o) => o.path.split('.')[0];
+
+  const groups = [];
+  for (const club of clubs) {
+    const key = rootOf(club);
+    let group = groups.find((g) => g.key === key);
+    if (!group) groups.push(group = {
+      key, clubs: [], federation: parents.find((p) => p.path === key) ?? null });
+    group.clubs.push(club);
+  }
+
+  // Resolved from a club rather than from its federation, because the
+  // federation that defines the words is not always one this account can see.
+  for (const group of groups) {
+    group.vocabulary = await orgs.vocabulary(group.clubs[0].id);
+  }
+  groups.sort((a, b) =>
+    (a.federation?.name ?? a.key).localeCompare(b.federation?.name ?? b.key));
+
   return ctx.send(200,
-    V.dashboard({ me: ctx.me, orgs: rows, csrf: ctx.csrf, vocabulary }));
+    V.dashboard({ me: ctx.me, orgs: rows, parents, groups, csrf: ctx.csrf }));
 });
 
 // ---- roster ---------------------------------------------------------------
@@ -260,7 +287,7 @@ get('/o/:slug/roster', async (ctx) => {
   const org = await orgs.bySlug(ctx.params.slug);
   if (!org) throw new NotFound('Organisation');
   const roster = await people.roster(ctx.me.accountId, org.id,
-    { subtree: !(org.type === 'club' || org.type === 'dojo') });
+    { subtree: org.type !== 'club' });
   return ctx.send(200, V.roster({
     me: ctx.me, org, roster, csrf: ctx.csrf,
     canRegister: await mayRegisterAt(ctx, org.id),
@@ -732,7 +759,7 @@ get('/o/:slug/events/:eventSlug/enter', async (ctx) => {
   const eventDate = dayOf(event, host.timezone);
 
   const roster = (await people.roster(ctx.me.accountId, org.id, {
-    subtree: !(org.type === 'club' || org.type === 'dojo') }))
+    subtree: org.type !== 'club' }))
     .filter((p) => p.status === 'active')
     .map((p) => ({ ...p, ageOnDay: ageOn(p.date_of_birth, eventDate) }));
 
@@ -752,7 +779,7 @@ post('/o/:slug/events/:eventSlug/enter', async (ctx) => {
   const eventDate = dayOf(event, host.timezone);
 
   const roster = await people.roster(ctx.me.accountId, org.id, {
-    subtree: !(org.type === 'club' || org.type === 'dojo') });
+    subtree: org.type !== 'club' });
   const byId = new Map(roster.map((p) => [p.id, p]));
 
   // Which boxes were ticked, per person. A person with none ticked is simply
@@ -1063,7 +1090,7 @@ get('/o/:slug/grading', async (ctx) => {
   // Whose syllabus this club grades on, rather than one federation's slug.
   const fed = await orgs.ladderOwnerOf(org.id) ?? org;
   const roster = await people.roster(ctx.me.accountId, org.id,
-    { subtree: !(org.type === 'club' || org.type === 'dojo') });
+    { subtree: org.type !== 'club' });
 
   const candidates = [];
   for (const p of roster) {

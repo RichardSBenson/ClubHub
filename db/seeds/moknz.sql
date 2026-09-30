@@ -22,11 +22,17 @@ begin;
 -- the tree
 -- ---------------------------------------------------------------------------
 
+-- The vocabulary lives here, on the federation, not in data/settings.json.
+-- The file is the deployment's; this is MOKNZ's, and it stays right even when
+-- a federation in another art appears on the same screen. Dojo is deliberately
+-- its own plural — 道場 does not inflect, and MOKNZ kept that in English.
 insert into organisation (id, parent_id, type, name, short_name, slug, path,
-                          country_code, timezone, founded)
+                          country_code, timezone, founded, settings)
 values ('11111111-1111-1111-1111-111111111111', null, 'country',
         'Mas Oyama Karate New Zealand', 'MOKNZ', 'moknz', 'moknz',
-        'NZ', 'Pacific/Auckland', '1965-01-01');
+        'NZ', 'Pacific/Auckland', '1965-01-01',
+        '{"vocabulary":{"club":"Dojo","clubPlural":"Dojo",
+                        "grade":"Grade","grading":"Grading"}}'::jsonb);
 
 insert into organisation (parent_id, type, name, slug, path, country_code, timezone)
 select '11111111-1111-1111-1111-111111111111', 'club', name, slug,
