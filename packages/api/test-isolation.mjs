@@ -108,6 +108,19 @@ const theirPerson = await one(`
   select p.* from affiliation a join person p on p.id = a.person_id
   where a.organisation_id = $1 and a.ends is null limit 1`, [theirs.id]);
 
+// A real image belonging to them, with real bytes behind it. Probing /a/ with
+// a made-up id proves only that the route 404s on nonsense.
+const theirAsset = await one(`
+  insert into asset (organisation_id, kind, filename, mime, width, height,
+                     bytes, alt_text)
+  values ($1,'image','committee-photo.png','image/png',1,1,70,
+          'The Whanganui committee')
+  returning *`, [theirs.id]);
+await pool.query(`insert into asset_blob (asset_id, bytes) values ($1,$2)`,
+  [theirAsset.id, Buffer.from(
+    'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmM'
+    + 'IQAAAABJRU5ErkJggg==', 'base64')]);
+
 ok('the actor administers Wellington', !!mine);
 ok('Whanganui is a different club, not beneath it',
   !!theirs && theirs.id !== mine.id);
@@ -146,6 +159,7 @@ function pathFor(pattern) {
     id: theirPerson ? theirPerson.id : '00000000-0000-0000-0000-000000000000',
     // /p/:id/access — creating an account for somebody else's member is
     // exactly the kind of thing this probe exists to refuse.
+    assetId: theirAsset.id,
     token: 'not-a-real-token',
     secret: 'not-a-real-secret',
   };
@@ -181,7 +195,11 @@ console.log('\nEVERY ROUTE IS EITHER PUBLIC ON PURPOSE OR PROTECTED');
   const unclassified = routes
     .map((r) => `${r.method} ${r.pattern}`)
     .filter((key) => !PUBLIC.has(key))
-    .filter((key) => !key.includes('/o/:slug') && !key.includes('/p/:id'));
+    // Scoped by path, and every one of them is probed below. /a/ is not
+    // scoped by path — an asset id carries its own federation — but it is
+    // probed too, and the probe below is what proves it refuses.
+    .filter((key) => !key.includes('/o/:slug') && !key.includes('/p/:id')
+                  && !key.includes('/a/:'));
 
   ok(`all ${routes.length} routes are accounted for`,
     unclassified.length === 0,

@@ -1358,3 +1358,164 @@ export const pages = {
       [rev.page_id, rev.title, rev.body, rev.meta_title, rev.meta_description]);
   },
 };
+
+// ---------------------------------------------------------------------------
+// assets
+//
+// Images belonging to a federation. The bytes are in this database, not in a
+// blob service — see db/016 for why. Metadata and bytes are separate tables so
+// that listing a media library does not pull megabytes through the connection
+// to show a filename.
+// ---------------------------------------------------------------------------
+
+export const assets = {
+  /** One federation's images, newest first. Never the bytes. */
+  async list(actor, orgId) {
+    await assertRole(actor, orgId, TEACH);
+    const { rows } = await pool.query(`
+      select id, filename, mime, width, height, bytes, alt_text, credit,
+             created_at
+      from asset
+      where organisation_id = $1
+      order by created_at desc`, [orgId]);
+    return rows;
+  },
+
+  /**
+   * An asset's metadata, with the organisation it belongs to.
+   *
+   * Deliberately does not check a role: the caller has to, because the check
+   * depends on what it is about to do, and a function that both fetches and
+   * authorises tempts a caller into thinking the fetch alone was enough.
+   */
+  async byId(id) {
+    return one(`select * from asset where id = $1`, [id]);
+  },
+
+  /**
+   * An image and its bytes, for somebody allowed to see it.
+   *
+   * Fetch and permission are one call here, on purpose, and it is the only way
+   * to reach the bytes. An asset id is an unguessable uuid, but unguessable is
+   * not a permission model — ids end up in drafts, in logs, in a browser
+   * history — so the viewer must hold a role at the federation that owns it,
+   * exactly as for every other record.
+   */
+  async forViewing(actor, id) {
+    const asset = await this.byId(id);
+    if (!asset) throw new NotFound('Image');
+    await assertRole(actor, asset.organisation_id, TEACH);
+    const row = await one(`select bytes from asset_blob where asset_id = $1`, [id]);
+    if (!row?.bytes) throw new NotFound('Image');
+    return { asset, bytes: row.bytes };
+  },
+
+  /** The bytes alone, for the build. No actor: the build is not a person. */
+  async bytesOf(id) {
+    const row = await one(`select bytes from asset_blob where asset_id = $1`, [id]);
+    return row?.bytes ?? null;
+  },
+
+  /**
+   * Store an image.
+   *
+   * `identified` comes from images.mjs, which read it out of the bytes — the
+   * mime recorded here is never the one the uploader declared.
+   */
+  async create(actor, orgId, { bytes, identified, filename, altText = null,
+                               credit = null, consentRef = null }) {
+    await assertRole(actor, orgId, MANAGE);
+
+    const client = await pool.connect();
+    try {
+      await client.query('begin');
+      const { rows: [row] } = await client.query(`
+        insert into asset (organisation_id, kind, storage_key, filename, mime,
+                           width, height, bytes, alt_text, credit, consent_ref)
+        values ($1,'image','',$2,$3,$4,$5,$6,$7,$8,$9)
+        returning *`,
+        [orgId, filename, identified.mime, identified.width, identified.height,
+         identified.bytes, altText?.trim() || null, credit?.trim() || null,
+         consentRef?.trim() || null]);
+
+      await client.query(
+        `insert into asset_blob (asset_id, bytes) values ($1,$2)`,
+        [row.id, bytes]);
+
+      await client.query(`
+        insert into audit_log (account_id, organisation_id, action, entity,
+                               entity_id, after)
+        values ($1,$2,'asset_upload','asset',$3,$4)`,
+        [actor, orgId, row.id,
+         JSON.stringify({ filename, mime: identified.mime,
+                          width: identified.width, height: identified.height,
+                          bytes: identified.bytes })]);
+
+      await client.query('commit');
+      return row;
+    } catch (e) {
+      await client.query('rollback');
+      throw e;
+    } finally {
+      client.release();
+    }
+  },
+
+  /** Change what an image says about itself. Not its bytes — those are fixed. */
+  async describe(actor, id, { altText, credit, consentRef }) {
+    const asset = await this.byId(id);
+    if (!asset) throw new NotFound('Image');
+    await assertRole(actor, asset.organisation_id, MANAGE);
+    return one(`update asset set alt_text=$2, credit=$3, consent_ref=$4
+                where id=$1 returning *`,
+      [id, altText?.trim() || null, credit?.trim() || null,
+       consentRef?.trim() || null]);
+  },
+
+  /**
+   * Which published pages use this image.
+   *
+   * Asked before deleting one. A page's body is a block document, and an image
+   * block holds the asset's id as a string, so this looks for that id anywhere
+   * in the document rather than trying to walk the block tree in SQL.
+   */
+  async usedBy(actor, id) {
+    const asset = await this.byId(id);
+    if (!asset) throw new NotFound('Image');
+    await assertRole(actor, asset.organisation_id, TEACH);
+    const { rows } = await pool.query(`
+      select id, title, slug, status from page
+      where organisation_id = $1 and body::text like $2
+      order by title`, [asset.organisation_id, `%${id}%`]);
+    return rows;
+  },
+
+  /**
+   * Remove an image, unless a page is still pointing at it.
+   *
+   * Deleting one that is in use would empty that page's image block silently,
+   * which is the exact failure this whole feature exists to end. So the
+   * refusal names the pages and lets somebody go and fix them.
+   */
+  async remove(actor, id) {
+    const asset = await this.byId(id);
+    if (!asset) throw new NotFound('Image');
+    await assertRole(actor, asset.organisation_id, MANAGE);
+
+    const used = await this.usedBy(actor, id);
+    if (used.length)
+      throw new Invalid(
+        `That image is used by ${used.map((p) => `"${p.title}"`).join(', ')}. `
+        + 'Remove it from those pages first.');
+
+    await pool.query(`
+      insert into audit_log (account_id, organisation_id, action, entity,
+                             entity_id, before)
+      values ($1,$2,'asset_delete','asset',$3,$4)`,
+      [actor, asset.organisation_id, id,
+       JSON.stringify({ filename: asset.filename, mime: asset.mime })]);
+
+    await pool.query(`delete from asset where id = $1`, [id]);
+    return { deleted: true, filename: asset.filename };
+  },
+};

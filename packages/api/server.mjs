@@ -32,7 +32,7 @@
 
 import crypto from 'node:crypto';
 import { URL } from 'node:url';
-import { pool, orgs, people, rank, events, competition, pages,
+import { pool, orgs, people, rank, events, competition, pages, assets,
          Forbidden, NotFound, Invalid } from './data.mjs';
 import * as auth from './auth.mjs';
 import * as V from './views.mjs';
@@ -43,6 +43,9 @@ import { ScheduleEvent, ReviseEvent, CancelEvent, MAY_SCHEDULE }
   from '../core/application/schedule-event.mjs';
 import { repositories } from '../infrastructure/factory.mjs';
 import { toInstant, toLocalInput } from './zones.mjs';
+import { readMultipart, BadUpload } from './multipart.mjs';
+import { identify, NotAnImage, ACCEPTED, MAX_BYTES }
+  from '../content/images.mjs';
 import { parseTable, planImport } from '../core/domain/roll-import.mjs';
 import { Competitor, Division, placeEntry, priceFor, consentNeeded,
          problemsWithConsent } from '../core/domain/competition.mjs';
@@ -627,6 +630,100 @@ const previewBanner = (org, pg) => `
   <a href="/o/${org.slug}/pages/${pg.id}"
     style="margin-left:auto;color:#F0CE41">Back to editing</a>
 </div>`;
+
+// ---- media ----------------------------------------------------------------
+
+get('/o/:slug/media', async (ctx) => {
+  const org = await organisationFor(ctx, { toWrite: true });
+  return ctx.send(200, V.mediaLibrary({
+    me: ctx.me, org, csrf: ctx.csrf,
+    assets: await assets.list(ctx.me.accountId, org.id),
+    accepted: ACCEPTED, maxBytes: MAX_BYTES,
+    done: ctx.url.searchParams.get('done'),
+    error: ctx.url.searchParams.get('error'),
+  }));
+});
+
+post('/o/:slug/media', async (ctx) => {
+  const org = await organisationFor(ctx, { toWrite: true });
+  const back = `/o/${org.slug}/media`;
+
+  try {
+    // Room for the image plus the form around it. The image's own limit is
+    // the one that produces a sensible message; this one only stops a body
+    // large enough to be a problem before anything has looked at it.
+    const { fields, files } = await ctx.upload({ maxBytes: MAX_BYTES + 256 * 1024 });
+    const file = files.find((f) => f.field === 'file');
+
+    if (!file || !file.bytes.length)
+      return ctx.redirect(`${back}?error=${encodeURIComponent('Choose a file first.')}`);
+
+    // From the bytes. What the browser called it is not consulted.
+    const identified = identify(file.bytes, { filename: file.filename });
+
+    await assets.create(ctx.me.accountId, org.id, {
+      bytes: file.bytes, identified, filename: file.filename,
+      altText: fields.alt_text, credit: fields.credit,
+      consentRef: fields.consent_ref,
+    });
+
+    return ctx.redirect(`${back}?done=${encodeURIComponent(`${file.filename} uploaded`)}`);
+  } catch (e) {
+    // A refused upload goes back to the screen with the reason, rather than an
+    // error page — the person is mid-task and the fix is usually obvious.
+    if (e instanceof NotAnImage || e instanceof BadUpload || e instanceof Invalid)
+      return ctx.redirect(`${back}?error=${encodeURIComponent(e.message)}`);
+    throw e;
+  }
+});
+
+post('/o/:slug/media/:assetId/describe', async (ctx) => {
+  const org = await organisationFor(ctx, { toWrite: true });
+  const form = await ctx.form();
+  await assets.describe(ctx.me.accountId, ctx.params.assetId, {
+    altText: form.alt_text, credit: form.credit, consentRef: form.consent_ref,
+  });
+  return ctx.redirect(`/o/${org.slug}/media?done=${encodeURIComponent('Saved')}`);
+});
+
+post('/o/:slug/media/:assetId/delete', async (ctx) => {
+  const org = await organisationFor(ctx, { toWrite: true });
+  const back = `/o/${org.slug}/media`;
+  try {
+    const { filename } = await assets.remove(ctx.me.accountId, ctx.params.assetId);
+    return ctx.redirect(`${back}?done=${encodeURIComponent(`${filename} deleted`)}`);
+  } catch (e) {
+    if (e instanceof Invalid)
+      return ctx.redirect(`${back}?error=${encodeURIComponent(e.message)}`);
+    throw e;
+  }
+});
+
+/**
+ * Serve an image to the admin.
+ *
+ * The public site does not come through here — it is built at deploy, with
+ * these written out as files. This exists so the media library and the page
+ * preview can show what they are talking about.
+ *
+ * The permission check lives in assets.forViewing, which is the only way to
+ * reach an asset's bytes at all.
+ */
+get('/a/:assetId', async (ctx) => {
+  ctx.requireActor();
+  // Fetching and authorising are one call, so there is no version of this
+  // route that reads the bytes without having checked.
+  const { asset, bytes } = await assets.forViewing(ctx.me.accountId,
+                                                   ctx.params.assetId);
+
+  return ctx.sendBytes(200, bytes, {
+    type: asset.mime,
+    filename: asset.filename,
+    // Private, because this is behind a sign-in. The public site's copies are
+    // static files and get cached properly by whatever serves them.
+    cacheControl: 'private, max-age=300',
+  });
+});
 
 // ---- competition ----------------------------------------------------------
 
@@ -1455,6 +1552,42 @@ export async function handler(req, res) {
       const f = await readForm(req);
       assertCsrf(cookies[CSRF_COOKIE], f._csrf);
       return f;
+    },
+
+    /**
+     * The same for a form carrying files. Separate from form() because the
+     * body is read differently, but it checks CSRF identically — an upload
+     * route must not be the one place the token is not looked at.
+     */
+    async upload(options) {
+      const { fields, files } = await readMultipart(req, options);
+      assertCsrf(cookies[CSRF_COOKIE], fields._csrf);
+      return { fields, files };
+    },
+
+    /**
+     * Bytes rather than a page.
+     *
+     * The type given here is the one sniffed from the bytes, never the one an
+     * uploader declared, and nosniff comes along with the rest of the security
+     * headers so a browser cannot decide it knows better either.
+     */
+    sendBytes(status, buffer, { type = 'application/octet-stream',
+                                cacheControl = 'private, max-age=0',
+                                filename = null } = {}) {
+      res.writeHead(status, {
+        'content-type': type,
+        'content-length': buffer.length,
+        'cache-control': cacheControl,
+        // Shown inline, but named — so a browser that will not render it
+        // offers a sensible filename rather than the bare id.
+        ...(filename
+          ? { 'content-disposition': `inline; filename="${filename.replace(/["\\]/g, '')}"` }
+          : {}),
+        ...SECURITY_HEADERS,
+        ...(setCookies.length ? { 'set-cookie': setCookies } : {}),
+      });
+      res.end(buffer);
     },
 
     send(status, html) {

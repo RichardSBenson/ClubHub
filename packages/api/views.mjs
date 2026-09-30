@@ -1376,6 +1376,7 @@ export const pageList = ({ me, csrf, org, pages = [], canPublish = false,
   title: `Website — ${org.name}`, me, csrf, body: `
   <h1>Website</h1>
   <p class="sub">${esc(org.name)} ·
+    <a href="/o/${esc(org.slug)}/media">Images</a> ·
     <a href="/o/${esc(org.slug)}/roster">Back to the roll</a></p>
 
   ${done ? `<div class="good">${esc(done)}</div>` : ''}
@@ -1408,6 +1409,92 @@ export const pageList = ({ me, csrf, org, pages = [], canPublish = false,
 
   ${canPublish ? '' : `<p class="muted">You can write and change pages here.
     Putting one in front of the public needs an owner or administrator.</p>`}` });
+
+/**
+ * The media library.
+ *
+ * A federation's images, and the form that puts one there. The alt text field
+ * is not optional-looking by accident: an image block renders an <img> with
+ * whatever alt it is given, and a page full of undescribed photographs is
+ * unusable with a screen reader and invisible to a search engine.
+ *
+ * consent_ref is here because a federation photographing children needs to be
+ * able to say where the permission for a given photograph is recorded. The
+ * platform does not know what form that takes — a signed slip in a folder, a
+ * row in somebody's spreadsheet — so it stores a reference and does not
+ * pretend to validate it.
+ */
+export const mediaLibrary = ({ me, csrf, org, assets = [], accepted = [],
+                               maxBytes = 0, done, error }) => page({
+  title: `Images — ${org.name}`, me, csrf, body: `
+  <h1>Images</h1>
+  <p class="sub">${esc(org.name)} ·
+    <a href="/o/${esc(org.slug)}/pages">Back to the website</a></p>
+
+  ${done ? `<div class="good">${esc(done)}</div>` : ''}
+  ${error ? `<div class="bad">${esc(error)}</div>` : ''}
+
+  <form method="post" action="/o/${esc(org.slug)}/media"
+        enctype="multipart/form-data" class="card" style="margin-bottom:24px">
+    <input type="hidden" name="_csrf" value="${esc(csrf)}">
+    <h3>Add an image</h3>
+    <p><label>File<br>
+      <input type="file" name="file" required accept="${esc(accepted.join(','))}">
+    </label></p>
+    <p class="muted">PNG, JPEG, GIF or WebP, up to
+      ${Math.round(maxBytes / 1024 / 1024)}MB. Not SVG — an SVG can carry
+      script, so it is refused.</p>
+    <p><label>Describe it for somebody who cannot see it<br>
+      <input type="text" name="alt_text" maxlength="300"
+             placeholder="Doug Holloway bowing in before a grading"></label></p>
+    <p><label>Credit <span class="muted">optional</span><br>
+      <input type="text" name="credit" maxlength="200"></label></p>
+    <p><label>Where the permission for this photograph is recorded
+      <span class="muted">optional</span><br>
+      <input type="text" name="consent_ref" maxlength="200"
+             placeholder="2026 consent folder, p14"></label></p>
+    <p><button class="btn" type="submit">Upload</button></p>
+  </form>
+
+  ${assets.length ? `<div class="grid">${assets.map((a) => `
+    <div class="card">
+      <img src="/a/${esc(a.id)}" alt="${esc(a.alt_text ?? '')}"
+           style="max-width:100%;height:auto;display:block;margin-bottom:8px">
+      <p><strong>${esc(a.filename ?? 'untitled')}</strong><br>
+        <span class="muted">${a.width}×${a.height} ·
+          ${Math.round((a.bytes ?? 0) / 1024)}KB ·
+          ${esc((a.mime ?? '').replace('image/', '').toUpperCase())}</span></p>
+      ${a.alt_text ? '' : `<p class="bad" style="padding:6px 10px">
+        No description. Add one before using it on a page.</p>`}
+      <p class="muted">Reference for an image block:<br>
+        <code>${esc(a.id)}</code></p>
+
+      <details>
+        <summary>Change its description</summary>
+        <form method="post"
+              action="/o/${esc(org.slug)}/media/${esc(a.id)}/describe">
+          <input type="hidden" name="_csrf" value="${esc(csrf)}">
+          <p><label>Description<br>
+            <input type="text" name="alt_text" maxlength="300"
+                   value="${esc(a.alt_text ?? '')}"></label></p>
+          <p><label>Credit<br>
+            <input type="text" name="credit" maxlength="200"
+                   value="${esc(a.credit ?? '')}"></label></p>
+          <p><label>Permission recorded at<br>
+            <input type="text" name="consent_ref" maxlength="200"
+                   value="${esc(a.consent_ref ?? '')}"></label></p>
+          <p><button class="btn quiet" type="submit">Save</button></p>
+        </form>
+      </details>
+
+      <form method="post" action="/o/${esc(org.slug)}/media/${esc(a.id)}/delete"
+            style="margin-top:8px">
+        <input type="hidden" name="_csrf" value="${esc(csrf)}">
+        <button class="btn quiet" type="submit">Delete</button>
+      </form>
+    </div>`).join('')}</div>`
+    : `<div class="note">No images yet. Upload one above, then put its
+        reference into an image block on a page.</div>`}` });
 
 const FIELD_LABELS_PAGE = {
   text: 'Text', level: 'Heading level', items: 'One per line',
