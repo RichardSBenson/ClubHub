@@ -17,8 +17,12 @@ copy a connection string by hand.
 
 1. From the database in Vercel, **Open in Neon**.
 2. **SQL Editor**.
-3. Open `db/setup-all.sql` from the repository in GitHub, copy all of it,
-   paste it into the editor, **Run**.
+3. Open `db/install/schema.sql` from the repository in GitHub, copy all of
+   it, paste it into the editor, **Run**. That is every table and function
+   and no federation's data.
+4. Then, **only for MOKNZ**, do the same with `db/seeds/moknz.sql`. A new
+   federation skips this step and runs `node tools/found.mjs` instead — see
+   INSTALL.md.
 
 It takes a few seconds. You should end with 40 tables.
 

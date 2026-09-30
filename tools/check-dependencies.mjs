@@ -41,13 +41,42 @@ function walk(dir, out = []) {
   return out;
 }
 
+/**
+ * What a file imports.
+ *
+ * Matched as STATEMENTS, not as any occurrence of the word "from". The
+ * looser version — /from\s+['"]([^'"]+)['"]/ — matched ordinary prose: a
+ * page saying "edit it from " + "the admin" was read as importing a module
+ * called "\n + ". A checker that reports things nobody wrote is a checker
+ * people learn to ignore, and one that can be fooled by prose can be fooled
+ * into silence just as easily.
+ *
+ * Three forms, all anchored to the start of a statement:
+ *   import x from 'y'   import 'y'   await import('y')
+ */
+function importsIn(src) {
+  const out = [];
+  const statement = /(?:^|[;{}\n])\s*import\b[^;'"]*?from\s*['"]([^'"]+)['"]/g;
+  const bare = /(?:^|[;{}\n])\s*import\s*['"]([^'"]+)['"]/g;
+  const dynamic = /\bimport\s*\(\s*['"]([^'"]+)['"]\s*\)/g;
+  for (const re of [statement, bare, dynamic]) {
+    for (const m of src.matchAll(re)) out.push(m[1]);
+  }
+  return out;
+}
+
 const violations = [];
 
 for (const layer of LAYERS) {
   for (const file of walk(path.join(ROOT, layer.dir))) {
     const src = fs.readFileSync(file, 'utf8');
-    const imports = [...src.matchAll(/from\s+['"]([^'"]+)['"]/g)].map((m) => m[1]);
+    const imports = importsIn(src);
     const rel = file.replace(ROOT, '');
+
+    // A test is not part of the graph that ships. It exercises its subject
+    // from outside, and reaching across layers to build a database or reset
+    // one is what it is for. The rule is about what the product depends on.
+    const isTest = /(^|\/)test[^/]*\.mjs$/.test(rel);
 
     for (const spec of imports) {
       if (BUILTIN.test(spec)) {
@@ -55,6 +84,8 @@ for (const layer of LAYERS) {
           violations.push(`${rel}\n    domain imports the runtime: ${spec}`);
         continue;
       }
+
+      if (isTest && spec.startsWith('.')) continue;
 
       if (!spec.startsWith('.')) {
         // A bare package name is a third-party dependency.

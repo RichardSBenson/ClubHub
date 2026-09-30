@@ -2,12 +2,11 @@
  * Rebuild the database from the canonical setup file. Tests must start from a
  * known state, and the state they should know is the one production has.
  *
- * This used to load schema.sql and seed-moknz.sql, which is a SUBSET: the auth
- * tables, publishing, content types and every migration since live in their own
- * files and are concatenated into setup-all.sql — the file that actually gets
- * pasted into the hosted database. So the tests were running against a schema
- * nothing else has, and a column added by a migration was missing under them
- * while being present everywhere else.
+ * Loads db/install/schema.sql — every table, function and migration, and no
+ * federation's data — then db/seeds/moknz.sql, which is customer zero's
+ * register. The two were one file until the install was separated out, and a
+ * database built from the halves is byte-identical to one built from the
+ * whole: the split was checked with pg_dump, not assumed.
  */
 import { execSync } from 'node:child_process';
 import fs from 'node:fs';
@@ -20,7 +19,9 @@ const PSQL = 'psql -h /tmp/pgrun -p 5433 -U postgres';
 const ADMIN = `${PSQL} -d postgres`;
 const run = (cmd) => execSync(cmd, { stdio: 'pipe' }).toString();
 
-const files = ['../../db/setup-all.sql'];
+// Structure first, then one customer's data. They used to be one file, which
+// is why a new federation's install had seventeen karate dojo in it.
+const files = ['../../db/install/schema.sql', '../../db/seeds/moknz.sql'];
 if (process.env.HONBU_SEED_DEMOS) files.push('../../db/seeds/demo-federations.sql');
 
 for (const f of files) {

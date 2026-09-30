@@ -33,7 +33,12 @@ export const STORE = { toString: currentStore, valueOf: currentStore };
 
 export async function repositories({ dataDir = null } = {}) {
   if (currentStore() === 'postgres') {
-    const { pool } = await import('../api/data.mjs');
+    // Straight from where the pool lives. This used to come from
+    // ../api/data.mjs, which only re-exports it — so the composition root was
+    // reaching out through the outermost layer to fetch something its own
+    // layer owns. The dependency checker never saw it because it only
+    // matched `from '...'` and this is a dynamic import.
+    const { pool } = await import('./postgres/pool.mjs');
     const pg = await import('./postgres/repositories.mjs');
     return {
       store: 'postgres',
