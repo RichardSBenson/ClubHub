@@ -140,6 +140,53 @@ console.log('\nAND THE REST OF THE SITE IS STILL THERE');
     AWKWARD.filter(([s]) => !sitemap.includes(`/${s}`)).map(([s]) => s).join(','));
 }
 
+console.log('\nIMAGES ARE WRITTEN OUT, AND THE BLOCK POINTS AT THEM');
+{
+  // The failure this exists to catch is silence: blocks.mjs looks up
+  // data.assets[assetId], misses, and returns an empty string. The page still
+  // builds, the suite still passes, and the image is simply not there.
+  const png = Buffer.from(
+    'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmM'
+    + 'IQAAAABJRU5ErkJggg==', 'base64');
+  const { rows: [asset] } = await pool.query(`
+    insert into asset (organisation_id, kind, filename, mime, width, height,
+                       bytes, alt_text)
+    values ($1,'image','crest.png','image/png',1,1,$2,'The MOKNZ crest')
+    returning id`, [org.id, png.length]);
+  await pool.query(`insert into asset_blob (asset_id, bytes) values ($1,$2)`,
+    [asset.id, png]);
+  await pool.query(`
+    insert into page (organisation_id, slug, title, body, status, published_at)
+    values ($1,'with-an-image','With an image',$2,'published',now())`,
+    [org.id, JSON.stringify({ blocks: [
+      { type: 'image', assetId: asset.id, alt: 'The MOKNZ crest',
+        caption: 'Since 1965' }] })]);
+
+  execSync(`HONBU_STORE=postgres OUT=${OUT} node packages/site/build.mjs`,
+    { cwd: path.join(import.meta.dirname, '../..'), stdio: 'pipe' });
+
+  const file = path.join(OUT, 'images', `${asset.id}.png`);
+  ok('the image is written into the build', fs.existsSync(file));
+  ok('byte for byte', fs.existsSync(file)
+    && fs.readFileSync(file).equals(png));
+
+  const html = fs.readFileSync(
+    path.join(OUT, 'with-an-image', 'index.html'), 'utf8');
+  ok('the page has an img tag at all, not an empty figure',
+    html.includes('<img src="/images/'), 'the block rendered as nothing');
+  ok('pointing at the file that was written',
+    html.includes(`/images/${asset.id}.png`));
+  ok('with the description on it',
+    html.includes('alt="The MOKNZ crest"'));
+  ok('and the caption',
+    html.includes('Since 1965'));
+
+  // /a/ is rewritten to the serverless function, so a built image must not
+  // land there or the two would be fighting over the same path in production.
+  ok('and nothing was written under /a/',
+    !fs.existsSync(path.join(OUT, 'a')));
+}
+
 fs.rmSync(OUT, { recursive: true, force: true });
 
 console.log(`\n${pass} passed, ${fail} failed\n`);

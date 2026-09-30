@@ -10,6 +10,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { repositories, currentStore } from '../infrastructure/factory.mjs';
 import { renderBlocks, excerpt } from '../content/blocks.mjs';
+import { extensionFor } from '../content/images.mjs';
 import { loadSettings, SettingsError } from './settings.mjs';
 import * as R from './render.mjs';
 
@@ -147,6 +148,41 @@ for (const target of SITES) {
     return rel;
   };
 
+  /**
+   * Images, written out as real files.
+   *
+   * This is the half of the image block that was missing. blocks.mjs looks up
+   * data.assets[assetId] and returns an empty string when it misses, so every
+   * image block on every page has rendered as nothing since it was written —
+   * silently, because an empty string is a perfectly good return value.
+   *
+   * Written at build rather than served at runtime: the public site is static,
+   * so an image is a file next to the page that references it, cached by
+   * whatever serves the site, and needs no function invocation and no database
+   * connection to look at.
+   *
+   * The extension comes from the mime that images.mjs read out of the bytes,
+   * never from the uploaded filename.
+   *
+   * Written under /images/, not /a/. /a/ is rewritten to the serverless
+   * function so the admin can serve an image from the database, and whether
+   * Vercel checks the filesystem before applying a rewrite is not something to
+   * find out in production. Two prefixes, no overlap, no question.
+   */
+  const assetRows = site.assets ? await site.assets(target.slug) : [];
+  const assets = {};
+  for (const a of assetRows) {
+    if (!a.bytes?.length) continue;
+    const name = `${a.id}.${extensionFor(a.mime)}`;
+    const file = path.join(OUT, base.replace(/^\//, ''), 'images', name);
+    await fs.mkdir(path.dirname(file), { recursive: true });
+    await fs.writeFile(file, a.bytes);
+    written.push(base.replace(/^\//, '')
+      ? `${base.slice(1)}/images/${name}` : `images/${name}`);
+    assets[a.id] = `${base}/images/${name}`;
+  }
+  if (assetRows.length) console.log(`  ${assetRows.length} image(s)`);
+
   const dojos = (await site.dojos(target.slug)).map((d) => ({
     ...d,
     venue_name: d.venue_name ?? d.venueName ?? null,
@@ -192,7 +228,7 @@ for (const target of SITES) {
   await write('events/index.html', R.eventsPage({ events: evs, ...shared }));
 
   for (const pg of authored) {
-    const html = renderBlocks(pg.body, { dojos, events: evs },
+    const html = renderBlocks(pg.body, { dojos, events: evs, assets },
       { origin: ORIGIN + base });
     await write(`${pg.slug}/index.html`, R.authoredPage({
       // Only computed when the page has no description of its own, as it was
@@ -206,7 +242,8 @@ for (const target of SITES) {
   await write('news/index.html', R.newsPage({ articles, ...shared }));
   for (const article of articles) {
     const body = article.body
-      ? renderBlocks(article.body, { dojos, events: evs }, { origin: ORIGIN + base })
+      ? renderBlocks(article.body, { dojos, events: evs, assets },
+                     { origin: ORIGIN + base })
       : '';
     await write(`news/${article.slug}/index.html`,
       R.articlePage({ article, html: body, ...shared }));

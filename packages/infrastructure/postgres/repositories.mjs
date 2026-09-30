@@ -175,6 +175,27 @@ export class PostgresSiteContent {
     return r ?? null;
   }
 
+  /**
+   * Every image belonging to this federation or anything beneath it, bytes
+   * included, for the build to write out as files.
+   *
+   * The build is the one caller that reads bytes without an actor, which is
+   * right: it is not a person, it holds no session, and everything it touches
+   * is about to be published anyway.
+   */
+  async assets(rootSlug) {
+    const { rows } = await this.pool.query(`
+      select a.id, a.mime, a.filename, a.alt_text as "altText",
+             a.width, a.height, b.bytes
+      from asset a
+      join asset_blob b on b.asset_id = a.id
+      join organisation o on o.id = a.organisation_id
+      join organisation root on o.path <@ root.path
+      where root.slug = $1
+      order by a.created_at`, [rootSlug]);
+    return rows;
+  }
+
   async brand(federationId) {
     const { rows: [r] } = await this.pool.query(
       'select * from brand where organisation_id=$1', [federationId]);
@@ -250,88 +271,6 @@ export class SystemClock {
 // what the site generator reads
 // ---------------------------------------------------------------------------
 
-export class PostgresSite {
-  constructor(pool) { this.pool = pool; }
-  #q = async (sql, p = []) => (await this.pool.query(sql, p)).rows;
-
-  async federation(slug) {
-    const [r] = await this.#q(
-      `select * from organisation where slug=$1 and parent_id is null`, [slug]);
-    return r ?? null;
-  }
-
-  async brand(organisationId) {
-    const [r] = await this.#q(
-      `select * from brand where organisation_id=$1`, [organisationId]);
-    return r ?? null;
-  }
-
-  async dojos(rootSlug) {
-    return this.#q(`
-      select o.id, o.parent_id as "parentId", o.name, o.slug, o.country_code,
-             d.venue_name as "venueName", d.address_line as "addressLine",
-             d.suburb, d.city, d.postcode, d.latitude, d.longitude,
-             d.directions, d.phone, d.email, d.blurb,
-             d.who_trains as "whoTrains",
-             d.first_class_free as "firstClassFree", d.published,
-             coalesce(json_agg(json_build_object(
-               'label', t.label, 'weekday', t.weekday,
-               'starts', t.starts::text, 'ends', t.ends::text)
-               order by t.sort_order) filter (where t.id is not null), '[]') as sessions
-      from organisation root
-      join organisation o on o.path <@ root.path and o.type = 'club' and o.status='active'
-      left join dojo_profile d on d.organisation_id=o.id
-      left join training_session t on t.organisation_id=o.id
-      where root.slug=$1
-      group by o.id, o.parent_id, o.name, o.slug, o.country_code,
-               d.organisation_id
-      order by o.name`, [rootSlug]);
-  }
-
-  async eventsFor(orgSlug) {
-    return this.#q(`
-      select e.id, e.title, e.slug, e.kind, e.summary, e.starts_at, e.ends_at,
-             e.venue_name, e.visibility, e.entries_close,
-             o.name as from_org, o.slug as from_slug,
-             (o.id = target.id) as is_own
-      from organisation target
-      join organisation o on target.path <@ o.path
-      join event e on e.organisation_id = o.id
-      where target.slug = $1 and e.status='published' and e.visibility='public'
-        and (e.organisation_id = target.id or e.publish_down)
-      order by e.starts_at`, [orgSlug]);
-  }
-
-  async pages(federationId = null) {
-    return this.#q(`select slug, title, meta_title, meta_description, body
-      from page
-      where status='published'
-        and ($1::uuid is null or organisation_id in (
-          select d.id from organisation d, organisation root
-          where root.id = $1 and d.path <@ root.path))`, [federationId]);
-  }
-
-  /**
-   * Scoped to one federation's subtree. Unscoped, a second federation on the
-   * same deployment showed the first one's news on its own front page, which
-   * is the kind of leak that is only funny until it happens in a demo.
-   */
-  async articles(federationId = null) {
-    return this.#q(`
-      select a.slug, a.title, a.summary, a.published_at, o.name as about_org
-      from article a left join organisation o on o.id = a.about_org_id
-      where a.status='published'
-        and ($1::uuid is null or a.organisation_id in (
-          select d.id from organisation d, organisation root
-          where root.id = $1 and d.path <@ root.path))
-      order by a.published_at desc`, [federationId]);
-  }
-
-  async redirects() {
-    return this.#q(`select from_path as "fromPath", to_path as "toPath",
-      permanent from redirect`);
-  }
-}
 
 // ---------------------------------------------------------------------------
 // publishing

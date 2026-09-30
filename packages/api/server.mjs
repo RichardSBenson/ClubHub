@@ -589,7 +589,16 @@ get('/o/:slug/pages/:pageId/preview', async (ctx) => {
     ? `https://${process.env.VERCEL_PROJECT_PRODUCTION_URL}`
     : `${ctx.secure ? 'https' : 'http'}://${ctx.req.headers.host}`;
 
-  const html = renderBlocks(pg.body, { dojos, events: evs }, { origin });
+  // The preview points at /a/:id, which serves from the database behind a
+  // sign-in. The build writes the same images out as files and points at
+  // those. Different addresses, same bytes — and the preview has to resolve
+  // them at all, or somebody checks a page, sees no image, and assumes the
+  // block is broken rather than the preview.
+  const previewAssets = Object.fromEntries(
+    (await assets.list(ctx.me.accountId, org.id)).map((a) => [a.id, `/a/${a.id}`]));
+
+  const html = renderBlocks(pg.body, { dojos, events: evs, assets: previewAssets },
+    { origin });
 
   const body = R.authoredPage({
     page: pg, html, federation,

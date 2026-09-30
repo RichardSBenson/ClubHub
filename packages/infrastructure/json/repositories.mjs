@@ -280,6 +280,29 @@ export class JsonSiteContent {
       .find((b) => b.organisationId === federationId) ?? { tokens: {}, fonts: {} };
   }
 
+  /**
+   * Images, for the build to write out.
+   *
+   * The flat store keeps bytes as base64 in the record, because the point of
+   * this store is that a federation's whole register is a folder of files
+   * somebody can read, copy and commit. A sidecar directory of binaries
+   * alongside it would break that and gain nothing at this size.
+   *
+   * Empty is the normal answer here: the files store exists for the demo and
+   * for a federation that has not set up a database, and neither uploads.
+   */
+  async assets(rootSlug) {
+    const root = await this.federation(rootSlug);
+    if (!root) return [];
+    const under = new Set(this.orgs.publicDojos
+      ? (await this.orgs.publicDojos(rootSlug)).map((d) => d.id)
+      : []);
+    under.add(root.id);
+    return this.data.read('assets')
+      .filter((a) => under.has(a.organisationId))
+      .map((a) => ({ ...a, bytes: Buffer.from(a.base64 ?? '', 'base64') }));
+  }
+
   async dojos(rootSlug) { return this.orgs.publicDojos(rootSlug); }
 
   async eventsFor(orgSlug) {
@@ -320,71 +343,4 @@ export class JsonSiteContent {
 
 export class SystemClock {
   today() { return new Date().toISOString().slice(0, 10); }
-}
-
-// ---------------------------------------------------------------------------
-// what the site generator reads
-// ---------------------------------------------------------------------------
-
-export class JsonSite {
-  constructor(data) {
-    this.data = data;
-    this.orgs = new JsonOrganisations(data);
-  }
-
-  async federation(slug) {
-    return this.data.read('organisations')
-      .find((o) => o.slug === slug && !o.parentId) ?? null;
-  }
-
-  async brand(organisationId) {
-    return this.data.read('brand')
-      .find((b) => b.organisationId === organisationId) ?? null;
-  }
-
-  async dojos(rootSlug) { return this.orgs.publicDojos(rootSlug); }
-
-  /**
-   * Public events for one organisation: its own, plus anything an ancestor
-   * published downward. The scoping rules hold in the flat store too — they are
-   * not a database feature.
-   */
-  async eventsFor(orgSlug) {
-    const orgs = this.data.read('organisations');
-    const target = orgs.find((o) => o.slug === orgSlug);
-    if (!target) return [];
-
-    const ancestors = new Set();
-    for (let cur = target; cur; cur = orgs.find((o) => o.id === cur.parentId))
-      ancestors.add(cur.id);
-
-    return this.data.read('events')
-      .filter((e) => e.visibility === 'public'
-        && (e.organisationId === target.id
-            || (e.publishDown && ancestors.has(e.organisationId))))
-      .map((e) => {
-        const from = orgs.find((o) => o.id === e.organisationId);
-        return { ...e, starts_at: e.startsAt, ends_at: e.endsAt,
-                 venue_name: e.venueName, entries_close: e.entriesClose,
-                 from_org: from?.name, from_slug: from?.slug,
-                 is_own: e.organisationId === target.id };
-      })
-      .sort((a, b) => String(a.startsAt).localeCompare(String(b.startsAt)));
-  }
-
-  async pages(federationId = null) {
-    return this.data.read('pages')
-      .filter((p) => !federationId || p.organisationId === federationId)
-      .map((p) => ({ ...p, meta_title: p.metaTitle,
-                     meta_description: p.metaDescription }));
-  }
-
-  /** Scoped to one federation, so a second one's news never shows here. */
-  async articles(federationId = null) {
-    return this.data.read('articles')
-      .filter((a) => !federationId || a.organisationId === federationId)
-      .map((a) => ({ ...a, published_at: a.publishedAt, about_org: a.aboutOrg }));
-  }
-
-  async redirects() { return this.data.read('redirects'); }
 }
