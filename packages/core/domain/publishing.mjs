@@ -11,7 +11,7 @@
  * Imports only ./values.mjs.
  */
 
-import { GradingDate, DomainError } from './values.mjs';
+import { CalendarDay, DomainError } from './values.mjs';
 
 // ---------------------------------------------------------------------------
 // value objects
@@ -138,7 +138,7 @@ export class Publication {
     this.organisationId = organisationId;
     this.status = status;
     this.publishedAt = publishedAt;
-    this.scheduledFor = scheduledFor ? GradingDate.of(scheduledFor) : null;
+    this.scheduledFor = scheduledFor ? CalendarDay.of(scheduledFor) : null;
     this.publishedBy = publishedBy;
     this.supersededAt = supersededAt;
     this.withdrawnAt = withdrawnAt;
@@ -154,7 +154,7 @@ export class Publication {
   isDue(on) {
     return this.status === PublicationStatus.SCHEDULED
       && this.scheduledFor != null
-      && !this.scheduledFor.isAfter(GradingDate.of(on));
+      && !this.scheduledFor.isAfter(CalendarDay.of(on));
   }
 
   supersededBy(at) {

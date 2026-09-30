@@ -7,7 +7,13 @@
  *
  * The advantage over every hosted club platform is here: real slugs, per-page
  * meta, and JSON-LD on every dojo so Google reads it as a physical business.
+ *
+ * This file was written with no imports at all, which was a nice property
+ * while it lasted. It buys one exception, for a domain value: writing a second
+ * way to turn a date into 'YYYY-MM-DD' is what put a wrong founding date — in
+ * fact no founding date — into the structured data on every page.
  */
+import { CalendarDay } from '../core/domain/values.mjs';
 
 const esc = (s = '') => String(s)
   .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
@@ -559,7 +565,7 @@ ${articles.length ? `<section><div class="wrap">
     jsonLd: [{
       '@context':'https://schema.org','@type':'SportsOrganization',
       name: federation.name, url: `${origin}${base}`, sport: disciplineOf(federation),
-      foundingDate: federation.founded?.toISOString?.().slice(0,10),
+      foundingDate: CalendarDay.from(federation.founded)?.value ?? undefined,
     }],
     federation, fonts, nav, base, vocabulary, body,
   });

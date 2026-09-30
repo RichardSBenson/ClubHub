@@ -1,5 +1,10 @@
 process.env.HONBU_STORE = 'postgres';
-process.env.PGDATABASE = 'fresh';
+// This used to say PGDATABASE = 'fresh', a database nothing in the repository
+// creates — so every query failed and the route 403'd, which made a correct
+// secret look exactly like a wrong one. The assertions below want the seeded
+// register anyway: they look for Doug Holloway, for Whanganui, and for exactly
+// the two accounts the seed creates.
+import './reset.mjs';
 import http from 'node:http';
 import handler from './server.mjs';
 import { pool } from '../infrastructure/postgres/pool.mjs';

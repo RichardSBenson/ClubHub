@@ -8,7 +8,7 @@
  * grading history means.
  */
 
-import { RankOrder, GradingDate, Age, DomainError, OrgType } from './values.mjs';
+import { RankOrder, CalendarDay, Age, DomainError, OrgType } from './values.mjs';
 
 // ---------------------------------------------------------------------------
 
@@ -34,10 +34,10 @@ export class Grade {
    */
   requirementsFor({ heldSince, sessionsSince, dateOfBirth, on }) {
     const checks = [];
-    const when = GradingDate.of(on);
+    const when = CalendarDay.of(on);
 
     if (this.minMonthsAtPrevious != null) {
-      const months = heldSince ? GradingDate.of(heldSince).monthsUntil(when) : 0;
+      const months = heldSince ? CalendarDay.of(heldSince).monthsUntil(when) : 0;
       checks.push({
         name: 'time at grade', has: months, needs: this.minMonthsAtPrevious,
         met: months >= this.minMonthsAtPrevious,
@@ -172,11 +172,11 @@ export class GradingRecord {
     this.id = id;
     this.personId = personId;
     this.gradeId = gradeId;
-    this.awardedOn = GradingDate.of(awardedOn);
+    this.awardedOn = CalendarDay.of(awardedOn);
     this.awardedByOrgId = awardedByOrgId;
     this.result = result;
     this.panel = panel;
-    this.ratifiedOn = GradingDate.from(ratifiedOn);
+    this.ratifiedOn = CalendarDay.from(ratifiedOn);
     this.certificateNo = certificateNo;
   }
 

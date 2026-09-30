@@ -12,7 +12,8 @@ import { CheckEligibility } from './application/check-eligibility.mjs';
 import { AwardGrade } from './application/award-grade.mjs';
 import { Refused, NotPermitted } from './application/ports.mjs';
 import { PostgresLadder, PostgresRanks, PostgresMembers,
-         PostgresOrganisations, PostgresAuthorisation, SystemClock }
+         PostgresOrganisations, PostgresAuthorisation, PostgresTitles,
+         SystemClock }
   from '../infrastructure/postgres/repositories.mjs';
 import { InMemoryLadder, InMemoryRanks, InMemoryMembers,
          InMemoryOrganisations, AllowAll, FixedClock }
@@ -42,6 +43,10 @@ const pg = {
   members: new PostgresMembers(pool),
   organisations: new PostgresOrganisations(pool),
   auth: new PostgresAuthorisation(pool),
+  // AwardGrade grew a titles port — a panel member's authority depends on the
+  // titles they hold, not only their grade. This file never ran, so nothing
+  // said it was missing.
+  titles: new PostgresTitles(pool),
   clock: new SystemClock(),
 };
 
@@ -59,30 +64,49 @@ console.log('\nTHE SAME USE CASE, WIRED TO POSTGRES');
 
 console.log('\nAUTHORITY RULES HOLD AGAINST REAL DATA');
 {
+  // MOKNZ's real authority table, which is data and not code:
+  //
+  //   ranks  1–8   awarded by a dojo,    ratified nationally, panel of 1
+  //   ranks  9–10  awarded by a dojo,    ratified nationally, panel of 1
+  //   ranks 11–18  awarded by the country,                    panel of 3
+  //
+  // Kyu grades are a dojo's business and dan grades are the federation's,
+  // which is how Kyokushin has always done it. This file was written against
+  // an earlier table where 3rd kyu was national, and asserted the opposite of
+  // what the register now says. It never ran, so it never disagreed.
   const award = new AwardGrade(pg);
-  const thirdKyu = (await id(
-    `select id from grade where label='3rd kyu' and organisation_id=$1`, [moknz])).id;
+  const grade = async (label) => (await id(
+    `select id from grade where label=$2 and organisation_id=$1`,
+    [moknz, label])).id;
+  const thirdKyu = await grade('3rd kyu');   // rank 8  — a dojo grade
+  const shodan   = await grade('Shodan');    // rank 11 — a national grade
 
-  await throws('a dojo still cannot award a national grade', () =>
-    award.execute({ actorId: DOUG_ACCOUNT, personId: AROHA, gradeId: thirdKyu,
+  await throws('a dojo cannot award a dan grade', () =>
+    award.execute({ actorId: DOUG_ACCOUNT, personId: AROHA, gradeId: shodan,
       awardingOrgId: whanganui, awardedOn:'2026-10-17',
       panel:[{personId:DOUG},{personId:TANE}] }),
     Refused, 'must be awarded by a country');
 
-  await throws('a panel of one is still refused', () =>
+  await throws('nor can the country award a kyu grade', () =>
     award.execute({ actorId: DOUG_ACCOUNT, personId: AROHA, gradeId: thirdKyu,
       awardingOrgId: moknz, awardedOn:'2026-10-17', panel:[{personId:DOUG}] }),
-    Refused, 'panel of 2');
+    Refused, 'must be awarded by a club');
+
+  await throws('a dan panel of two is refused where three are required', () =>
+    award.execute({ actorId: DOUG_ACCOUNT, personId: AROHA, gradeId: shodan,
+      awardingOrgId: moknz, awardedOn:'2026-10-17',
+      panel:[{personId:DOUG},{personId:TANE}] }),
+    Refused, 'panel of 3');
 
   const TANE_ACCOUNT = '33333333-0000-0000-0000-000000000003';
-  await throws('a Wellington admin cannot record a national grading', () =>
+  await throws('a Wellington admin cannot record a Whanganui grading', () =>
     award.execute({ actorId: TANE_ACCOUNT, personId: AROHA, gradeId: thirdKyu,
-      awardingOrgId: moknz, awardedOn:'2026-10-17',
-      panel:[{personId:DOUG},{personId:TANE}] }), NotPermitted);
+      awardingOrgId: whanganui, awardedOn:'2026-10-17',
+      panel:[{personId:DOUG}] }), NotPermitted);
 
   const out = await award.execute({ actorId: DOUG_ACCOUNT, personId: AROHA,
-    gradeId: thirdKyu, awardingOrgId: moknz, awardedOn:'2026-09-17',
-    panel:[{personId:DOUG},{personId:TANE}] });
+    gradeId: thirdKyu, awardingOrgId: whanganui, awardedOn:'2026-09-17',
+    panel:[{personId:DOUG}] });
   ok('a valid grading writes to the register', !!out.record.id);
   ok('and the register agrees afterwards',
     (await id(`select g.label as grade_label from person_current_grade cg

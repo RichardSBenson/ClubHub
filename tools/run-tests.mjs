@@ -31,16 +31,12 @@ const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
  * test to delete — nothing is allowed to sit here quietly forever.
  */
 const KNOWN_BROKEN = {
-  'packages/api/test-bootstrap.mjs':
-    'null accountId — found 2026-09-30, alongside the bootstrap door we are closing anyway',
-  'packages/core/test-against-postgres.mjs':
-    'date_of_birth comes back a string, not a Date — found 2026-09-30, real and worth chasing',
-  'packages/core/test-content-types-postgres.mjs':
-    'same date handling as test-against-postgres — found 2026-09-30',
-  'packages/core/test-publishing-postgres.mjs':
-    'same date handling as test-against-postgres — found 2026-09-30',
-  'packages/infrastructure/test-events.mjs':
-    'looks for /tmp/002-revisions.sql, a path from the old schema layout — found 2026-09-30',
+  // Empty, and worth keeping that way. The five that were here on 2026-09-30,
+  // the day discovery first made them visible, were all fixed on 2026-10-01:
+  // a stale date assumption, three tests applying migrations from /tmp that
+  // have been part of db/install/schema.sql for months, and one pointed at a
+  // database nothing creates. None of them was hard. They had simply never
+  // been run.
 };
 
 /**

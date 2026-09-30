@@ -20,9 +20,11 @@ const throws = async (n,fn,T,m) => {
 };
 
 // Apply the migrations this test needs.
-const { execSync } = await import('node:child_process');
-for (const f of ['002-revisions','006-publishing'])
-  execSync(`su postgres -c "psql -h /tmp/pgrun -p 5433 -U postgres -d honbu -q -f /tmp/${f}.sql"`);
+// The migrations these tests used to apply by hand — from /tmp, of all
+// places — are all in db/install/schema.sql now, which reset.mjs above
+// loads in full. The section headers in that file still carry their
+// original names. Applying them again from a path that has not existed
+// for months is why this file could not start.
 
 const DOUG = '33333333-0000-0000-0000-000000000001';
 const { rows: [page] } = await pool.query(`select id from page limit 1`);

@@ -1,5 +1,4 @@
 import '../api/reset.mjs';
-import { execSync } from 'node:child_process';
 import { pool } from '../infrastructure/postgres/pool.mjs';
 import { DefineContentType } from './application/define-content-type.mjs';
 import { SaveEntry } from './application/save-entry.mjs';
@@ -8,8 +7,11 @@ import { FieldType, RoutePattern } from './domain/content-types.mjs';
 import { PostgresContentTypes, PostgresContentEntries,
          PostgresAuthorisation, SystemClock } from '../infrastructure/postgres/repositories.mjs';
 
-for (const f of ['003-auth','008-content-types'])
-  execSync(`su postgres -c "psql -h /tmp/pgrun -p 5433 -U postgres -d honbu -q -f /tmp/${f}.sql"`);
+// The migrations these tests used to apply by hand — from /tmp, of all
+// places — are all in db/install/schema.sql now, which reset.mjs above
+// loads in full. The section headers in that file still carry their
+// original names. Applying them again from a path that has not existed
+// for months is why this file could not start.
 
 let pass = 0, fail = 0;
 const ok = (n,c,d='') => c ? (pass++,console.log(`  ✓ ${n}`))

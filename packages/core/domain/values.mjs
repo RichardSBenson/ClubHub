@@ -66,8 +66,15 @@ export class MemberNumber {
  * A date with no time and no zone. A grading happened on a day; the hour it was
  * written down is not part of the fact, and carrying a timestamp across time
  * zones is how a grading slides to the previous evening.
+ *
+ * The same is true of a birthday, a founding date and a publication date, so
+ * this was renamed from GradingDate — it was already being used for all of
+ * them, and the narrow name was why two places went and reinvented it badly
+ * instead. Taking either a Date or a 'YYYY-MM-DD' string is the point: the
+ * shape a date arrives in depends on which store answered, and that is not
+ * something a caller should have to know.
  */
-export class GradingDate {
+export class CalendarDay {
   #iso;
 
   constructor(value) {
@@ -81,15 +88,15 @@ export class GradingDate {
     this.#iso = iso;
   }
 
-  static of(value) { return new GradingDate(value); }
-  static from(value) { return value == null ? null : new GradingDate(value); }
+  static of(value) { return new CalendarDay(value); }
+  static from(value) { return value == null ? null : new CalendarDay(value); }
 
   get value() { return this.#iso; }
-  isAfter(other) { return this.#iso > GradingDate.of(other).value; }
-  isBefore(other) { return this.#iso < GradingDate.of(other).value; }
+  isAfter(other) { return this.#iso > CalendarDay.of(other).value; }
+  isBefore(other) { return this.#iso < CalendarDay.of(other).value; }
 
   monthsUntil(other) {
-    const a = new Date(this.#iso), b = new Date(GradingDate.of(other).value);
+    const a = new Date(this.#iso), b = new Date(CalendarDay.of(other).value);
     let months = (b.getFullYear() - a.getFullYear()) * 12
       + (b.getMonth() - a.getMonth());
     if (b.getDate() < a.getDate()) months -= 1;
@@ -103,8 +110,8 @@ export class GradingDate {
 /** Whole years on a given day. Never stored — always derived. */
 export class Age {
   static onDate(dateOfBirth, on) {
-    const dob = GradingDate.of(dateOfBirth);
-    const d = GradingDate.of(on);
+    const dob = CalendarDay.of(dateOfBirth);
+    const d = CalendarDay.of(on);
     let years = Math.floor(dob.monthsUntil(d) / 12);
     return Math.max(0, years);
   }

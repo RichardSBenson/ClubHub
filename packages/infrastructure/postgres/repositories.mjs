@@ -11,6 +11,7 @@
 
 import { Grade, GradingAuthority, GradingRecord }
   from '../../core/domain/rank.mjs';
+import { CalendarDay } from '../../core/domain/values.mjs';
 
 export class PostgresLadder {
   constructor(pool) { this.pool = pool; }
@@ -125,7 +126,7 @@ export class PostgresMembers {
     if (!r) return null;
     return {
       id: r.id,
-      dateOfBirth: r.date_of_birth ? r.date_of_birth.toISOString().slice(0, 10) : null,
+      dateOfBirth: CalendarDay.from(r.date_of_birth)?.value ?? null,
       displayNumber: r.display_number,
       organisationId: r.organisation_id,
     };

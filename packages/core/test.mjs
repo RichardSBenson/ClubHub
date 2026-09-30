@@ -7,7 +7,7 @@
 import { CheckEligibility } from './application/check-eligibility.mjs';
 import { AwardGrade } from './application/award-grade.mjs';
 import { Refused, NotPermitted } from './application/ports.mjs';
-import { RankOrder, MemberNumber, GradingDate, Age, DomainError }
+import { RankOrder, MemberNumber, CalendarDay, Age, DomainError }
   from './domain/values.mjs';
 import { Grade, GradingAuthority, RankHistory, GradingRecord } from './domain/rank.mjs';
 import { InMemoryLadder, InMemoryRanks, InMemoryMembers, InMemoryOrganisations,
@@ -36,9 +36,9 @@ console.log('\nVALUE OBJECTS ENFORCE THEIR OWN RULES');
     (() => { try { MemberNumber.of('417'); return false; } catch { return true; } })());
   ok('country prefix is readable', MemberNumber.of('JP-0001').countryCode === 'JP');
   ok('a grading date drops the time',
-    GradingDate.of('2026-10-17T23:30:00Z').value === '2026-10-17');
+    CalendarDay.of('2026-10-17T23:30:00Z').value === '2026-10-17');
   ok('months between dates are whole months',
-    GradingDate.of('2024-10-19').monthsUntil('2026-09-17') === 22);
+    CalendarDay.of('2024-10-19').monthsUntil('2026-09-17') === 22);
   ok('age is derived on a given day',
     Age.onDate('2011-08-04', '2026-09-17') === 15);
   ok('and is 14 the day before the birthday',
