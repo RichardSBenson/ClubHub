@@ -233,23 +233,46 @@ export function renderBlocks(doc, data = {}, { origin = '' } = {}) {
   }).filter(Boolean).join('\n');
 }
 
+/**
+ * The words out of a rich-text value, whatever shape it is in.
+ *
+ * Rich text is an array of runs. It is also, legally, a bare string — cleanRich
+ * accepts one and this file has always said so. But a document that came from a
+ * seed, a migration or somebody's SQL console never went through cleanRich, so
+ * it arrives exactly as it was written.
+ *
+ * Both readers below used to assume the array. A single page with a plain
+ * string in it killed the whole site build with "(p.text ?? []).map is not a
+ * function" — no page name, no slug, just a stack. Reading is where a document
+ * from outside arrives, so reading is where it has to be tolerated.
+ */
+function wordsOf(value) {
+  if (typeof value === 'string') return value;
+  if (!Array.isArray(value)) return '';
+  return value.map((run) =>
+    typeof run === 'string' ? run : String(run?.text ?? '')).join('');
+}
+
 /** First paragraph, trimmed — a fallback meta description. */
 export function excerpt(doc, max = 155) {
   const p = (doc?.blocks ?? []).find((b) => b.type === 'paragraph');
   if (!p) return '';
-  const text = (p.text ?? []).map((r) => r.text).join('');
-  return text.length <= max ? text
-    : text.slice(0, text.lastIndexOf(' ', max)) + '…';
+  const text = wordsOf(p.text);
+  if (text.length <= max) return text;
+  // lastIndexOf returns -1 when there is no space to break on, and slicing to
+  // -1 drops the last character instead of cutting at the limit.
+  const cut = text.lastIndexOf(' ', max);
+  return text.slice(0, cut > 0 ? cut : max) + '…';
 }
 
 /** Plain text, for search indexing and for checking a page is not empty. */
 export function toText(doc) {
   return (doc?.blocks ?? []).map((b) => {
-    if (b.type === 'heading') return b.text ?? '';
+    if (b.type === 'heading') return typeof b.text === 'string' ? b.text : wordsOf(b.text);
     if (b.type === 'paragraph' || b.type === 'callout' || b.type === 'quote')
-      return (b.text ?? []).map((r) => r.text).join('');
+      return wordsOf(b.text);
     if (b.type === 'list')
-      return (b.items ?? []).map((i) => i.map((r) => r.text).join('')).join(' ');
+      return (b.items ?? []).map(wordsOf).join(' ');
     return '';
   }).filter(Boolean).join('\n');
 }

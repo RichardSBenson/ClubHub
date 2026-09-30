@@ -195,7 +195,11 @@ for (const target of SITES) {
     const html = renderBlocks(pg.body, { dojos, events: evs },
       { origin: ORIGIN + base });
     await write(`${pg.slug}/index.html`, R.authoredPage({
-      page: pg, html, description: excerpt(pg.body), ...shared,
+      // Only computed when the page has no description of its own, as it was
+      // before: reading every page's first paragraph to throw it away is work
+      // for nothing, and it is work done on data from outside.
+      page: pg, html, description: pg.meta_description ?? excerpt(pg.body),
+      ...shared,
     }));
   }
 

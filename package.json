@@ -10,7 +10,7 @@
   },
   "scripts": {
     "db": "psql -f db/schema.sql && psql -f db/seed-moknz.sql",
-    "test": "cd packages/brand && node test.mjs && cd ../content && node test.mjs && node test-marks.mjs && node test-page-form.mjs && cd ../core && node test-calendar.mjs && node test-roll-import.mjs && node test-competition.mjs && cd ../api && node test-zones.mjs && node test.mjs && node test-pages.mjs && node test-auth.mjs && node test-server.mjs && node test-events.mjs && node test-members.mjs && node test-entries.mjs && node test-website.mjs && cd ../wallet && node test.mjs && cd ../site && node build.mjs && node verify.mjs",
+    "test": "cd packages/brand && node test.mjs && cd ../content && node test.mjs && node test-marks.mjs && node test-page-form.mjs && cd ../core && node test-calendar.mjs && node test-roll-import.mjs && node test-competition.mjs && cd ../api && node test-zones.mjs && node test.mjs && node test-pages.mjs && node test-auth.mjs && node test-server.mjs && node test-events.mjs && node test-members.mjs && node test-entries.mjs && node test-website.mjs && cd ../wallet && node test.mjs && cd ../site && node build.mjs && node verify.mjs && node test-postgres-build.mjs",
     "build": "node tools/check-dependencies.mjs && node tools/check-wiring.mjs && node packages/site/build.mjs",
     "export": "node tools/export-to-json.mjs",
     "check": "node tools/check-dependencies.mjs && node tools/check-wiring.mjs",

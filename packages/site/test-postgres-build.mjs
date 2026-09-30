@@ -1,0 +1,147 @@
+/**
+ * The site build, against the database it actually deploys against.
+ *
+ * Every other check on the build runs it from the JSON files, because that is
+ * what a laptop has. The hosted deployment builds from Postgres, and the two
+ * are not the same: a page written by a seed or a migration never went through
+ * the block validator, so it arrives in whatever shape it was written in.
+ *
+ * A single page holding its paragraph text as a bare string — legal, accepted
+ * by the validator, present in the seed — killed the entire build with
+ * "(p.text ?? []).map is not a function". No page name, no slug, just a stack
+ * trace, and a green test suite right up until the deploy failed.
+ *
+ * So this runs the real build against a real database, with the awkward shapes
+ * deliberately in it.
+ */
+
+import '../api/reset.mjs';
+import { execSync } from 'node:child_process';
+import fs from 'node:fs';
+import path from 'node:path';
+import { pool } from '../api/data.mjs';
+
+let pass = 0, fail = 0;
+const ok = (n, c, d = '') => c ? (pass++, console.log(`  ✓ ${n}`))
+                               : (fail++, console.log(`  ✗ ${n}  ${d}`));
+
+const OUT = '/tmp/honbu-pg-build';
+const org = (await pool.query(
+  `select id from organisation where slug = 'moknz'`)).rows[0];
+
+// ---------------------------------------------------------------------------
+// the shapes that arrive from outside the editor
+// ---------------------------------------------------------------------------
+
+const AWKWARD = [
+  ['bare-string',
+   'Text as a plain string, which cleanRich accepts and the readers did not',
+   { blocks: [{ type: 'paragraph', text: 'Founded in 1965 in Whanganui.' }] }],
+
+  ['array-of-strings',
+   'Runs as plain strings rather than objects',
+   { blocks: [{ type: 'paragraph', text: ['One sentence. ', 'And another.'] }] }],
+
+  ['no-paragraph',
+   'A page with nothing excerpt can read',
+   { blocks: [{ type: 'heading', text: 'Just a heading', level: 2 },
+              { type: 'divider' }] }],
+
+  ['no-spaces',
+   'One very long word, so there is nowhere to break the excerpt',
+   { blocks: [{ type: 'paragraph', text: 'x'.repeat(400) }] }],
+
+  ['mixed-list',
+   'A list whose items are strings rather than arrays of runs',
+   { blocks: [{ type: 'paragraph', text: 'Times below.' },
+              { type: 'list', items: ['Tuesday', 'Thursday'] }] }],
+];
+
+for (const [slug, title, body] of AWKWARD) {
+  await pool.query(`
+    insert into page (organisation_id, slug, title, body, status, published_at)
+    values ($1,$2,$3,$4::jsonb,'published',now())
+    on conflict (organisation_id, slug) do update
+      set body = excluded.body, status = 'published'`,
+    [org.id, slug, title, JSON.stringify(body)]);
+}
+
+console.log('\nTHE BUILD RUNS AGAINST POSTGRES AT ALL');
+{
+  let output = '';
+  let threw = null;
+  try {
+    output = execSync('node packages/site/build.mjs', {
+      cwd: new URL('../../', import.meta.url).pathname,
+      env: { ...process.env, HONBU_STORE: 'postgres', OUT },
+      stdio: 'pipe',
+    }).toString();
+  } catch (e) {
+    threw = e;
+  }
+
+  ok('it does not die on real content', !threw,
+    threw ? String(threw.stderr ?? threw.message).slice(0, 400) : '');
+  ok('and says which store it used', output.includes('store: postgres'), output.slice(-120));
+}
+
+console.log('\nEVERY AWKWARD PAGE WAS BUILT');
+{
+  for (const [slug, title] of AWKWARD) {
+    const file = path.join(OUT, slug, 'index.html');
+    const there = fs.existsSync(file);
+    ok(`${slug} — ${title.toLowerCase()}`, there, 'not built');
+    if (!there) continue;
+    const html = fs.readFileSync(file, 'utf8');
+    ok(`  its title is on the page`, html.includes(title), 'title missing');
+    ok(`  and it is a whole page`, html.includes('<!DOCTYPE html>'));
+  }
+}
+
+console.log('\nTHE WORDS SURVIVE WHATEVER SHAPE THEY WERE IN');
+{
+  const read = (slug) => fs.readFileSync(path.join(OUT, slug, 'index.html'), 'utf8');
+
+  ok('a bare string renders as text',
+    read('bare-string').includes('Founded in 1965 in Whanganui.'));
+  ok('an array of plain strings joins up',
+    read('array-of-strings').includes('One sentence. And another.'));
+  ok('a list of plain strings renders its items',
+    read('mixed-list').includes('Tuesday') && read('mixed-list').includes('Thursday'));
+}
+
+console.log('\nTHE DESCRIPTION SEARCH ENGINES GET');
+{
+  const meta = (slug) => (fs.readFileSync(path.join(OUT, slug, 'index.html'), 'utf8')
+    .match(/<meta name="description" content="([^"]*)"/) ?? [])[1];
+
+  ok('comes from the first paragraph when the page has none of its own',
+    meta('bare-string')?.startsWith('Founded in 1965'), meta('bare-string'));
+  ok('is empty rather than broken when there is no paragraph',
+    meta('no-paragraph') === '', JSON.stringify(meta('no-paragraph')));
+
+  const long = meta('no-spaces');
+  ok('a word with nowhere to break is cut at the limit, not mangled',
+    long.length > 100 && long.length <= 160 && long.endsWith('…'),
+    `${long.length} chars, ends "${long.slice(-4)}"`);
+  ok('and it does not lose its last character to a -1 slice',
+    !long.startsWith('…'), long.slice(0, 8));
+}
+
+console.log('\nAND THE REST OF THE SITE IS STILL THERE');
+{
+  for (const p of ['index.html', 'find-a-dojo/index.html', 'events/index.html',
+                   'news/index.html', 'sitemap.xml', 'robots.txt', 'theme.css']) {
+    ok(p, fs.existsSync(path.join(OUT, p)), 'missing');
+  }
+  const sitemap = fs.readFileSync(path.join(OUT, 'sitemap.xml'), 'utf8');
+  ok('the new pages are in the sitemap',
+    AWKWARD.every(([slug]) => sitemap.includes(`/${slug}`)),
+    AWKWARD.filter(([s]) => !sitemap.includes(`/${s}`)).map(([s]) => s).join(','));
+}
+
+fs.rmSync(OUT, { recursive: true, force: true });
+
+console.log(`\n${pass} passed, ${fail} failed\n`);
+await pool.end();
+process.exit(fail ? 1 : 0);
