@@ -1462,3 +1462,27 @@ alter table event
   add column if not exists consent_text text,
   -- Whether somebody who is not on any roll may enter at all.
   add column if not exists guests_allowed boolean not null default false;
+
+-- ---------------------------------------------------------------------------
+--  016 — asset bytes
+--
+--  The asset table shipped with a storage_key pointing into a blob service
+--  that was never set up, so every image block rendered as nothing. The bytes
+--  live in the federation's own database instead: one install is one
+--  federation, data residency follows the database, and there is no second
+--  service to configure on install. The public site is built at deploy and
+--  writes these out as real files, so nothing serves an image from here except
+--  the admin preview.
+-- ---------------------------------------------------------------------------
+
+create table asset_blob (
+  asset_id  uuid primary key references asset(id) on delete cascade,
+  bytes     bytea not null
+);
+
+comment on table asset_blob is
+  'Image bytes. Separate from asset so listing metadata stays cheap.';
+
+alter table asset alter column storage_key set default '';
+
+create index asset_organisation_idx on asset (organisation_id, created_at desc);
