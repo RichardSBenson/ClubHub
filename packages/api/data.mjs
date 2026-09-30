@@ -339,6 +339,109 @@ export const people = {
   },
 
   /**
+   * Give somebody access to the register.
+   *
+   * Creates the account if they have not got one, grants the role, and hands
+   * back a sign-in link the administrator can pass on — by message, on paper,
+   * or read out over the phone.
+   *
+   * ## Why a link an administrator can see
+   *
+   * Sign-in is a link emailed to you, which is right, and which means the
+   * system cannot let anybody in until email is configured for that
+   * federation's own domain. That is a wall in front of the first thing a new
+   * install needs to do: add a second administrator.
+   *
+   * It is also a permanent need. A member with no email address, or an
+   * address that bounces, or somebody standing in the hall who cannot receive
+   * anything right now — a registrar has to be able to get them in. Every
+   * membership system has this; it is what "resend the invitation" is.
+   *
+   * ## What it is not
+   *
+   * Not a way to read somebody's mail, and not a password. The link expires
+   * in fifteen minutes, works once, and is recorded in the audit log with who
+   * created it. An administrator who creates a link for a member can sign in
+   * as that member — which is true of every system where an administrator can
+   * reset a password, and is the reason this is restricted to the roles that
+   * already administer the register, scoped to the organisations they
+   * administer, and written down every time.
+   */
+  async grantAccess(actor, personId, { role = 'member', email = null,
+                                       organisationId = null } = {}) {
+    const person = await one('select * from person where id = $1', [personId]);
+    if (!person) throw new NotFound('Person');
+
+    const home = organisationId ?? (await one(`
+      select organisation_id from affiliation
+      where person_id = $1 and ends is null
+      order by case role when 'member' then 0 else 1 end limit 1`,
+      [personId]))?.organisation_id;
+    if (!home) throw new NotFound('Person has no current affiliation');
+    await assertRole(actor, home, MANAGE);
+
+    const address = (email ?? person.email ?? '').trim().toLowerCase();
+    if (!address) {
+      throw new Invalid(
+        `${person.first_name} has no email address on file. Add one to their `
+        + 'record first — an account is identified by its address, even when '
+        + 'the link is handed over rather than sent.');
+    }
+    if (!/^[^\s@]+@[^\s@.]+\.[^\s@]+$/.test(address))
+      throw new Invalid(`"${address}" does not look like an email address`);
+
+    const client = await pool.connect();
+    try {
+      await client.query('begin');
+
+      // An address already used by somebody else is a different person, not
+      // this one. Silently attaching it would hand over their account.
+      const { rows: [clash] } = await client.query(
+        `select person_id from account where email = $1`, [address]);
+      if (clash && clash.person_id && clash.person_id !== personId) {
+        throw new Invalid(
+          `${address} already belongs to somebody else's account.`);
+      }
+
+      const { rows: [account] } = await client.query(`
+        insert into account (person_id, email) values ($1,$2)
+        on conflict (email) do update set person_id = coalesce(account.person_id,
+          excluded.person_id)
+        returning *`, [personId, address]);
+
+      await client.query(`
+        insert into grant_role (account_id, organisation_id, role, granted_by)
+        values ($1,$2,$3,$4)
+        on conflict (account_id, organisation_id, role) do nothing`,
+        [account.id, home, role, actor]);
+
+      await client.query(`
+        insert into audit_log (account_id, organisation_id, action, entity,
+                               entity_id, after)
+        values ($1,$2,'grant_access','account',$3,$4::jsonb)`,
+        [actor, home, account.id, JSON.stringify({ personId, role, address })]);
+
+      await client.query('commit');
+      return { account, organisationId: home, role };
+    } catch (e) {
+      await client.query('rollback');
+      throw e;
+    } finally { client.release(); }
+  },
+
+  /** Who already has a way in, and what they may do. */
+  async accessFor(actor, personId) {
+    const account = await one(
+      'select * from account where person_id = $1', [personId]);
+    if (!account) return null;
+    const roles = await q(`
+      select gr.role, o.name, o.slug from grant_role gr
+      join organisation o on o.id = gr.organisation_id
+      where gr.account_id = $1 order by o.path`, [account.id]);
+    return { account, roles };
+  },
+
+  /**
    * Write an agreed import.
    *
    * Takes the rows a person has already looked at and approved — this does not

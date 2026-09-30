@@ -144,6 +144,8 @@ function pathFor(pattern) {
     pageId: theirPage.id,
     pageSlug: theirPage.slug,
     id: theirPerson ? theirPerson.id : '00000000-0000-0000-0000-000000000000',
+    // /p/:id/access — creating an account for somebody else's member is
+    // exactly the kind of thing this probe exists to refuse.
     token: 'not-a-real-token',
     secret: 'not-a-real-secret',
   };

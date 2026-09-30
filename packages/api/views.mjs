@@ -204,7 +204,8 @@ export const roster = ({ me, csrf, org, roster, canRegister = false,
     : '<div class="note">Nobody on the roll yet.</div>'}` });
 
 export const person = ({ me, csrf, person, history, affiliations, eligibility,
-                        canEdit = false }) => page({
+                        canEdit = false, access = null, link = null,
+                        linkExpires = 15, error = null }) => page({
   title: `${person.first_name} ${person.last_name}`, me, csrf, body: `
   <h1>${esc(person.first_name)} ${esc(person.last_name)}</h1>
   <p class="sub">${esc(person.display_number ?? 'no member number')}
@@ -233,6 +234,60 @@ export const person = ({ me, csrf, person, history, affiliations, eligibility,
         : '<span class="muted">pending</span>'}</td>
     </tr>`).join('')}</tbody></table>`
     : '<div class="note">No gradings on file.</div>'}
+
+  ${link ? `<div class="good">
+    <strong>Their way in — copy it now.</strong>
+    <p style="margin:8px 0">This is shown once. It works for
+      ${linkExpires} minutes and can only be used a single time.
+      Send it to them however you like, or let them open it here.</p>
+    <input readonly value="${esc(link)}" onclick="this.select()"
+      style="max-width:100%;font-family:ui-monospace,monospace;font-size:13px">
+    <p class="muted" style="margin:8px 0 0">Lost it? Make another — there is
+      no limit, and the old one stops working as soon as it is used.</p>
+  </div>` : ''}
+
+  ${error ? `<div class="bad">${esc(error)}</div>` : ''}
+
+  ${canEdit ? `
+  <h2>Signing in</h2>
+  ${access
+    ? `<p>They have an account as <strong>${esc(access.account.email)}</strong>${
+        access.roles.length
+          ? `, with ${access.roles.map((r) =>
+              `${esc(r.role)} at ${esc(r.name)}`).join(' and ')}`
+          : ', with no role anywhere yet'}.</p>`
+    : '<p class="muted">They have no account, so they cannot sign in.</p>'}
+
+  <form method="post" action="/p/${esc(person.id)}/access">
+    <input type="hidden" name="_csrf" value="${esc(csrf ?? '')}">
+    <div class="row">
+      <div>
+        <label for="access_email">Their email
+          <span class="hint">How the account is identified, even when you
+            hand the link over rather than send it.</span></label>
+        <input id="access_email" name="email" type="email" maxlength="200"
+          value="${esc(access?.account?.email ?? person.email ?? '')}">
+      </div>
+      <div>
+        <label for="access_role">What they may do</label>
+        <select id="access_role" name="role">
+          ${[['member', 'Member — see their own record'],
+             ['instructor', 'Instructor — see the roll'],
+             ['registrar', 'Registrar — add and correct members, run gradings'],
+             ['administrator', 'Administrator — everything, including the website'],
+             ['owner', 'Owner — everything, including other administrators']]
+            .map(([v, l]) => option(v, l, 'member')).join('')}
+        </select>
+      </div>
+    </div>
+    <div class="actions">
+      <button class="btn" type="submit">
+        ${access ? 'Make them a new sign-in link' : 'Give them access'}</button>
+    </div>
+    <p class="hint">Nothing is emailed. You get a link to pass on — useful
+      before a federation's own email is set up, and afterwards for anybody
+      whose address bounces or who is standing in front of you.</p>
+  </form>` : ''}
 
   <h2>Affiliation</h2>
   <ul class="plain">${affiliations.map((a) => `<li>
