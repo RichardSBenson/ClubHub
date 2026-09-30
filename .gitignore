@@ -2,3 +2,10 @@ node_modules/
 dist/
 .env
 .env.*
+
+# Tooling installed into the working copy, not part of Honbu.
+# `npx neon@latest skills -s neon -s neon-postgres -y` writes these; they are
+# vendor documentation for whoever is working on the code, and a federation
+# that installs Honbu has no use for them.
+.claude/
+skills-lock.json
