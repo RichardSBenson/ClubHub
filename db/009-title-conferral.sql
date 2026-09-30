@@ -1,3 +1,10 @@
+-- applied-when: select exists (select 1 from information_schema.columns where table_name='title' and column_name='conferred_by_rank')
+--
+-- How tools/migrate.mjs tells whether this migration is already in a
+-- database. True means it is, and the migration is recorded without being
+-- run again — which is what lets a database that predates the runner be
+-- baselined honestly rather than guessed at.
+
 -- ===========================================================================
 --  How a title is obtained is itself configuration
 --

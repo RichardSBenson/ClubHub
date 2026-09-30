@@ -1,6 +1,6 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
-  "buildCommand": "node tools/check-dependencies.mjs && node tools/check-wiring.mjs && node packages/site/build.mjs",
+  "buildCommand": "node tools/check-dependencies.mjs && node tools/check-wiring.mjs && node tools/migrate.mjs && node packages/site/build.mjs",
   "outputDirectory": "dist",
   "functions": {
     "api/index.js": {

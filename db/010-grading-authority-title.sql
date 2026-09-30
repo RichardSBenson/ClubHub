@@ -1,3 +1,10 @@
+-- applied-when: select exists (select 1 from information_schema.columns where table_name='grade_authority' and column_name='requires_title_id')
+--
+-- How tools/migrate.mjs tells whether this migration is already in a
+-- database. True means it is, and the migration is recorded without being
+-- run again — which is what lets a database that predates the runner be
+-- baselined honestly rather than guessed at.
+
 -- ===========================================================================
 --  010 — a grading authority may require a title on the panel
 --

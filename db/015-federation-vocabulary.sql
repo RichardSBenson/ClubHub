@@ -1,3 +1,16 @@
+-- applied-when: select not exists (select 1 from organisation where path='moknz' and not (settings ? 'vocabulary'))
+--
+-- Reads as "there is no MOKNZ row still missing its vocabulary", which is
+-- true both after this has run and on any install that has no MOKNZ at all.
+-- This is the one migration here that repairs a particular federation's data
+-- rather than changing the schema, and a buyer installing Honbu for their own
+-- federation should never see it run.
+--
+-- How tools/migrate.mjs tells whether this migration is already in a
+-- database. True means it is, and the migration is recorded without being
+-- run again — which is what lets a database that predates the runner be
+-- baselined honestly rather than guessed at.
+
 -- ===========================================================================
 --  A federation's words belong to the federation, not to the deployment
 --

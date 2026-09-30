@@ -1,3 +1,10 @@
+-- applied-when: select to_regclass('public.redirect') is not null
+--
+-- How tools/migrate.mjs tells whether this migration is already in a
+-- database. True means it is, and the migration is recorded without being
+-- run again — which is what lets a database that predates the runner be
+-- baselined honestly rather than guessed at.
+
 -- ===========================================================================
 --  Routing lives in the register, not in code.
 --
