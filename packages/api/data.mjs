@@ -2077,7 +2077,10 @@ export const clubProfile = {
   /** The club, and who runs it, who trains in it, and what is coming up. */
   async get(actor, orgId) {
     await assertRole(actor, orgId, MANAGE);
-    const club = await one(`select * from organisation where id=$1 and type='club'`, [orgId]);
+    // The date as text: pg hands a DATE back as a JS Date at local midnight,
+    // and turning that into a string shifts it a day on a server east of UTC.
+    const club = await one(`select *, to_char(founded,'YYYY-MM-DD') as founded_iso
+      from organisation where id=$1 and type='club'`, [orgId]);
     if (!club) throw new NotFound('Club');
 
     const { rows: administrators } = await pool.query(`
@@ -2107,7 +2110,8 @@ export const clubProfile = {
 
   async save(actor, orgId, input) {
     await assertRole(actor, orgId, MANAGE);
-    const before = await one(`select * from organisation where id=$1 and type='club'`, [orgId]);
+    const before = await one(`select *, to_char(founded,'YYYY-MM-DD') as founded_iso
+      from organisation where id=$1 and type='club'`, [orgId]);
     if (!before) throw new NotFound('Club');
 
     const problems = problemsWithClubProfile(input);
@@ -2117,15 +2121,13 @@ export const clubProfile = {
       update organisation
          set name=$2, short_name=$3, founded=$4::date, timezone=$5, status=$6,
              updated_at=now()
-       where id=$1 returning *`,
+       where id=$1 returning *, to_char(founded,'YYYY-MM-DD') as founded_iso`,
       [orgId, input.name, input.shortName, input.founded, input.timezone, input.status]);
 
     const was = { name: before.name, status: before.status, timezone: before.timezone,
-                  short_name: before.short_name,
-                  founded: before.founded ? String(before.founded.toISOString?.().slice(0, 10) ?? before.founded) : null };
+                  short_name: before.short_name, founded: before.founded_iso };
     const now = { name: row.name, status: row.status, timezone: row.timezone,
-                  short_name: row.short_name,
-                  founded: row.founded ? String(row.founded.toISOString?.().slice(0, 10) ?? row.founded) : null };
+                  short_name: row.short_name, founded: row.founded_iso };
     await pool.query(`
       insert into audit_log (account_id, organisation_id, action, entity,
                              entity_id, before, after)

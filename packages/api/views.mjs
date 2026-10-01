@@ -297,6 +297,7 @@ export function rail({ org, vocabulary = {}, can = {}, path = '' }) {
   ]) : ''}
   ${can.manage ? group('Organisation', [
     !isClub && link(`${base}/clubs`, vocabulary.clubPlural ?? `${club}s`),
+    isClub && link(`${base}/profile`, `${club} details`),
     link(`${base}/history`, 'History'),
   ]) : ''}
   <div class="all"><nav aria-label="All organisations">
@@ -2788,4 +2789,66 @@ export const clubsScreen = ({ me, csrf, org, clubs = [], values = {}, error,
       <td>${c.has_administrator ? 'Yes' : '<span class="tag no">Nobody yet</span>'}</td>
       <td>${c.page_live ? '<span class="tag ok">Live</span>' : '<span class="muted">Not listed</span>'}</td>
     </tr>`).join('')}</tbody></table>` : '<div class="note">No clubs yet.</div>'}` });
+};
+
+/**
+ * A club's own screen: what it is, who runs it, what is happening.
+ *
+ * One page to start from rather than five. Contact details and training
+ * times are not here on purpose — they are the club's page, and a second
+ * place to type a phone number is how two of them end up different.
+ */
+export const clubProfileScreen = ({ me, csrf, org, club, parent, administrators = [],
+                                    counts = {}, page: pageRow, values = null, error, done,
+                                    rebuild }) => {
+  const v = (k, fallback) => esc(values?.[k] ?? fallback ?? '');
+  const founded = club.founded_iso ?? '';
+  const zones = Intl.supportedValuesOf('timeZone');
+  const state = values?.status ?? club.status;
+  const pageState = pageRow?.published ? 'Live on the website'
+    : pageRow?.page_requested_at ? 'Waiting for the federation' : 'Not on the website';
+
+  return page({ title: `${club.name} — details`, me, csrf, body: `
+  <h1>${esc(club.name)}</h1>
+  <p class="sub">${parent ? `Part of ${esc(parent.name)} · ` : ''}${esc(pageState)}</p>
+  ${done ? `<div class="good">${esc(done)}</div>` : ''}
+  ${error ? `<div class="bad">${esc(error)}</div>` : ''}
+  ${rebuild ? `<div class="note">${esc(rebuild)}</div>` : ''}
+
+  <div class="row">
+    <div><a href="/o/${esc(org.slug)}/roster"><strong>${counts.members ?? 0}</strong> members</a></div>
+    <div><strong>${counts.instructors ?? 0}</strong> instructors</div>
+    <div><a href="/o/${esc(org.slug)}/events"><strong>${counts.upcoming ?? 0}</strong> upcoming events</a></div>
+    <div><a href="/o/${esc(org.slug)}/club-page">Edit the club's page</a></div>
+  </div>
+
+  <h2>Details</h2>
+  <form method="post" action="/o/${esc(org.slug)}/profile">
+    <input type="hidden" name="_csrf" value="${esc(csrf ?? '')}">
+    <div class="row">
+      <div><label for="name">Name</label>
+        <input id="name" name="name" required maxlength="80" value="${v('name', club.name)}"></div>
+      <div><label for="shortName">Short name <span class="muted">(optional)</span></label>
+        <input id="shortName" name="shortName" maxlength="12" value="${v('shortName', club.short_name)}"></div>
+    </div>
+    <div class="row">
+      <div><label for="founded">Began <span class="muted">(optional, 2009-03-14)</span></label>
+        <input id="founded" name="founded" maxlength="10" value="${v('founded', founded)}"></div>
+      <div><label for="timezone">Timezone</label>
+        <input id="timezone" name="timezone" list="zones" required value="${v('timezone', club.timezone)}">
+        <datalist id="zones">${zones.map((z) => `<option value="${esc(z)}">`).join('')}</datalist></div>
+    </div>
+    <fieldset><legend>Is the club running?</legend>
+      <label><input type="radio" name="status" value="active"${state === 'active' ? ' checked' : ''}> Running</label>
+      <label><input type="radio" name="status" value="dormant"${state === 'dormant' ? ' checked' : ''}> On a break
+        <span class="muted">— comes off the website; nothing is deleted</span></label>
+    </fieldset>
+    <div class="actions"><button class="btn" type="submit">Save</button></div>
+  </form>
+
+  <h2>Who runs it</h2>
+  ${administrators.length ? `<table><tbody>${administrators.map((a) => `<tr>
+    <td>${esc([a.first_name, a.last_name].filter(Boolean).join(' ') || '—')}</td>
+    <td>${esc(a.email)}</td><td>${esc(a.role)}</td></tr>`).join('')}</tbody></table>`
+    : '<div class="note">Nobody has administrator access yet. Open a member\'s record to give it.</div>'}` });
 };
