@@ -1557,7 +1557,7 @@ const BLOCK_NAMES = Object.fromEntries(BLOCK_MENU);
  * are. It also means every change leaves a revision.
  */
 export const pageEditor = ({ me, csrf, org, page: pg, values = {},
-                             blocks = [], dropped = [], revisions = [],
+                             dropped = [], revisions = [], images = [],
                              canPublish = false, done, error, warning }) => {
   const isNew = !pg;
   const action = isNew
@@ -1607,7 +1607,7 @@ export const pageEditor = ({ me, csrf, org, page: pg, values = {},
     </fieldset>
 
     <h2>What is on it</h2>
-    ${writingBox({ name: 'body', value: values.body ?? '' })}
+    ${writingBox({ name: 'body', value: values.body ?? '', images, org })}
 
     <div class="actions">
       <button class="btn" type="submit" name="op" value="save">
@@ -2071,7 +2071,7 @@ export const newsList = ({ me, csrf, org, articles = [], waiting = [],
  * has and a page does not: a summary, a hero image and tags.
  */
 export const articleEditor = ({ me, csrf, org, article: a = null, values = {},
-                                blocks = [], dropped = [], images = [],
+                                dropped = [], images = [],
                                 canPublish = false, done, error }) => {
   const isNew = !a;
   const action = isNew
@@ -2092,7 +2092,7 @@ export const articleEditor = ({ me, csrf, org, article: a = null, values = {},
   ${dropped.length ? `<div class="note"><strong>Some of that could not be
     kept.</strong> ${dropped.map(esc).join('; ')}</div>` : ''}
 
-  <form method="post" action="${esc(action)}">
+  <form method="post" action="${esc(action)}" enctype="multipart/form-data">
     <input type="hidden" name="_csrf" value="${esc(csrf ?? '')}">
 
     <fieldset>
@@ -2126,8 +2126,15 @@ export const articleEditor = ({ me, csrf, org, article: a = null, values = {},
               values.heroAssetId === img.id ? ' selected' : ''}>${
               esc(img.filename ?? img.id)}${img.alt_text ? '' : ' — no description'}</option>`).join('')}
           </select>
-          ${images.length ? '' : `<p class="hint">No images yet.
-            <a href="/o/${esc(org.slug)}/media">Upload one</a> first.</p>`}
+
+          <p style="margin-top:8px"><label for="heroFile">…or add one now
+            <span class="hint">It is uploaded when you save, and goes into
+              your images as well.</span><br>
+            <input id="heroFile" type="file" name="heroFile"
+              accept="image/png,image/jpeg,image/gif,image/webp"></label></p>
+          <p><label for="heroAlt">Describe it for somebody who cannot see it<br>
+            <input id="heroAlt" type="text" name="heroAlt" maxlength="300"
+              value="${esc(values.heroAlt ?? '')}"></label></p>
         </div>
         <div>
           <label for="tags">Tags
@@ -2139,7 +2146,7 @@ export const articleEditor = ({ me, csrf, org, article: a = null, values = {},
     </fieldset>
 
     <h2>What it says</h2>
-    ${writingBox({ name: 'body', value: values.body ?? '' })}
+    ${writingBox({ name: 'body', value: values.body ?? '', images, org })}
 
     <div class="actions">
       <button class="btn" type="submit" name="op" value="save">
@@ -2170,10 +2177,36 @@ export const articleEditor = ({ me, csrf, org, article: a = null, values = {},
  * Output is markdown TEXT, never HTML. It is parsed into blocks on save, so
  * the stored document is the same shape it has always been.
  */
-function writingBox({ name = 'body', value = '', rows = 18 }) {
+function writingBox({ name = 'body', value = '', rows = 18,
+                      images = [], org = null }) {
+  // The images this organisation already has, shown here rather than on
+  // another screen. Leaving a half-written article to go and look up what a
+  // picture was called is how somebody loses a draft, and it was the only way
+  // to find out until now.
+  const picker = images.length ? `
+  <details class="hint-block">
+    <summary>Pictures you can use (${images.length})</summary>
+    <div class="grid" style="margin-top:10px">${images.map((img) => `
+      <div class="card" style="padding:10px">
+        <img src="/a/${esc(img.id)}" alt="${esc(img.alt_text ?? '')}"
+          loading="lazy"
+          style="width:100%;height:auto;display:block;margin-bottom:6px">
+        <code>![${esc(img.alt_text || 'describe it')}](${
+          esc(img.filename ?? img.id)})</code>
+        ${img.alt_text ? '' : `<p class="hint">No description yet.</p>`}
+      </div>`).join('')}</div>
+    <p class="hint">Copy a line into the box where you want the picture.
+      ${org ? `<a href="/o/${esc(org.slug)}/media">Add more</a>.` : ''}</p>
+  </details>` : (org ? `
+  <p class="hint">No pictures yet —
+    <a href="/o/${esc(org.slug)}/media">add some</a> and they appear here to
+    drop into the text.</p>` : '');
+
   return `
   <textarea id="${esc(name)}" name="${esc(name)}" rows="${rows}"
     class="writing">${esc(value)}</textarea>
+
+  ${picker}
 
   <details class="hint-block">
     <summary>How to write it</summary>

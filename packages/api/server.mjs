@@ -438,6 +438,7 @@ get('/o/:slug/pages/new', async (ctx) => {
   const org = await organisationFor(ctx, { toWrite: true });
   return ctx.send(200, V.pageEditor({
     me: ctx.me, org, csrf: ctx.csrf,
+    images: await assets.list(ctx.me.accountId, org.id),
     values: { body: '' },
     canPublish: await mayPublishAt(ctx, org.id),
   }));
@@ -458,14 +459,17 @@ async function editorPost(ctx, { org, page = null }) {
 
   // One box of text, parsed into blocks. What comes back out still goes
   // through the whitelist in pages.save, so the editor is not a way past it.
+  const images = await assets.list(ctx.me.accountId, org.id);
   const body = String(form.body ?? '');
-  const doc = documentFromText(body);
+  // Pictures are referred to by filename in the box and by id in the
+  // document, so the list is needed on the way in as well as out.
+  const doc = documentFromText(body, { images });
 
   const title = String(form.title ?? '').trim();
   const slug = slugify(form.slug || title);
 
   const render = (extra = {}) => ctx.send(extra.status ?? 200, V.pageEditor({
-    me: ctx.me, org, page, csrf: ctx.csrf, canPublish,
+    me: ctx.me, org, page, csrf: ctx.csrf, canPublish, images,
     values: { body, title, slug,
               metaDescription: form.metaDescription ?? '' },
     ...extra,
@@ -536,9 +540,11 @@ get('/o/:slug/pages/:pageId', async (ctx) => {
   const pg = await pages.byId(ctx.me.accountId, ctx.params.pageId);
   const doc = pg.body ?? { blocks: [] };
 
+  const images = await assets.list(ctx.me.accountId, org.id);
   return ctx.send(200, V.pageEditor({
-    me: ctx.me, org, page: pg, csrf: ctx.csrf,
-    values: { body: textFromDocument(doc), title: pg.title, slug: pg.slug,
+    me: ctx.me, org, page: pg, csrf: ctx.csrf, images,
+    values: { body: textFromDocument(doc, { images }),
+              title: pg.title, slug: pg.slug,
               metaDescription: pg.meta_description ?? '' },
     revisions: await pages.revisions(ctx.me.accountId, pg.id),
     canPublish: await mayPublishAt(ctx, org.id),
@@ -842,12 +848,13 @@ get('/o/:slug/news/:articleId', async (ctx) => {
   const org = await organisationFor(ctx, { toWrite: true });
   const a = await news.byId(ctx.me.accountId, ctx.params.articleId);
   const doc = a.body ?? { blocks: [] };
+  const images = await assets.list(ctx.me.accountId, org.id);
   return ctx.send(200, V.articleEditor({
-    me: ctx.me, org, article: a, csrf: ctx.csrf,
-    values: { body: textFromDocument(doc), title: a.title, slug: a.slug,
+    me: ctx.me, org, article: a, csrf: ctx.csrf, images,
+    values: { body: textFromDocument(doc, { images }),
+              title: a.title, slug: a.slug,
               summary: a.summary ?? '', heroAssetId: a.hero_asset_id ?? '',
               tags: (a.tags ?? []).join(', ') },
-    images: await assets.list(ctx.me.accountId, org.id),
     canPublish: await mayPublishAt(ctx, org.id),
     done: ctx.url.searchParams.get('done'),
   }));
@@ -904,25 +911,58 @@ post('/o/:slug/news/:articleId/decide', async (ctx) => {
 
 /** Shared by both article posts, the way editorPost is shared by pages. */
 async function articlePost(ctx, { org, article = null }) {
-  const form = await ctx.form();
+  // Multipart, because a picture can be chosen here rather than on another
+  // screen. Leaving a half-written article to go and upload one, then coming
+  // back to a blank form, is how somebody loses what they wrote.
+  const { fields: form, files } = await ctx.upload({
+    maxBytes: MAX_BYTES + 256 * 1024 });
   const op = String(form.op ?? 'save');
   const canPublish = await mayPublishAt(ctx, org.id);
 
+  let images = await assets.list(ctx.me.accountId, org.id);
   const body = String(form.body ?? '');
-  const doc = documentFromText(body);
 
   const title = String(form.title ?? '').trim();
   const slug = slugify(form.slug || title);
   const summary = String(form.summary ?? '').trim();
-  const heroAssetId = String(form.heroAssetId ?? '').trim() || null;
+  let heroAssetId = String(form.heroAssetId ?? '').trim() || null;
   const tags = String(form.tags ?? '').split(',');
+
+  // A picture attached here is uploaded as part of saving and becomes the
+  // one at the top. It also joins the organisation's images, so it can be
+  // used again — a hero picture is not a different kind of thing.
+  const hero = files.find((f) => f.field === 'heroFile' && f.bytes.length);
+  if (hero) {
+    try {
+      const identified = identify(hero.bytes, { filename: hero.filename });
+      const created = await assets.create(ctx.me.accountId, org.id, {
+        bytes: hero.bytes, identified, filename: hero.filename,
+        altText: form.heroAlt,
+      });
+      heroAssetId = created.id;
+      images = await assets.list(ctx.me.accountId, org.id);
+    } catch (e) {
+      if (e instanceof NotAnImage || e instanceof BadUpload
+          || e instanceof Invalid) {
+        return ctx.send(422, V.articleEditor({
+          me: ctx.me, org, article, csrf: ctx.csrf, canPublish, images,
+          values: { body, title, slug, summary, heroAssetId: heroAssetId ?? '',
+                    heroAlt: form.heroAlt ?? '', tags: form.tags ?? '' },
+          error: e.message,
+        }));
+      }
+      throw e;
+    }
+  }
+
+  const doc = documentFromText(body, { images });
 
   const render = async (extra = {}) => ctx.send(extra.status ?? 200,
     V.articleEditor({
-      me: ctx.me, org, article, csrf: ctx.csrf, canPublish,
-      images: await assets.list(ctx.me.accountId, org.id),
+      me: ctx.me, org, article, csrf: ctx.csrf, canPublish, images,
       values: { body, title, slug, summary,
-                heroAssetId: heroAssetId ?? '', tags: form.tags ?? '' },
+                heroAssetId: heroAssetId ?? '', heroAlt: form.heroAlt ?? '',
+                tags: form.tags ?? '' },
       ...extra,
     }));
 

@@ -62,7 +62,7 @@ function attrs(pairs) {
   return parts.length ? ` ${parts.join(' ')}` : '';
 }
 
-function blockToText(block) {
+function blockToText(block, names) {
   switch (block.type) {
     case 'heading': {
       const level = Math.min(Math.max(Number(block.level) || 2, 2), 4);
@@ -86,9 +86,14 @@ function blockToText(block) {
       return lines.join('\n');
     }
 
-    case 'image':
-      return `![${block.alt ?? ''}](${block.assetId ?? ''})`
+    case 'image': {
+      // By filename when we know one. Nobody can remember
+      // a1b2c3d4-5e6f-… , and an editor that asks them to is an editor
+      // people leave in order to go and look it up.
+      const ref = names?.get(block.assetId) ?? block.assetId ?? '';
+      return `![${block.alt ?? ''}](${ref})`
         + (block.caption ? `\n*${block.caption}*` : '');
+    }
 
     case 'callout': {
       const marker = block.tone === 'warning' ? '!!' : '!>';
@@ -123,8 +128,18 @@ function blockToText(block) {
 }
 
 /** A whole document as one piece of text. */
-export function textFromDocument(doc) {
-  return (doc?.blocks ?? []).map(blockToText).join('\n\n').trim();
+export function textFromDocument(doc, { images = [] } = {}) {
+  // id → filename, so an image block comes back as the name somebody chose
+  // rather than the uuid the database uses. Ambiguous names are left as ids:
+  // two files called photo.png cannot both be "photo.png" in the text.
+  const counts = new Map();
+  for (const i of images)
+    counts.set(i.filename, (counts.get(i.filename) ?? 0) + 1);
+  const names = new Map();
+  for (const i of images)
+    if (i.filename && counts.get(i.filename) === 1) names.set(i.id, i.filename);
+
+  return (doc?.blocks ?? []).map((b) => blockToText(b, names)).join('\n\n').trim();
 }
 
 // ---------------------------------------------------------------------------
@@ -177,7 +192,14 @@ function liveBlock(inner) {
  * rather than an error — losing what they wrote to teach them a syntax would
  * be the wrong trade every time.
  */
-export function documentFromText(text = '') {
+export function documentFromText(text = '', { images = [] } = {}) {
+  // filename → id, so what somebody typed finds the image they meant.
+  // Case-insensitive, because nobody types Crest.PNG the same way twice.
+  const byName = new Map();
+  for (const i of images)
+    if (i.filename) byName.set(String(i.filename).toLowerCase(), i.id);
+  const resolve = (ref) => byName.get(String(ref).toLowerCase()) ?? ref;
+
   const lines = String(text).replace(/\r\n?/g, '\n').split('\n');
   const blocks = [];
   let i = 0;
@@ -226,7 +248,7 @@ export function documentFromText(text = '') {
     const image = line.match(/^!\[([^\]]*)\]\(([^)]*)\)\s*$/);
     if (image) {
       const block = { type: 'image', alt: image[1].trim(),
-                      assetId: image[2].trim(), caption: '' };
+                      assetId: resolve(image[2].trim()), caption: '' };
       const next = lines[i + 1];
       const caption = next?.match(/^\*([^*]+)\*\s*$/);
       if (caption) { block.caption = caption[1].trim(); i += 1; }

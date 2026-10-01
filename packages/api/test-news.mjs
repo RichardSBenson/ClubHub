@@ -40,6 +40,44 @@ async function req(path, { method = 'GET', form } = {}) {
            html: await res.text() };
 }
 const one = async (sql, a = []) => (await pool.query(sql, a)).rows[0] ?? null;
+
+/**
+ * The article form is multipart, because a picture can be attached to it.
+ * Built as bytes here, the way a browser builds one.
+ */
+async function postArticle(path, form = {}, file = null) {
+  const b = '----HonbuNewsBoundary';
+  const parts = [];
+  const push = (x) => parts.push(Buffer.isBuffer(x) ? x : Buffer.from(x));
+
+  for (const [k, v] of Object.entries({ _csrf: jar.honbu_csrf ?? '', ...form }))
+    push(`--${b}\r\nContent-Disposition: form-data; name="${k}"\r\n\r\n${v}\r\n`);
+
+  if (file) {
+    push(`--${b}\r\nContent-Disposition: form-data; name="heroFile"; `
+       + `filename="${file.filename}"\r\nContent-Type: image/png\r\n\r\n`);
+    push(file.bytes);
+    push('\r\n');
+  }
+  push(`--${b}--\r\n`);
+
+  const res = await fetch(base + path, { method: 'POST', redirect: 'manual',
+    headers: { cookie: Object.entries(jar).map(([k, v]) => `${k}=${v}`).join('; '),
+               'content-type': `multipart/form-data; boundary=${b}` },
+    body: Buffer.concat(parts) });
+  for (const sc of res.headers.getSetCookie?.() ?? []) {
+    const [k, v] = sc.split(';')[0].split('=');
+    if (v === '') delete jar[k]; else jar[k] = v;
+  }
+  return { status: res.status, location: res.headers.get('location'),
+           html: await res.text() };
+}
+
+const PNG_1x1 = Buffer.from(
+  'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmM'
+  + 'IQAAAABJRU5ErkJggg==', 'base64');
+
+
 const signIn = async (email) => {
   delete jar.honbu_session;
   await req('/signin');
@@ -63,7 +101,7 @@ console.log('\nWRITING ONE');
   const empty = await req('/o/moknz/news');
   ok('the news screen renders', empty.status === 200);
 
-  const made = await req('/o/moknz/news/new', { method: 'POST', form: compose() });
+  const made = await postArticle('/o/moknz/news/new', compose());
   ok('creating one redirects to its editor',
     made.status === 302 && /\/o\/moknz\/news\/[0-9a-f-]{36}/.test(made.location ?? ''),
     made.location);
@@ -86,13 +124,12 @@ console.log('\nWRITING ONE');
 
 console.log('\nWHAT IS REFUSED');
 {
-  const noTitle = await req('/o/moknz/news/new',
-    { method: 'POST', form: compose({ title: '' }) });
+  const noTitle = await postArticle('/o/moknz/news/new', compose({ title: '' }));
   ok('an article with no headline is refused',
     noTitle.status === 422 && noTitle.html.includes('needs a headline'));
 
-  const noBody = await req('/o/moknz/news/new',
-    { method: 'POST', form: compose({ body: '', slug: 'empty-one' }) });
+  const noBody = await postArticle('/o/moknz/news/new',
+    compose({ body: '', slug: 'empty-one' }));
   ok('and one with nothing in it',
     noBody.status === 422 && noBody.html.includes('nothing in this article'),
     noBody.status);
@@ -109,18 +146,84 @@ console.log('\nWHAT IS REFUSED');
     insert into asset (organisation_id, kind, filename, mime, width, height, bytes)
     values ($1,'image','theirs.png','image/png',1,1,70) returning id`, [kaimai.id]);
 
-  const stolen = await req('/o/moknz/news/new', { method: 'POST',
-    form: compose({ slug: 'stolen-hero', heroAssetId: theirs.id }) });
+  const stolen = await postArticle('/o/moknz/news/new',
+    compose({ slug: 'stolen-hero', heroAssetId: theirs.id }));
   ok('a hero image from another federation is refused',
     stolen.status === 422 && stolen.html.includes('does not belong'),
     stolen.status);
 }
 
+console.log('\nA PICTURE CAN BE ADDED WITHOUT LEAVING THE ARTICLE');
+{
+  // The complaint this answers: choosing a hero picture meant leaving a
+  // half-written article, going to the images screen, uploading, remembering
+  // what it was called, and coming back to a blank form.
+  const before = (await pool.query('select count(*)::int n from asset')).rows[0].n;
+
+  const r = await postArticle('/o/moknz/news/new',
+    compose({ title: 'With a picture', slug: 'with-a-picture',
+              heroAlt: 'Doug bowing in' }),
+    { filename: 'bowing.png', bytes: PNG_1x1 });
+  ok('the article saves', r.status === 302 && !r.location.includes('error='),
+    r.location);
+
+  const art = await one(`select * from article where slug='with-a-picture'`);
+  ok('and it has a picture at the top', !!art.hero_asset_id);
+
+  const asset = await one(`select * from asset where id=$1`, [art.hero_asset_id]);
+  ok('which was uploaded as part of saving', !!asset);
+  ok('keeping its name', asset.filename === 'bowing.png');
+  ok('and the description typed beside it',
+    asset.alt_text === 'Doug bowing in');
+  ok('it joins the organisation\'s images rather than being hidden',
+    (await pool.query('select count(*)::int n from asset')).rows[0].n
+      === before + 1);
+
+  // A file that is not an image is refused without losing what was written.
+  const bad = await postArticle('/o/moknz/news/new',
+    compose({ title: 'Bad picture', slug: 'bad-picture',
+              body: 'Something I spent a while writing.' }),
+    { filename: 'notreally.png', bytes: Buffer.from('<?php echo 1; ?>') });
+  ok('a file that is not an image is refused', bad.status === 422, bad.status);
+  ok('saying why', bad.html.includes('not a PNG'), 'no reason given');
+  ok('and what was written is still in the box',
+    bad.html.includes('Something I spent a while writing.'),
+    'THE DRAFT WAS LOST');
+  ok('nothing was stored',
+    !(await one(`select 1 from article where slug='bad-picture'`)));
+}
+
+console.log('\nPICTURES ARE REFERRED TO BY NAME IN THE TEXT');
+{
+  const art = await one(`select * from article where slug='with-a-picture'`);
+
+  const open = await req(`/o/moknz/news/${art.id}`);
+  ok('the editor lists the pictures that can be used',
+    open.html.includes('Pictures you can use'), 'no picker');
+  ok('showing the line to copy, with the filename not a uuid',
+    open.html.includes('](bowing.png)'), 'no copyable reference');
+
+  // Writing that line into the body must find the right image.
+  await postArticle(`/o/moknz/news/${art.id}`,
+    compose({ title: 'With a picture', slug: 'with-a-picture',
+              body: 'Here it is.\n\n![Doug bowing in](bowing.png)' }));
+
+  const after = await one(`select body from article where id=$1`, [art.id]);
+  const image = after.body.blocks.find((b) => b.type === 'image');
+  ok('the name resolved to the image', image?.assetId === art.hero_asset_id,
+    JSON.stringify(image));
+
+  const reopened = await req(`/o/moknz/news/${art.id}`);
+  ok('and it comes back as the name, not the uuid',
+    reopened.html.includes('![Doug bowing in](bowing.png)'),
+    'came back as a uuid');
+}
+
 console.log('\nA DOJO ASKS; THE FEDERATION DECIDES');
 {
   const wh = await one(`select id from organisation where slug='whanganui'`);
-  const made = await req('/o/whanganui/news/new', { method: 'POST',
-    form: compose({ title: 'Our own view of things', slug: 'our-view' }) });
+  const made = await postArticle('/o/whanganui/news/new',
+    compose({ title: 'Our own view of things', slug: 'our-view' }));
   ok('a dojo can write its own', made.status === 302, made.status);
 
   const id = (made.location.match(/news\/([0-9a-f-]{36})/) ?? [])[1];
@@ -131,9 +234,8 @@ console.log('\nA DOJO ASKS; THE FEDERATION DECIDES');
     decodeURIComponent(tooEarly.location ?? '').includes('Publish it on your own site'),
     decodeURIComponent(tooEarly.location ?? ''));
 
-  await req(`/o/whanganui/news/${id}`, { method: 'POST',
-    form: compose({ title: 'Our own view of things', slug: 'our-view',
-                    op: 'publish' }) });
+  await postArticle(`/o/whanganui/news/${id}`, compose({ title: 'Our own view of things', slug: 'our-view',
+                    op: 'publish' }));
   const published = await one(`select * from article where id=$1`, [id]);
   ok('published on the dojo site', published.status === 'published');
   ok('and nobody has asked for it to go further',

@@ -182,6 +182,52 @@ console.log('\nIT IS FORGIVING, BECAUSE A TEXTAREA IS NOT A FILE FORMAT');
   ok('unterminated braces do not hang it', Date.now() - started < 1000);
 }
 
+console.log('\nIMAGES ARE REFERRED TO BY NAME, NOT BY UUID');
+{
+  const images = [
+    { id: 'a1b2c3d4-0000-0000-0000-000000000001', filename: 'crest.png' },
+    { id: 'a1b2c3d4-0000-0000-0000-000000000002', filename: 'doug.jpg' },
+  ];
+
+  const text = textFromDocument(EVERYTHING, { images });
+  ok('the image is written out as its filename',
+    text.includes('![Doug bowing in](crest.png)'),
+    text.split('\n').find((l) => l.startsWith('![')));
+
+  const back = documentFromText(text, { images });
+  const img = back.blocks.find((b) => b.type === 'image');
+  ok('and reading it back finds the right image',
+    img.assetId === 'a1b2c3d4-0000-0000-0000-000000000001', img.assetId);
+
+  ok('typing the name in any case works',
+    documentFromText('![x](CREST.PNG)', { images }).blocks[0].assetId
+      === 'a1b2c3d4-0000-0000-0000-000000000001');
+
+  ok('a uuid still works, for anything written before this',
+    documentFromText('![x](a1b2c3d4-0000-0000-0000-000000000002)', { images })
+      .blocks[0].assetId === 'a1b2c3d4-0000-0000-0000-000000000002');
+
+  ok('a name nobody has is left alone rather than guessed at',
+    documentFromText('![x](missing.png)', { images }).blocks[0].assetId
+      === 'missing.png');
+
+  // Two files with the same name cannot both be that name.
+  const clashing = [
+    { id: 'id-one', filename: 'photo.png' },
+    { id: 'id-two', filename: 'photo.png' },
+  ];
+  const ambiguous = textFromDocument(
+    { blocks: [{ type: 'image', assetId: 'id-one', alt: 'x', caption: '' }] },
+    { images: clashing });
+  ok('a duplicated filename stays a uuid rather than pointing at the wrong one',
+    ambiguous.includes('](id-one)'), ambiguous);
+
+  ok('and with no images known, it still round-trips on ids',
+    documentFromText(textFromDocument(EVERYTHING)).blocks
+      .find((b) => b.type === 'image').assetId
+      === 'a1b2c3d4-0000-0000-0000-000000000001');
+}
+
 console.log('\nTHE HELP IS SHORT ENOUGH TO READ');
 {
   ok('nine lines at most', WRITING_HELP.length <= 9);
