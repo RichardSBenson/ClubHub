@@ -307,7 +307,14 @@ for (const target of SITES) {
   }
   if (assetRows.length) console.log(`  ${assetRows.length} image(s)`);
 
-  const dojos = (await site.dojos(target.slug)).map((d) => ({
+  // Every club in the tree, and then the ones that have a page.
+  //
+  // A club is on the website because it asked and the federation said yes,
+  // not because it exists. This used to publish every active club, so one
+  // that had told the federation nothing went live with the placeholder text
+  // from the template in its description. `published` has been in the schema
+  // since the first migration and nothing read it.
+  const everyClub = (await site.dojos(target.slug)).map((d) => ({
     ...d,
     venue_name: d.venue_name ?? d.venueName ?? null,
     address_line: d.address_line ?? d.addressLine ?? null,
@@ -319,7 +326,10 @@ for (const target of SITES) {
     first_class_free: d.first_class_free ?? d.firstClassFree ?? null,
     accepts_beginners: d.accepts_beginners ?? d.acceptsBeginners ?? null,
     sessions: d.sessions ?? [],
+    hero_url: assets[d.hero_asset_id ?? d.heroAssetId] ?? null,
   }));
+  const dojos = everyClub.filter((d) => d.published === true);
+  const unlisted = everyClub.length - dojos.length;
 
   const evs = await site.eventsFor(target.slug);
   const articles = await site.articles(federation.id);
@@ -413,7 +423,9 @@ for (const target of SITES) {
   }));
 
   console.log(`  ${(base || '/').padEnd(11)} ${federation.name}`
-    + ` — ${dojos.length} ${clubsWord.toLowerCase()}, ${evs.length} event(s),`
+    + ` — ${dojos.length} ${clubsWord.toLowerCase()}`
+    + (unlisted ? ` (+${unlisted} without a page)` : '')
+    + `, ${evs.length} event(s),`
     + ` ${articles.length} article(s)`);
   allWritten.push(...written);
 }

@@ -50,112 +50,257 @@ const esc = (s = '') => String(s)
 
 const CSS = `
 :root{
-  --red:#CE372C; --red-text:#9A2A1F; --gold:#F0CE41;
-  --ink:#161617; --ink-2:#252527; --ink-3:#3A3A3D;
-  --canvas:#F5F5F5; --canvas-2:#E3E3E3; --silver:#BDBDBF; --muted:#6F6F72;
+  --ink:#15171A; --ink-2:#394047; --muted:#68777F;
+  --canvas:#FFFFFF; --wash:#F5F6F7; --soft:#ECEEF0; --line:#E2E6E9; --line-2:#CED4D9;
+  --accent:#3451D1; --accent-ink:#263CA3; --accent-wash:#EEF1FD;
+  --ok:#1E6B35; --ok-wash:#E8F4EB; --warn:#7A5200; --warn-wash:#FFF7E0;
+  --bad:#A8261B; --bad-wash:#FDEDEB;
+  --radius:10px;
 }
 *{box-sizing:border-box}
-body{margin:0;background:var(--canvas);color:var(--ink);
-  font:16px/1.6 system-ui,-apple-system,Segoe UI,Roboto,sans-serif}
-.wrap{max-width:900px;margin:0 auto;padding:0 20px}
-a{color:var(--red-text)}
-header{background:var(--ink);color:var(--canvas)}
-header .wrap{display:flex;align-items:center;gap:16px;padding:12px 20px}
-header a{color:var(--canvas);text-decoration:none}
-header .who{margin-left:auto;font-size:14px;color:var(--silver)}
-header form{display:inline;margin-left:14px}
-header button{background:none;border:1px solid var(--silver);color:var(--canvas);
-  font:inherit;font-size:13px;padding:4px 10px;cursor:pointer}
-h1{font-size:26px;margin:28px 0 6px}
-h2{font-size:19px;margin:28px 0 10px}
-.sub{color:var(--muted);margin:0 0 20px}
-table{width:100%;border-collapse:collapse;background:#fff;font-size:15px}
-th{text-align:left;padding:10px 12px;border-bottom:2px solid var(--ink);font-size:13px;
-  letter-spacing:.04em;text-transform:uppercase;color:var(--muted)}
-td{padding:11px 12px;border-bottom:1px solid var(--canvas-2)}
-tr:hover td{background:#FAFAFA}
-.tag{font-size:12px;font-weight:700;padding:2px 8px;border-radius:2px}
-.tag.ok{background:#E4F0E4;color:#2E6B33}
-.tag.no{background:var(--canvas-2);color:var(--muted)}
-.tag.dan{background:var(--ink);color:var(--gold)}
-.card{background:#fff;border:1px solid var(--canvas-2);padding:18px 20px;margin:0 0 14px}
-.card h3{margin:0 0 4px;font-size:17px}
+body{margin:0;background:var(--wash);color:var(--ink);
+  font:15.5px/1.6 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+  -webkit-font-smoothing:antialiased}
+a{color:var(--accent-ink)}
+:focus-visible{outline:3px solid var(--accent);outline-offset:2px}
+.skip{position:absolute;left:-999px;top:8px;background:var(--ink);color:#fff;
+  padding:8px 14px;border-radius:6px;z-index:10}
+.skip:focus{left:8px}
+
+/* ---- the frame ------------------------------------------------------ */
+.shell{display:grid;grid-template-columns:auto minmax(0,1fr);
+  grid-template-areas:"rail stage";min-height:100vh}
+.rail{grid-area:rail;width:248px;background:var(--canvas);border-right:1px solid var(--line);
+  padding:20px 14px 28px;position:sticky;top:0;height:100vh;overflow-y:auto}
+.rail .brand{display:block;font-weight:700;font-size:18px;letter-spacing:-.02em;
+  color:var(--ink);text-decoration:none;padding:2px 10px 16px}
+.rail .here{background:var(--wash);border:1px solid var(--line);
+  border-radius:var(--radius);padding:10px 12px;margin:0 0 18px;line-height:1.35}
+.rail .here strong{display:block;font-size:14.5px}
+.rail .here span{font-size:12.5px;color:var(--muted)}
+.rail h6{margin:18px 10px 6px;font-size:11.5px;font-weight:700;letter-spacing:.07em;
+  text-transform:uppercase;color:var(--muted)}
+.rail nav a{display:block;padding:7px 10px;border-radius:7px;color:var(--ink-2);
+  text-decoration:none;font-size:14.5px}
+.rail nav a:hover{background:var(--soft)}
+.rail nav a[aria-current="page"]{background:var(--accent-wash);color:var(--accent-ink);
+  font-weight:600}
+.rail .all{margin-top:20px;border-top:1px solid var(--line);padding-top:12px}
+.stage{grid-area:stage;min-width:0;display:flex;flex-direction:column}
+.top{display:flex;align-items:center;gap:14px;padding:12px 32px;
+  background:var(--canvas);border-bottom:1px solid var(--line)}
+.top .brand{font-weight:700;font-size:18px;letter-spacing:-.02em;
+  color:var(--ink);text-decoration:none}
+.top .find{display:flex;gap:6px;align-items:center;margin-left:auto}
+.top .find input{padding:7px 12px;border-radius:8px;border:1px solid var(--line-2);
+  background:var(--wash);min-width:200px;font-size:14px}
+.top .find label{color:var(--muted);font-size:13px;margin:0;font-weight:500}
+.top .find .btn{padding:7px 14px;font-size:14px}
+.shell:has(.rail) .top .brand{display:none}
+.top .who{font-size:14px;color:var(--muted);display:flex;align-items:center;gap:10px}
+.top .who form{display:inline;margin:0}
+.top .who button{background:none;border:1px solid var(--line-2);color:var(--ink-2);
+  font:inherit;font-size:13px;padding:5px 11px;border-radius:7px;cursor:pointer}
+.top .who button:hover{background:var(--soft)}
+.page{width:100%;max-width:980px;margin:0 auto;padding:6px 32px 64px;flex:1}
+.page.wide{max-width:1180px}
+footer.foot{color:var(--muted);font-size:13px;padding:0 32px 36px}
+
+/* ---- type ----------------------------------------------------------- */
+h1{font-size:28px;line-height:1.2;letter-spacing:-.02em;margin:30px 0 6px}
+h2{font-size:18px;letter-spacing:-.01em;margin:32px 0 10px}
+.sub{color:var(--muted);margin:0 0 22px}
+.sub a{color:var(--muted)}
+.muted{color:var(--muted);font-size:14px}
+.hint{font-size:13px;color:var(--muted);margin:4px 0 0;font-weight:400}
+label .hint{display:block}
+
+/* ---- surfaces ------------------------------------------------------- */
+table{width:100%;border-collapse:separate;border-spacing:0;background:var(--canvas);
+  border:1px solid var(--line);border-radius:var(--radius);overflow:hidden;font-size:15px}
+th{text-align:left;padding:11px 14px;border-bottom:1px solid var(--line);font-size:12px;
+  letter-spacing:.06em;text-transform:uppercase;color:var(--muted);background:var(--wash)}
+td{padding:12px 14px;border-bottom:1px solid var(--line)}
+tr:last-child td{border-bottom:0}
+tr:hover td{background:#FBFBFC}
+.draft td{background:#FCFCF8}
+.card{background:var(--canvas);border:1px solid var(--line);border-radius:var(--radius);
+  padding:18px 20px;margin:0 0 14px}
+.card h3{margin:0 0 4px;font-size:16.5px}
 .card p{margin:0;color:var(--muted);font-size:14px}
 .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:12px}
-.btn{display:inline-block;background:var(--red);color:#fff;border:0;font:inherit;
-  font-weight:600;padding:11px 20px;text-decoration:none;cursor:pointer}
-.btn:hover{background:var(--red-text)}
-.btn.quiet{background:none;color:var(--red-text);border:1px solid var(--silver)}
-input,select{font:inherit;padding:9px 11px;border:1px solid var(--silver);
-  background:#fff;width:100%;max-width:340px}
-label{display:block;font-size:14px;font-weight:600;margin:14px 0 4px}
-.note{background:#FDF6E3;border-left:4px solid var(--gold);padding:12px 16px;margin:16px 0}
-.bad{background:#FBE9E7;border-left:4px solid var(--red);padding:12px 16px;margin:16px 0}
-.good{background:#E4F0E4;border-left:4px solid #2E6B33;padding:12px 16px;margin:16px 0}
-.muted{color:var(--muted);font-size:14px}
-ul.plain{list-style:none;padding:0;margin:0}
-ul.plain li{padding:8px 0;border-bottom:1px solid var(--canvas-2)}
-footer{color:var(--muted);font-size:13px;padding:40px 0}
-textarea{font:inherit;padding:9px 11px;border:1px solid var(--silver);
-  background:#fff;width:100%;max-width:560px;min-height:90px}
+fieldset{border:1px solid var(--line);background:var(--canvas);border-radius:var(--radius);
+  padding:6px 22px 22px;margin:22px 0}
+legend{font-size:12px;letter-spacing:.07em;text-transform:uppercase;
+  color:var(--muted);font-weight:700;padding:0 8px}
+.tag{display:inline-block;font-size:12px;font-weight:600;padding:2px 9px;
+  border-radius:999px;background:var(--soft);color:var(--ink-2)}
+.tag.ok{background:var(--ok-wash);color:var(--ok)}
+.tag.no{background:var(--soft);color:var(--muted)}
+.tag.dan{background:var(--ink);color:#fff}
+.tag.wait{background:var(--warn-wash);color:var(--warn)}
+
+/* ---- messages ------------------------------------------------------- */
+.note,.bad,.good{padding:12px 16px;margin:16px 0;border-radius:var(--radius);
+  border:1px solid transparent}
+.note{background:var(--warn-wash);border-color:#F1DFAA;color:#4F3600}
+.bad{background:var(--bad-wash);border-color:#F3C4BF;color:#6F1A12}
+.good{background:var(--ok-wash);border-color:#BCDDC5;color:#14462A}
+
+/* ---- controls ------------------------------------------------------- */
+.btn{display:inline-block;background:var(--accent);color:#fff;border:1px solid var(--accent);
+  font:inherit;font-weight:600;padding:9px 18px;text-decoration:none;cursor:pointer;
+  border-radius:8px}
+.btn:hover{background:var(--accent-ink);border-color:var(--accent-ink)}
+.btn.quiet{background:var(--canvas);color:var(--ink-2);border-color:var(--line-2)}
+.btn.quiet:hover{background:var(--soft)}
+td .btn{padding:5px 12px;font-size:14px}
+td form{display:inline}
+input,select,textarea{font:inherit;padding:9px 12px;border:1px solid var(--line-2);
+  background:var(--canvas);width:100%;max-width:360px;border-radius:8px;color:var(--ink)}
+input:focus,select:focus,textarea:focus{border-color:var(--accent)}
+textarea{max-width:600px;min-height:92px}
+label{display:block;font-size:14px;font-weight:600;margin:16px 0 5px}
+.check{display:flex;align-items:flex-start;gap:9px;margin:12px 0;font-size:15px}
+.check input{width:auto;margin-top:5px}
 .row{display:flex;flex-wrap:wrap;gap:18px}
 .row > div{flex:1 1 200px}
 .row input,.row select{max-width:none}
-.hint{font-size:13px;color:var(--muted);margin:4px 0 0;font-weight:400}
-label .hint{display:block}
-.check{display:flex;align-items:flex-start;gap:9px;margin:12px 0;font-size:15px}
-.check input{width:auto;margin-top:4px}
-fieldset{border:1px solid var(--canvas-2);background:#fff;padding:4px 20px 20px;
-  margin:22px 0}
-legend{font-size:13px;letter-spacing:.04em;text-transform:uppercase;
-  color:var(--muted);font-weight:700;padding:0 6px}
 .actions{display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin:26px 0 0}
 .actions form{display:inline}
 .right{margin-left:auto}
-td form{display:inline}
-td .btn{padding:6px 12px;font-size:14px}
-.draft td{background:#FCFCF7}
-@media(max-width:600px){
-  table{font-size:14px} td,th{padding:9px 8px}
-  .hide-sm{display:none}
-}
-header .find{display:flex;gap:6px;align-items:center;margin-left:auto;
-  margin-right:14px}
-header .find input{padding:6px 10px;border-radius:6px;border:1px solid #3A3A3C;
-  background:#1C1C1E;color:#F2F2F7;min-width:150px;font-size:14px}
-header .find label{color:#BDBDBF;font-size:13px}
-@media (max-width:640px){header .find input{min-width:90px}}
-textarea.writing{width:100%;min-height:320px;font:15px/1.6 ui-monospace,
-  SFMono-Regular,Menlo,monospace}
-.editor-toolbar button.mde-text{width:auto;padding:0 9px;font-size:13px;
-  font-weight:600}
-.hint-block{margin:10px 0 18px}
-.hint-block summary{cursor:pointer;color:#BDBDBF;font-size:14px}
-table.writing-help{margin-top:8px}
-table.writing-help td{padding:3px 12px 3px 0;font-size:14px}
-table.writing-help code{background:#1C1C1E;padding:2px 6px;border-radius:4px}`;
+ul.plain{list-style:none;padding:0;margin:0}
+ul.plain li{padding:9px 0;border-bottom:1px solid var(--line)}
 
-function page({ title, me, body, csrf, query = '' }) {
+/* ---- writing -------------------------------------------------------- */
+textarea.writing{width:100%;max-width:none;min-height:340px;
+  font:15px/1.65 ui-monospace,SFMono-Regular,Menlo,monospace}
+.editor-toolbar button.mde-text{width:auto;padding:0 9px;font-size:13px;font-weight:600}
+.hint-block{margin:10px 0 18px}
+.hint-block summary{cursor:pointer;color:var(--muted);font-size:14px}
+table.writing-help{margin-top:8px;border:0;background:none}
+table.writing-help td{padding:3px 12px 3px 0;font-size:14px;border:0}
+table.writing-help code{background:var(--soft);padding:2px 6px;border-radius:4px}
+
+/* ---- a club's times: one row per class ------------------------------- */
+.times-edit{display:grid;gap:8px;margin:6px 0 0}
+.times-edit .t{display:grid;grid-template-columns:minmax(0,2fr) 130px 100px 100px 70px 70px;
+  gap:8px;align-items:center}
+.times-edit .t input,.times-edit .t select{max-width:none}
+.times-edit .head{font-size:11.5px;font-weight:700;letter-spacing:.06em;
+  text-transform:uppercase;color:var(--muted)}
+
+@media(max-width:860px){
+  .shell{grid-template-columns:minmax(0,1fr);grid-template-areas:"rail" "stage"}
+  .rail{width:auto;position:static;height:auto;border-right:0;border-bottom:1px solid var(--line);
+    padding:14px 16px}
+  .rail .brand{padding-bottom:10px}
+  .rail .here{margin-bottom:8px}
+  .rail h6{display:none}
+  .rail nav{display:flex;flex-wrap:wrap;gap:2px 4px}
+  .rail .all{margin-top:6px;padding-top:6px}
+  .top{padding:10px 16px;flex-wrap:wrap}
+  .top .find{margin-left:0;flex:1 1 100%;order:3}
+  .top .find input{min-width:0;flex:1}
+  .page{padding:4px 16px 48px}
+  footer.foot{padding:0 16px 28px}
+  .times-edit .t{grid-template-columns:1fr 1fr;}
+  .times-edit .head{display:none}
+}
+@media(max-width:600px){
+  table{font-size:14px} td,th{padding:9px 10px}
+  .hide-sm{display:none}
+}`;
+
+/**
+ * The frame every screen sits in.
+ *
+ * The side rail is not built here. It depends on who is asking and what they
+ * may do at the organisation they are looking at, which the views do not
+ * know, so the server fills in the marker below on the way out (see
+ * ctx.send). A screen with no organisation behind it — the dashboard, the
+ * sign-in page — simply has no rail.
+ */
+const RAIL_MARKER = '<!--honbu:rail-->';
+
+function page({ title, me, body, csrf, query = '', wide = false }) {
+  const search = me ? `<form method="get" action="/search" class="find" role="search">
+    <label class="hide-sm" for="q">Find</label>
+    <input id="q" name="q" type="search" placeholder="a name, a number, anything"
+      value="${esc(query ?? '')}">
+    <button class="btn quiet">Find</button>
+  </form>` : '';
+  const who = me ? `<span class="who">${esc(me.name)}
+    <form method="post" action="/signout">
+      <input type="hidden" name="_csrf" value="${esc(csrf ?? '')}">
+      <button>Sign out</button></form></span>` : '';
+
   return `<!DOCTYPE html><html lang="en-NZ"><head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>${esc(title)} — Honbu</title><style>${CSS}</style></head><body>
-<header><div class="wrap">
-  <a href="/dashboard"><strong>Honbu</strong></a>
-  ${me ? `<form method="get" action="/search" class="find">
-    <label class="hide-sm" for="q">Find</label>
-    <input id="q" name="q" type="search" placeholder="name, number, anything"
-      value="${esc(query ?? '')}">
-    <button class="quiet">Find</button>
-  </form>` : ''}
-  ${me ? `<span class="who">${esc(me.name)}
-    <form method="post" action="/signout">
-      <input type="hidden" name="_csrf" value="${esc(csrf ?? '')}">
-      <button>Sign out</button></form></span>` : ''}
-</div></header>
-<div class="wrap">${body}</div>
-<footer class="wrap">Honbu — federation register</footer>
+<a class="skip" href="#main">Skip to the content</a>
+<div class="shell">
+  ${me ? RAIL_MARKER : ''}
+  <div class="stage">
+    <header class="top">
+      <a class="brand" href="${me ? '/dashboard' : '/signin'}">Honbu</a>
+      ${search}${who}
+    </header>
+    <main id="main" class="page${wide ? ' wide' : ''}">${body}</main>
+    <footer class="foot">Honbu — federation register</footer>
+  </div>
+</div>
 </body></html>`;
 }
+
+/**
+ * The side rail for one organisation.
+ *
+ * Only what this person may actually do is listed. A link that ends in
+ * "You do not have permission" is a screen the person was invited to walk
+ * into and refused at the door.
+ */
+export function rail({ org, vocabulary = {}, can = {}, path = '' }) {
+  const club = vocabulary.club ?? 'Club';
+  const isClub = org.type === 'club';
+  const base = `/o/${org.slug}`;
+
+  const link = (href, label) => `<a href="${esc(href)}"${
+    path === href || path.startsWith(href + '/') ? ' aria-current="page"' : ''}>${esc(label)}</a>`;
+
+  const group = (name, items) => {
+    const shown = items.filter(Boolean);
+    return shown.length ? `<h6>${esc(name)}</h6><nav aria-label="${esc(name)}">${
+      shown.join('')}</nav>` : '';
+  };
+
+  return `<aside class="rail">
+  <a class="brand" href="/dashboard">Honbu</a>
+  <div class="here"><strong>${esc(org.name)}</strong>
+    <span>${isClub ? esc(club) : 'Federation'}</span></div>
+  ${group('People', [
+    link(`${base}/roster`, 'Roll'),
+    can.register && link(`${base}/members/new`, 'Add a member'),
+    can.register && link(`${base}/members/import`, 'Import a roll'),
+    can.register && link(`${base}/grading`, vocabulary.grading ?? 'Grading'),
+  ])}
+  ${group('Events', [link(`${base}/events`, 'Events')])}
+  ${can.write ? group('Website', [
+    link(`${base}/pages`, 'Pages'),
+    link(`${base}/news`, 'News'),
+    link(`${base}/media`, 'Images'),
+    link(`${base}/menu`, 'Menu'),
+    link(`${base}/instructors`, 'Instructors'),
+    isClub ? link(`${base}/club-page`, `${club} page`)
+           : link(`${base}/club-pages`, `${club} pages`),
+  ]) : ''}
+  ${can.manage ? group('Organisation', [link(`${base}/history`, 'History')]) : ''}
+  <div class="all"><nav aria-label="All organisations">
+    ${link('/dashboard', 'Everything I look after')}</nav></div>
+</aside>`;
+}
+
+export { RAIL_MARKER };
 
 // ---------------------------------------------------------------------------
 
@@ -2249,6 +2394,240 @@ function writingBox({ name = 'body', value = '', rows = 18,
   </script>`;
 }
 
+
+// ---------------------------------------------------------------------------
+// a club's page on the federation's website
+// ---------------------------------------------------------------------------
+
+const WEEKDAYS = [[1, 'Monday'], [2, 'Tuesday'], [3, 'Wednesday'],
+                  [4, 'Thursday'], [5, 'Friday'], [6, 'Saturday'], [0, 'Sunday']];
+
+/**
+ * The club's own screen for its page. What it says is the club's to write;
+ * whether it goes up is the federation's to decide, and this screen says
+ * which of those is happening.
+ */
+export const clubPageEditor = ({ me, csrf, org, profile = {}, sessions = [],
+                                 state = 'off', problems = [], images = [],
+                                 canAsk = false, values = null,
+                                 done, error, rebuild }) => {
+  const p = values?.profile ?? profile;
+  const rows = (values?.sessions ?? sessions).map((t, i) => ({
+    id: t.id ?? '', label: t.label ?? '', weekday: t.weekday,
+    starts: t.starts ?? '', ends: t.ends ?? '',
+    min: t.minAge ?? t.min_age ?? '', max: t.maxAge ?? t.max_age ?? '',
+  }));
+  const total = Math.min(12, Math.max(6, rows.length + 2));
+  while (rows.length < total)
+    rows.push({ id: '', label: '', weekday: null, starts: '', ends: '', min: '', max: '' });
+
+  const base = `/o/${org.slug}/club-page`;
+  const post = (path, label, cls = 'btn') => `<form method="post" action="${base}/${path}">
+    <input type="hidden" name="_csrf" value="${esc(csrf ?? '')}">
+    <button class="${cls}" type="submit">${label}</button></form>`;
+
+  const status = {
+    live: `<div class="good"><strong>Your page is on the website.</strong>
+      Anything you save here goes up with the next update of the site.
+      <div class="actions">${post('takedown', 'Take it off the website', 'btn quiet')}</div></div>`,
+    requested: `<div class="note"><strong>Waiting for the federation.</strong>
+      You asked to be on their website. They will answer here.
+      <div class="actions">${post('takedown', 'Withdraw the request', 'btn quiet')}</div></div>`,
+    off: `<div class="note"><strong>Not on the website yet.</strong>
+      ${profile.page_note ? `The federation said: “${esc(profile.page_note)}” ` : ''}
+      A page appears under the federation's name once you ask and they agree.
+      ${problems.length ? `<ul style="margin:8px 0 0 18px;padding:0">${
+        problems.map((x) => `<li>${esc(x)}</li>`).join('')}</ul>` : ''}
+      ${problems.length ? '' : `<div class="actions">${
+        canAsk ? post('request', 'Ask to go on the website')
+               : '<span class="muted">Asking needs an owner or administrator.</span>'}</div>`}</div>`,
+  }[state];
+
+  return page({ title: `Page — ${org.name}`, me, csrf, body: `
+  <h1>${esc(org.name)}'s page</h1>
+  <p class="sub">What visitors see on the federation's website, in the
+    federation's design. You write what it says; the federation decides
+    whether it goes up.</p>
+
+  ${done ? `<div class="good">${esc(done)}</div>` : ''}
+  ${error ? `<div class="bad">${esc(error)}</div>` : ''}
+  ${rebuild ? `<div class="note">${esc(rebuild)}</div>` : ''}
+  ${status}
+
+  <form method="post" action="${base}" enctype="multipart/form-data">
+    <input type="hidden" name="_csrf" value="${esc(csrf ?? '')}">
+
+    <fieldset><legend>Where you train</legend>
+      <div class="row">
+        <div><label for="venue_name">Venue</label>
+          <input id="venue_name" name="venue_name" maxlength="120"
+            value="${esc(p.venue_name ?? '')}"></div>
+        <div><label for="address_line">Street address</label>
+          <input id="address_line" name="address_line" maxlength="160"
+            value="${esc(p.address_line ?? '')}"></div>
+      </div>
+      <div class="row">
+        <div><label for="suburb">Suburb</label>
+          <input id="suburb" name="suburb" maxlength="80" value="${esc(p.suburb ?? '')}"></div>
+        <div><label for="city">Town or city</label>
+          <input id="city" name="city" maxlength="80" value="${esc(p.city ?? '')}"></div>
+        <div><label for="postcode">Postcode</label>
+          <input id="postcode" name="postcode" maxlength="12" value="${esc(p.postcode ?? '')}"></div>
+      </div>
+      <label for="directions">Getting in
+        <span class="hint">“Park at the back, side door by the playground.”</span></label>
+      <textarea id="directions" name="directions" maxlength="400"
+        style="min-height:64px">${esc(p.directions ?? '')}</textarea>
+    </fieldset>
+
+    <fieldset><legend>How to reach you</legend>
+      <div class="row">
+        <div><label for="phone">Phone</label>
+          <input id="phone" name="phone" maxlength="40" value="${esc(p.phone ?? '')}"></div>
+        <div><label for="email">Email</label>
+          <input id="email" name="email" type="email" maxlength="160"
+            value="${esc(p.email ?? '')}"></div>
+      </div>
+    </fieldset>
+
+    <fieldset><legend>About you</legend>
+      <label for="blurb">A few sentences in your own words
+        <span class="hint">Who you are and what training with you is like.</span></label>
+      <textarea id="blurb" name="blurb" maxlength="1200">${esc(p.blurb ?? '')}</textarea>
+      <label for="who_trains">Who trains with you
+        <span class="hint">“Mostly families, a few shift workers.”</span></label>
+      <input id="who_trains" name="who_trains" maxlength="400"
+        value="${esc(p.who_trains ?? '')}" style="max-width:600px">
+      <div class="check"><input id="accepts_beginners" type="checkbox"
+        name="accepts_beginners"${p.accepts_beginners ? ' checked' : ''}>
+        <label for="accepts_beginners" style="margin:0;font-weight:400">
+          New people are welcome at any time</label></div>
+      <div class="check"><input id="first_class_free" type="checkbox"
+        name="first_class_free"${p.first_class_free ? ' checked' : ''}>
+        <label for="first_class_free" style="margin:0;font-weight:400">
+          The first class is free</label></div>
+      <p class="hint">The website only says these things if you tick them.</p>
+    </fieldset>
+
+    <fieldset><legend>Picture at the top</legend>
+      <label for="hero_asset_id">Choose one of your pictures</label>
+      <select id="hero_asset_id" name="hero_asset_id">
+        <option value="">None — the plain banner</option>
+        ${images.map((img) => `<option value="${esc(img.id)}"${
+          p.hero_asset_id === img.id ? ' selected' : ''}>${
+          esc(img.filename ?? img.id)}</option>`).join('')}
+      </select>
+      <label for="heroFile">…or add one now
+        <span class="hint">It is uploaded when you save, and goes into your images too.</span></label>
+      <input id="heroFile" type="file" name="heroFile"
+        accept="image/png,image/jpeg,image/gif,image/webp">
+      <label for="heroAlt">Describe it for somebody who cannot see it</label>
+      <input id="heroAlt" name="heroAlt" maxlength="300" style="max-width:600px">
+    </fieldset>
+
+    <fieldset><legend>Training times</legend>
+      <p class="hint" style="margin-top:12px">One row for each class. Empty a row to
+        remove it. Times are 24-hour, like 18:30.</p>
+      <div class="times-edit">
+        <div class="t head"><span>Class</span><span>Day</span><span>Starts</span>
+          <span>Ends</span><span>From age</span><span>To age</span></div>
+        ${rows.map((t, i) => `<div class="t">
+          <input type="hidden" name="session_id_${i}" value="${esc(t.id)}">
+          <input name="session_label_${i}" maxlength="80" value="${esc(t.label)}"
+            ${i === 0 ? 'placeholder="Juniors" ' : ''}aria-label="Class ${i + 1} name">
+          <select name="session_day_${i}" aria-label="Class ${i + 1} day">
+            <option value=""></option>${WEEKDAYS.map(([n, name]) => `<option value="${n}"${
+              t.weekday === n ? ' selected' : ''}>${name}</option>`).join('')}</select>
+          <input name="session_starts_${i}" type="time" value="${esc(t.starts)}"
+            aria-label="Class ${i + 1} starts">
+          <input name="session_ends_${i}" type="time" value="${esc(t.ends)}"
+            aria-label="Class ${i + 1} ends">
+          <input name="session_min_${i}" type="number" min="0" max="99"
+            value="${esc(t.min)}" aria-label="Class ${i + 1} youngest">
+          <input name="session_max_${i}" type="number" min="0" max="99"
+            value="${esc(t.max)}" aria-label="Class ${i + 1} oldest">
+        </div>`).join('')}
+      </div>
+    </fieldset>
+
+    <div class="actions">
+      <button class="btn" type="submit">Save</button>
+      <a class="btn quiet" href="${base}/preview" target="_blank" rel="noopener">
+        See it as visitors will</a>
+    </div>
+  </form>` });
+};
+
+/**
+ * The federation's side: every club beneath it, where its page stands, and
+ * the decision. Also the other way in — a federation that has filled in a
+ * club's details itself can switch it on without being asked.
+ */
+export const clubPageList = ({ me, csrf, org, clubs = [], vocabulary = {},
+                               done, error, rebuild }) => {
+  const word = vocabulary.club ?? 'Club';
+  const plural = vocabulary.clubPlural ?? `${word}s`;
+  const waiting = clubs.filter((c) => c.state === 'requested');
+
+  const decide = (c, answer, label, cls) => `<form method="post"
+    action="/o/${esc(org.slug)}/club-pages/${esc(c.id)}/decide" style="display:inline">
+    <input type="hidden" name="_csrf" value="${esc(csrf ?? '')}">
+    <button class="${cls}" type="submit" name="answer" value="${answer}">${label}</button>
+  </form>`;
+
+  const tag = (c) => ({
+    live: '<span class="tag ok">On the website</span>',
+    requested: '<span class="tag wait">Asking</span>',
+    off: '<span class="tag no">No page</span>',
+  }[c.state]);
+
+  return page({ title: `${plural} pages — ${org.name}`, me, csrf, body: `
+  <h1>${esc(word)} pages</h1>
+  <p class="sub">${esc(org.name)} · each ${esc(word.toLowerCase())} chooses what its
+    page says; you choose which go on your website. They all use your design.</p>
+
+  ${done ? `<div class="good">${esc(done)}</div>` : ''}
+  ${error ? `<div class="bad">${esc(error)}</div>` : ''}
+  ${rebuild ? `<div class="note">${esc(rebuild)}</div>` : ''}
+
+  ${waiting.length ? `<h2>Asking to go on the website</h2>
+  ${waiting.map((c) => `<div class="card">
+    <h3>${esc(c.name)}</h3>
+    <p>${esc([c.venue_name, c.city].filter(Boolean).join(', '))}</p>
+    ${c.blurb ? `<p style="margin-top:8px;color:var(--ink-2)">${esc(c.blurb)}</p>` : ''}
+    <div class="actions">
+      ${decide(c, 'approve', 'Put it on the website', 'btn')}
+      <a class="btn quiet" href="/o/${esc(c.slug)}/club-page/preview"
+        target="_blank" rel="noopener">Preview</a>
+    </div>
+    <form method="post" action="/o/${esc(org.slug)}/club-pages/${esc(c.id)}/decide"
+          style="margin-top:12px">
+      <input type="hidden" name="_csrf" value="${esc(csrf ?? '')}">
+      <label for="note-${esc(c.id)}">If not yet, tell them why
+        <span class="hint">They will see this on their own screen.</span></label>
+      <input id="note-${esc(c.id)}" name="note" maxlength="400" style="max-width:480px">
+      <p><button class="btn quiet" type="submit" name="answer" value="decline">
+        Not yet</button></p>
+    </form>
+  </div>`).join('')}` : ''}
+
+  <h2>Every ${esc(word.toLowerCase())}</h2>
+  ${clubs.length ? `<table>
+    <thead><tr><th>${esc(word)}</th><th>Page</th><th class="hide-sm">What is missing</th>
+      <th></th></tr></thead>
+    <tbody>${clubs.map((c) => `<tr>
+      <td><strong>${esc(c.name)}</strong>
+        ${c.city ? `<div class="muted">${esc(c.city)}</div>` : ''}</td>
+      <td>${tag(c)}</td>
+      <td class="hide-sm muted">${c.state === 'live' ? ''
+        : c.gaps.length ? `Needs ${esc(c.gaps.join(', '))}` : 'Ready'}</td>
+      <td><a class="btn quiet" href="/o/${esc(c.slug)}/club-page">Open</a>
+        ${c.state === 'off' && !c.gaps.length
+          ? decide(c, 'approve', 'Switch on', 'btn') : ''}</td>
+    </tr>`).join('')}</tbody></table>`
+    : `<div class="note">There are no ${esc(plural.toLowerCase())} beneath
+        ${esc(org.name)} yet.</div>`}` });
+};
 
 export const error = ({ me, csrf, status, message }) => page({
   title: `Error ${status}`, me, csrf, body: `

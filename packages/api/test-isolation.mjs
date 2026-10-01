@@ -168,6 +168,7 @@ function pathFor(pattern) {
     // exactly the kind of thing this probe exists to refuse.
     assetId: theirAsset.id,
     articleId: theirArticle.id,
+    clubId: theirs.id,
     token: 'not-a-real-token',
     secret: 'not-a-real-secret',
   };
@@ -300,7 +301,10 @@ console.log('\nAND NOTHING OF THEIRS CAN BE CHANGED');
           join affiliation a on a.person_id = gr.person_id
           where a.organisation_id = $1) as gradings,
         (select count(*)::int from page_revision r
-          join page p on p.id = r.page_id where p.organisation_id = $1) as revisions
+          join page p on p.id = r.page_id where p.organisation_id = $1) as revisions,
+        (select count(*)::int from dojo_profile
+          where organisation_id = $1
+            and (published or page_requested_at is not null)) as club_pages
       `, [theirs.id]);
     return rows[0];
   };

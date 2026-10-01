@@ -1567,3 +1567,17 @@ language sql immutable strict parallel safe as $$
     'āēīōūãáàâäåéèêëíìîïóòôöõúùûüñçýÿšžœæ',
     'aeiouaaaaaaeeeeiiiiooooouuuuncyyszoa')
 $$;
+
+-- ---------------------------------------------------------------------------
+--  021 — a club's page is switched on, not assumed
+--
+--  dojo_profile.published is the switch; the club asks, the federation
+--  answers. See db/021-club-pages.sql.
+-- ---------------------------------------------------------------------------
+
+alter table dojo_profile
+  add column hero_asset_id     uuid references asset(id) on delete set null,
+  add column page_requested_at timestamptz,
+  add column page_note         text,
+  add column published_by      uuid references account(id),
+  add column published_at      timestamptz;

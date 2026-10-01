@@ -124,6 +124,17 @@ export function describe(entry) {
       return `changed the site menu to ${(a.items ?? []).length} item`
         + ((a.items ?? []).length === 1 ? '' : 's');
 
+    case 'club_page_saved':
+      return `edited the page for ${a.club ? quote(a.club) : 'a club'}`;
+    case 'club_page_requested':
+      return `asked for ${a.club ? quote(a.club) : 'a club'}'s page to go on the federation's site`;
+    case 'club_page_approved':
+      return `put ${a.club ? quote(a.club) : 'a club'}'s page on the website`;
+    case 'club_page_declined':
+      return `declined ${a.club ? quote(a.club) : 'a club'}'s page`;
+    case 'club_page_taken_down':
+      return `took ${a.club ? quote(a.club) : 'a club'}'s page off the website`;
+
     default:
       // An action nobody wrote a sentence for still has to read as something.
       // Better a plain description than a blank line, and better a blank line
@@ -144,9 +155,11 @@ export function weight(entry) {
     case 'grant_access':
     case 'instructor_publish':
     case 'article_publish_up':
+    case 'club_page_approved':
       return 'notable';
     case 'asset_delete':
     case 'instructor_remove':
+    case 'club_page_taken_down':
       return 'removal';
     default:
       return 'ordinary';
@@ -169,4 +182,9 @@ export const ACTIONS = Object.freeze([
   ['instructor_save', 'Instructor profile changed'],
   ['instructor_remove', 'Instructor removed from site'],
   ['navigation_save', 'Menu changed'],
+  ['club_page_saved', 'Club page edited'],
+  ['club_page_requested', 'Club page requested'],
+  ['club_page_approved', 'Club page approved'],
+  ['club_page_declined', 'Club page declined'],
+  ['club_page_taken_down', 'Club page taken down'],
 ]);

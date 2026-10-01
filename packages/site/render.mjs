@@ -158,6 +158,7 @@ nav.main a:hover{border-bottom-color:var(--primary)}
 .hero h1{font-family:var(--display);font-size:clamp(32px,5.4vw,52px);font-weight:700;
   margin:0 0 14px;line-height:1.05;letter-spacing:-.02em}
 .hero p{font-size:19px;color:var(--neutral);margin:0 0 22px;max-width:46ch}
+.hero.photo{background-size:cover;background-position:center}
 .btn{display:inline-block;font-weight:700;padding:13px 26px;text-decoration:none;
   border:2px solid var(--primary);background:var(--primary);color:#fff}
 .btn:hover{background:var(--primary-hover);border-color:var(--primary-hover)}
@@ -286,7 +287,9 @@ export function dojoPage({ dojo, federation, events, origin, fonts, nav,
     : 'Training nights to confirm';
 
   const body = `
-<div class="hero"><div class="wrap">
+<div class="hero${dojo.hero_url ? ' photo' : ''}"${dojo.hero_url
+  ? ` style="background-image:linear-gradient(rgba(22,22,23,.62),rgba(22,22,23,.62)),url('${esc(dojo.hero_url)}')"`
+  : ''}><div class="wrap">
   <h1>${esc(federation.name)} in ${esc(town)}</h1>
   <p>${esc(capitalise(artOf(federation)))} for adults and children. ${esc(daysLine)}.${
     dojo.first_class_free ? ' Your first class is free.' : ''}</p>

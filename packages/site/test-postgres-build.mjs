@@ -210,6 +210,18 @@ console.log('\nTHE SITE PROMISES ONLY WHAT THE DOJOS SAID');
   // over every federation's list, hardcoded. Three of MOKNZ's seventeen clubs
   // have a profile row at all, so that was a promise made to the public on
   // behalf of fourteen businesses nobody had asked.
+  // Every club is on the site for this test, because a club only is when it
+  // has asked and been approved. Each says nothing about beginners or a free
+  // first class — which is what "false" means in a column that cannot be null.
+  await pool.query(`
+    insert into dojo_profile (organisation_id, published, accepts_beginners,
+                              first_class_free)
+    select o.id, true, false, false from organisation o where o.type='club'
+    on conflict (organisation_id) do update
+      set published = true, accepts_beginners = false, first_class_free = false`);
+  execSync(`HONBU_STORE=postgres OUT=${OUT} node packages/site/build.mjs`,
+    { cwd: path.join(import.meta.dirname, '../..'), stdio: 'pipe' });
+
   const find = fs.readFileSync(
     path.join(OUT, 'find-a-dojo', 'index.html'), 'utf8');
   ok('no blanket promise while most dojos have said nothing',

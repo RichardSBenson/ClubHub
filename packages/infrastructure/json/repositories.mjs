@@ -230,6 +230,9 @@ export class JsonOrganisations {
       .filter((o) => OrgType.isLeaf(o.type) && descendsFrom(o, root, orgs))
       .map((o) => ({
         ...o, ...(profiles.get(o.id) ?? {}),
+        // No profile means the club has told nobody anything, which is not
+        // the same as having asked to be on the website.
+        published: profiles.get(o.id)?.published === true,
         sessions: sessions.filter((s) => s.organisationId === o.id),
       }))
       .sort((a, b) => a.name.localeCompare(b.name));
