@@ -223,6 +223,25 @@ export class PostgresSiteContent {
     }
   }
 
+  /**
+   * Every federation in this database — the top of each tree.
+   *
+   * The build used to carry a hardcoded list: moknz at the root and two demos
+   * beneath it. That meant a federation who bought this and installed it
+   * published somebody else's karate organisation at their own address, with
+   * a taekwondo and a jiu-jitsu demo under it. One install is one federation,
+   * and the only honest source for which one is the database.
+   */
+  async federations() {
+    const { rows } = await this.pool.query(`
+      select slug, name, founded,
+             coalesce((settings->>'demo')::boolean, false) as demo
+      from organisation
+      where parent_id is null
+      order by founded nulls last, name`);
+    return rows;
+  }
+
   async brand(federationId) {
     const { rows: [r] } = await this.pool.query(
       'select * from brand where organisation_id=$1', [federationId]);

@@ -30,16 +30,97 @@ const FED = process.env.FEDERATION ?? 'moknz';
  * FEDERATION=<slug> builds just one, which is what a single-federation
  * deployment does.
  */
-const SITES = process.env.FEDERATION
-  ? [{ slug: process.env.FEDERATION, base: '' }]
-  : [
-      { slug: 'moknz', base: '' },
-      { slug: 'demo-tkd', base: '/demo/tkd' },
-      { slug: 'demo-bjj', base: '/demo/bjj' },
-    ];
-
 const repos = await repositories();
 const site = repos.site;
+
+/**
+ * Which federations this deployment publishes, and where each one lives.
+ *
+ * Read from the database. This used to be a list in this file — moknz at the
+ * root, a taekwondo demo and a jiu-jitsu demo beneath it — which meant a
+ * federation that bought this and installed it published somebody else's
+ * karate organisation at their own address, with two demos under it. "I have
+ * just purchased this and I do not want to see anything" is the right
+ * expectation and the list made it impossible.
+ *
+ * One install is one federation. That one is published at the root. A
+ * federation marked demo:true goes under /demo/<name>, because the demos are
+ * a sales tool for this deployment rather than anybody's real site. More than
+ * one real federation in a single database is not the intended shape, so it
+ * is published rather than refused — losing somebody's site to a rule is
+ * worse than an unusual arrangement — but it is said out loud.
+ */
+async function sitesToPublish() {
+  if (process.env.FEDERATION)
+    return [{ slug: process.env.FEDERATION, base: '' }];
+
+  const all = site.federations ? await site.federations() : [];
+  if (!all.length) return [];
+
+  const real = all.filter((f) => !f.demo);
+  const demos = all.filter((f) => f.demo);
+
+  const root = real[0] ?? demos[0];
+  const sites = [{ slug: root.slug, base: '' }];
+
+  for (const f of real.slice(1)) {
+    console.log(`  note: ${f.name} is a second federation in this database.`);
+    console.log(`        Publishing it at /f/${f.slug}. One install is meant`);
+    console.log('        to be one federation; set FEDERATION to choose which.');
+    sites.push({ slug: f.slug, base: `/f/${f.slug}` });
+  }
+
+  for (const f of demos)
+    sites.push({ slug: f.slug, base: `/demo/${f.slug.replace(/^demo-/, '')}` });
+
+  return sites;
+}
+
+const SITES = await sitesToPublish();
+
+/**
+ * Nothing set up yet.
+ *
+ * A federation who has just installed this has an empty database, and the
+ * build used to die writing a sitemap into a directory it never created. A
+ * first deploy failing with ENOENT is a poor welcome, and "the output
+ * directory is missing" is what Vercel would have said.
+ *
+ * So it publishes one page saying what to do, the way a fresh WordPress says
+ * run the installer, and exits successfully. There is a working deployment
+ * at the end of it with nothing in it, which is the correct state.
+ */
+if (!SITES.length) {
+  await fs.mkdir(OUT, { recursive: true });
+  await fs.writeFile(path.join(OUT, 'index.html'),
+    `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="robots" content="noindex">
+<title>Honbu — not set up yet</title>
+<style>
+  body{font:16px/1.6 system-ui,sans-serif;background:#111113;color:#F2F2F7;
+       margin:0;display:grid;place-items:center;min-height:100vh;padding:24px}
+  main{max-width:34rem}
+  h1{font-size:28px;margin:0 0 16px}
+  code{background:#1C1C1E;padding:2px 6px;border-radius:4px}
+  p{color:#BDBDBF}
+</style></head><body><main>
+  <h1>Nothing here yet</h1>
+  <p>This install has no federation in it. That is what a new one looks
+     like — it does not come with somebody else's organisation in it.</p>
+  <p>Set yours up by running:</p>
+  <p><code>npm run found -- --name "Your Federation" --art Karate
+     --country NZ --email you@example.org</code></p>
+  <p>Then deploy again, and this page is replaced by your site.</p>
+</main></body></html>\n`);
+  await fs.writeFile(path.join(OUT, 'robots.txt'),
+    'User-agent: *\nDisallow: /\n');
+
+  console.log('\nNo federation in this database yet.');
+  console.log('Wrote a placeholder page. Run `npm run found` to set one up,');
+  console.log('then deploy again.\n');
+  process.exit(0);
+}
 
 const DATA = process.env.HONBU_DATA
   ?? new URL('../../data/', import.meta.url).pathname;
@@ -55,6 +136,33 @@ try {
   throw e;
 }
 for (const n of rootSettings.notes ?? []) console.log(`  note: ${n}`);
+
+/**
+ * Whether the settings file is about the federation it is being applied to.
+ *
+ * data/settings.json is the deployment's one hand-edited file, and on a
+ * single-federation install it is that federation's own — name, tagline,
+ * colours, the word they use for a club. That was fine while this repository
+ * had exactly one customer.
+ *
+ * It is not fine shipped. A federation who installs this gets a settings file
+ * describing Mas Oyama Karate New Zealand, and their brand new aikido site
+ * says "Find a dojo" in somebody else's colours. The test for a fresh install
+ * caught exactly that.
+ *
+ * So the file is used only when it is about the federation at the root. If it
+ * names a different one, it is ignored and said so — loudly, because an
+ * ignored settings file is otherwise a mystery, and because the fix is for
+ * them to edit it or delete it rather than to wonder.
+ */
+function settingsAreAbout(federation) {
+  const named = rootSettings.organisation?.name;
+  if (!named) return true;              // nobody said; assume it is theirs
+  const same = (a, b) => String(a ?? '').trim().toLowerCase()
+                       === String(b ?? '').trim().toLowerCase();
+  return same(named, federation.name)
+      || same(rootSettings.organisation?.shortName, federation.short_name);
+}
 
 /**
  * Where this deployment actually answers.
@@ -99,10 +207,25 @@ for (const target of SITES) {
 
   const orgSettings = federation.settings ?? {};
   const atRoot = target.base === '';
+
+  // The settings file only counts if it is this federation's.
+  if (atRoot && !settingsAreAbout(federation)) {
+    console.log(`  note: data/settings.json describes `
+      + `"${rootSettings.organisation?.name}", not "${federation.name}".`);
+    console.log('        Ignoring it. Edit it for your federation, or delete');
+    console.log('        it — everything in it has a sensible default.');
+    rootSettings = loadSettings('/nonexistent');   // defaults only
+  }
+
   const settings = atRoot ? rootSettings : null;
 
-  const vocabulary = strip(orgSettings.vocabulary ?? {});
-  if (atRoot) Object.assign(vocabulary, strip(rootSettings.vocabulary ?? {}));
+  // The file supplies defaults; what the federation itself has stored wins.
+  // The other way round, a settings file that fell back to generic defaults
+  // overwrote a Muay Thai federation's "Gym" with "Club".
+  const vocabulary = {
+    ...(atRoot ? strip(rootSettings.vocabulary ?? {}) : {}),
+    ...strip(orgSettings.vocabulary ?? {}),
+  };
 
   // The art, for schema.org and for the page copy. From settings at the root,
   // from the federation's own record for everyone else.

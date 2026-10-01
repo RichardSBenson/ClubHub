@@ -275,6 +275,13 @@ export class JsonSiteContent {
     return this.data.read('organisations').find((o) => o.slug === slug) ?? null;
   }
 
+  async federations() {
+    return this.data.read('organisations')
+      .filter((o) => !o.parentId)
+      .map((o) => ({ slug: o.slug, name: o.name, founded: o.founded ?? null,
+                     demo: !!o.settings?.demo }));
+  }
+
   async brand(federationId) {
     return this.data.read('brand')
       .find((b) => b.organisationId === federationId) ?? { tokens: {}, fonts: {} };
