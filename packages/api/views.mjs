@@ -231,6 +231,7 @@ export const roster = ({ me, csrf, org, roster, canRegister = false,
     : '<div class="note">Nobody on the roll yet.</div>'}` });
 
 export const person = ({ me, csrf, person, history, affiliations, eligibility,
+                        titles = [],
                         canEdit = false, access = null, link = null,
                         linkExpires = 15, error = null }) => page({
   title: `${person.first_name} ${person.last_name}`, me, csrf, body: `
@@ -238,6 +239,12 @@ export const person = ({ me, csrf, person, history, affiliations, eligibility,
   <p class="sub">${esc(person.display_number ?? 'no member number')}
     ${person.age ? ` · ${person.age} years old` : ''}
     ${canEdit ? ` · <a href="/p/${esc(person.id)}/edit">Correct this record</a>` : ''}</p>
+
+  ${titles.length ? `<p class="sub">${titles.map((t) => `<span class="tag dan">${
+    esc(t.label)}</span>`).join(' ')}
+    ${titles[0].address_as
+      ? `<span class="muted">addressed as ${esc(titles[0].address_as)}</span>`
+      : ''}</p>` : ''}
 
   ${!eligibility?.next && history.length
     ? `<div class="note"><strong>Top of the ladder.</strong>

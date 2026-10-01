@@ -370,6 +370,32 @@ export function authoredPage({ page, html, federation, origin, fonts, nav,
   });
 }
 
+/**
+ * What can honestly be said about all of them at once.
+ *
+ * This line used to read "Every one takes beginners, and your first class is
+ * free" — printed over every federation's list regardless of what any dojo had
+ * said. Three of MOKNZ's seventeen clubs have a profile row at all, so the
+ * national site was making a promise to the public on behalf of fourteen
+ * businesses that had never been asked.
+ *
+ * accepts_beginners and first_class_free are real per-dojo columns. A claim
+ * about all of them is made only when all of them have actually said so;
+ * otherwise the page says nothing and the individual dojo pages speak for
+ * themselves. Silence is free, and a wrong promise is somebody turning up to
+ * a class expecting not to pay.
+ */
+function welcomeLine(dojos = []) {
+  if (!dojos.length) return '';
+  const all = (field) => dojos.every((d) => d[field] === true);
+  const beginners = all('accepts_beginners');
+  const free = all('first_class_free');
+  if (beginners && free) return ' Every one takes beginners, and your first class is free.';
+  if (beginners) return ' Every one takes beginners.';
+  if (free) return ' Your first class is free.';
+  return '';
+}
+
 export function findADojoPage({ dojos, federation, origin, fonts, nav,
                                 base = '', vocabulary = {} }) {
   const at = (p) => `${base}${p}`;
@@ -377,11 +403,12 @@ export function findADojoPage({ dojos, federation, origin, fonts, nav,
   const body = `
 <section><div class="wrap">
   <h1 style="font-family:var(--display);font-size:clamp(30px,5vw,46px);margin:0 0 12px">Find a dojo</h1>
-  <p style="font-size:19px;max-width:60ch">${dojos.length} dojo. Every one takes
-  beginners, and your first class is free.</p>
+  <p style="font-size:19px;max-width:60ch">${dojos.length} ${
+    clubsWordOf(vocabulary).toLowerCase()}.${esc(welcomeLine(dojos))}</p>
   <div class="grid" style="margin-top:28px">
     ${dojos.map((d) => `<a href="${at(`/${esc(d.slug)}`)}"><strong>${esc(d.name)}</strong>
-      <span>${esc(d.published ? (d.city ?? 'Book a free class') : 'Details coming')}</span></a>`).join('')}
+      <span>${esc(d.published ? (d.city ?? 'See times and address')
+                                : 'Details coming')}</span></a>`).join('')}
   </div>
   <p style="margin-top:22px;color:var(--muted);font-size:15px">
     ${ready.length} of ${dojos.length} pages complete.</p>

@@ -204,6 +204,50 @@ console.log('\nNEWS ARTICLES HAVE BODIES');
     !/<div class="wrap narrow"><\/div>/.test(html));
 }
 
+console.log('\nTHE SITE PROMISES ONLY WHAT THE DOJOS SAID');
+{
+  // It used to print "Every one takes beginners, and your first class is free"
+  // over every federation's list, hardcoded. Three of MOKNZ's seventeen clubs
+  // have a profile row at all, so that was a promise made to the public on
+  // behalf of fourteen businesses nobody had asked.
+  const find = fs.readFileSync(
+    path.join(OUT, 'find-a-dojo', 'index.html'), 'utf8');
+  ok('no blanket promise while most dojos have said nothing',
+    !/Every one takes beginners/.test(find)
+    && !/your first class is free/i.test(find),
+    find.match(/<p style="font-size:19px[^<]*/)?.[0]);
+  ok('it still says how many there are', /17 dojo/.test(find));
+
+  // And when every dojo really has said so, the claim comes back.
+  await pool.query(`
+    insert into dojo_profile (organisation_id, accepts_beginners, first_class_free)
+    select o.id, true, true from organisation o where o.type='club'
+    on conflict (organisation_id) do update
+      set accepts_beginners = true, first_class_free = true`);
+  execSync(`HONBU_STORE=postgres OUT=${OUT} node packages/site/build.mjs`,
+    { cwd: path.join(import.meta.dirname, '../..'), stdio: 'pipe' });
+  const now = fs.readFileSync(
+    path.join(OUT, 'find-a-dojo', 'index.html'), 'utf8');
+  ok('once all of them have said so, it says so',
+    /Every one takes beginners, and your first class is free/.test(now),
+    now.match(/<p style="font-size:19px[^<]*/)?.[0]);
+
+  // One dojo that does not take beginners is enough to withdraw the claim.
+  await pool.query(`
+    update dojo_profile set accepts_beginners = false
+    where organisation_id = (select id from organisation
+                             where type='club' order by name limit 1)`);
+  execSync(`HONBU_STORE=postgres OUT=${OUT} node packages/site/build.mjs`,
+    { cwd: path.join(import.meta.dirname, '../..'), stdio: 'pipe' });
+  const one = fs.readFileSync(
+    path.join(OUT, 'find-a-dojo', 'index.html'), 'utf8');
+  ok('one dissenter withdraws the claim about beginners',
+    !/Every one takes beginners/.test(one));
+  ok('but the free first class still stands',
+    /Your first class is free/.test(one),
+    one.match(/<p style="font-size:19px[^<]*/)?.[0]);
+}
+
 fs.rmSync(OUT, { recursive: true, force: true });
 
 console.log(`\n${pass} passed, ${fail} failed\n`);

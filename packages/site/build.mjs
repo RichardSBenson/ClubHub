@@ -201,7 +201,12 @@ for (const target of SITES) {
     venue_name: d.venue_name ?? d.venueName ?? null,
     address_line: d.address_line ?? d.addressLine ?? null,
     who_trains: d.who_trains ?? d.whoTrains ?? null,
-    first_class_free: d.first_class_free ?? d.firstClassFree ?? true,
+    // Not defaulted to true. A dojo with no profile row has told us nothing
+    // about its first class, and inventing "free" here is how fourteen dojos
+    // that have never filled anything in ended up with the national site
+    // promising the public something on their behalf.
+    first_class_free: d.first_class_free ?? d.firstClassFree ?? null,
+    accepts_beginners: d.accepts_beginners ?? d.acceptsBeginners ?? null,
     sessions: d.sessions ?? [],
   }));
 

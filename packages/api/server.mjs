@@ -316,6 +316,7 @@ get('/p/:id', async (ctx) => {
   const canEdit = record.at ? await mayRegisterAt(ctx, record.at.id) : false;
   return ctx.send(200, V.person({
     me: ctx.me, ...record, eligibility, csrf: ctx.csrf, canEdit,
+    titles: await people.titlesOf(ctx.me.accountId, ctx.params.id),
     access: canEdit ? await people.accessFor(ctx.me.accountId, record.person.id)
                     : null,
   }));

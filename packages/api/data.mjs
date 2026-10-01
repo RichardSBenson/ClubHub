@@ -430,6 +430,28 @@ export const people = {
   },
 
   /** Who already has a way in, and what they may do. */
+  /**
+   * The titles this person currently holds.
+   *
+   * person_current_title has carried an address_as column since titles were
+   * built and no screen has ever read it, so a federation could record that
+   * somebody is Shihan and then have nowhere that said so. In a martial art
+   * that is not decoration: a title is how a person is addressed in the hall,
+   * and getting it wrong in front of their own students is a real discourtesy.
+   */
+  async titlesOf(actor, personId) {
+    const row = await one(`
+      select a.organisation_id from affiliation a
+      where a.person_id = $1 and a.ends is null limit 1`, [personId]);
+    if (row) await assertRole(actor, row.organisation_id, TEACH);
+    const { rows } = await pool.query(`
+      select label, short_label, address_as, how, awarded_on
+      from person_current_title
+      where person_id = $1
+      order by rank_order desc nulls last, label`, [personId]);
+    return rows;
+  },
+
   async accessFor(actor, personId) {
     const account = await one(
       'select * from account where person_id = $1', [personId]);
@@ -1607,9 +1629,16 @@ export const news = {
           [articleId, slug, title, summary, doc, heroAssetId, clean, aboutOrgId])
       : await one(`
           insert into article (organisation_id, slug, title, summary, body,
-                               hero_asset_id, tags, about_org_id, status)
-          values ($1,$2,$3,$4,$5,$6,$7,$8,'draft') returning *`,
-          [orgId, slug, title, summary, doc, heroAssetId, clean, aboutOrgId]);
+                               hero_asset_id, tags, about_org_id, status,
+                               author_id)
+          values ($1,$2,$3,$4,$5,$6,$7,$8,'draft',$9) returning *`,
+          [orgId, slug, title, summary, doc, heroAssetId, clean, aboutOrgId,
+           // Who wrote it. The column has existed since articles did and
+           // nothing ever filled it in, so every article in the register was
+           // anonymous. Set on creation only: later edits do not make the
+           // editor the author.
+           (await one('select person_id from account where id=$1', [actor]))
+             ?.person_id ?? null]);
 
     await pool.query(`
       insert into audit_log (account_id, organisation_id, action, entity,
