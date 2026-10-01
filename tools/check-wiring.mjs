@@ -31,7 +31,12 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
 
-const SKIP_DIRECTORIES = new Set(['node_modules', 'dist', 'data', '.git', '.vercel']);
+// vendor/ holds browser files copied from npm — EasyMDE and its bundled
+// CodeMirror. Importing one in Node fails on `document is not defined`,
+// which is correct: they are not this project's modules and nothing here
+// imports them. The build copies them into the static output instead.
+const SKIP_DIRECTORIES = new Set(['node_modules', 'dist', 'data', '.git',
+                                  '.vercel', 'vendor', '.claude']);
 
 /** Modules that are scripts, not libraries: importing them does work. */
 const SKIP_FILES = [

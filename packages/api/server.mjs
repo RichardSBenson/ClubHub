@@ -47,13 +47,15 @@ import { toInstant, toLocalInput } from './zones.mjs';
 import { readMultipart, BadUpload } from './multipart.mjs';
 import { destinations, menuFor, MAX_ITEMS } from '../content/navigation.mjs';
 import { ACTIONS as AUDIT_ACTIONS } from '../content/audit.mjs';
+import { documentFromText, textFromDocument }
+  from '../content/document-text.mjs';
 import { identify, NotAnImage, ACCEPTED, MAX_BYTES }
   from '../content/images.mjs';
 import { parseTable, planImport } from '../core/domain/roll-import.mjs';
 import { Competitor, Division, placeEntry, priceFor, consentNeeded,
          problemsWithConsent } from '../core/domain/competition.mjs';
 import { ageOn } from '../core/domain/people.mjs';
-import { documentFromForm, formFromDocument, applyOperation, looksEmpty }
+import { looksEmpty }
   from '../content/page-form.mjs';
 import { renderBlocks, excerpt } from '../content/blocks.mjs';
 import * as R from '../site/render.mjs';
@@ -434,10 +436,9 @@ get('/o/:slug/pages', async (ctx) => {
 
 get('/o/:slug/pages/new', async (ctx) => {
   const org = await organisationFor(ctx, { toWrite: true });
-  const doc = { blocks: [] };
   return ctx.send(200, V.pageEditor({
-    me: ctx.me, org, csrf: ctx.csrf, blocks: doc.blocks,
-    values: { ...formFromDocument(doc) },
+    me: ctx.me, org, csrf: ctx.csrf,
+    values: { body: '' },
     canPublish: await mayPublishAt(ctx, org.id),
   }));
 });
@@ -455,26 +456,20 @@ async function editorPost(ctx, { org, page = null }) {
   const op = String(form.op ?? 'save');
   const canPublish = await mayPublishAt(ctx, org.id);
 
-  // Whatever is in the form right now, with the button applied to it.
-  const submitted = documentFromForm(form);
-  const structural = op.startsWith('up:') || op.startsWith('down:')
-    || op.startsWith('remove:') || op === 'add';
-  const doc = applyOperation(submitted,
-    op === 'add' ? `add:${form.addType}` : op);
+  // One box of text, parsed into blocks. What comes back out still goes
+  // through the whitelist in pages.save, so the editor is not a way past it.
+  const body = String(form.body ?? '');
+  const doc = documentFromText(body);
 
   const title = String(form.title ?? '').trim();
   const slug = slugify(form.slug || title);
 
   const render = (extra = {}) => ctx.send(extra.status ?? 200, V.pageEditor({
-    me: ctx.me, org, page, csrf: ctx.csrf, blocks: doc.blocks, canPublish,
-    values: { ...formFromDocument(doc), title, slug,
+    me: ctx.me, org, page, csrf: ctx.csrf, canPublish,
+    values: { body, title, slug,
               metaDescription: form.metaDescription ?? '' },
     ...extra,
   }));
-
-  // Rearranging is not saving. Somebody who moved a block and then changed
-  // their mind should be able to leave without having written anything.
-  if (structural) return render();
 
   if (!title) return render({ status: 422, error: 'The page needs a title.' });
   if (!slug) return render({ status: 422,
@@ -542,8 +537,8 @@ get('/o/:slug/pages/:pageId', async (ctx) => {
   const doc = pg.body ?? { blocks: [] };
 
   return ctx.send(200, V.pageEditor({
-    me: ctx.me, org, page: pg, csrf: ctx.csrf, blocks: doc.blocks,
-    values: { ...formFromDocument(doc), title: pg.title, slug: pg.slug,
+    me: ctx.me, org, page: pg, csrf: ctx.csrf,
+    values: { body: textFromDocument(doc), title: pg.title, slug: pg.slug,
               metaDescription: pg.meta_description ?? '' },
     revisions: await pages.revisions(ctx.me.accountId, pg.id),
     canPublish: await mayPublishAt(ctx, org.id),
@@ -830,10 +825,9 @@ get('/o/:slug/news', async (ctx) => {
 
 get('/o/:slug/news/new', async (ctx) => {
   const org = await organisationFor(ctx, { toWrite: true });
-  const doc = { blocks: [] };
   return ctx.send(200, V.articleEditor({
-    me: ctx.me, org, csrf: ctx.csrf, blocks: doc.blocks,
-    values: { ...formFromDocument(doc) },
+    me: ctx.me, org, csrf: ctx.csrf,
+    values: { body: '' },
     images: await assets.list(ctx.me.accountId, org.id),
     canPublish: await mayPublishAt(ctx, org.id),
   }));
@@ -849,8 +843,8 @@ get('/o/:slug/news/:articleId', async (ctx) => {
   const a = await news.byId(ctx.me.accountId, ctx.params.articleId);
   const doc = a.body ?? { blocks: [] };
   return ctx.send(200, V.articleEditor({
-    me: ctx.me, org, article: a, csrf: ctx.csrf, blocks: doc.blocks,
-    values: { ...formFromDocument(doc), title: a.title, slug: a.slug,
+    me: ctx.me, org, article: a, csrf: ctx.csrf,
+    values: { body: textFromDocument(doc), title: a.title, slug: a.slug,
               summary: a.summary ?? '', heroAssetId: a.hero_asset_id ?? '',
               tags: (a.tags ?? []).join(', ') },
     images: await assets.list(ctx.me.accountId, org.id),
@@ -914,10 +908,8 @@ async function articlePost(ctx, { org, article = null }) {
   const op = String(form.op ?? 'save');
   const canPublish = await mayPublishAt(ctx, org.id);
 
-  const submitted = documentFromForm(form);
-  const structural = op.startsWith('up:') || op.startsWith('down:')
-    || op.startsWith('remove:') || op === 'add';
-  const doc = applyOperation(submitted, op === 'add' ? `add:${form.addType}` : op);
+  const body = String(form.body ?? '');
+  const doc = documentFromText(body);
 
   const title = String(form.title ?? '').trim();
   const slug = slugify(form.slug || title);
@@ -927,14 +919,12 @@ async function articlePost(ctx, { org, article = null }) {
 
   const render = async (extra = {}) => ctx.send(extra.status ?? 200,
     V.articleEditor({
-      me: ctx.me, org, article, csrf: ctx.csrf, blocks: doc.blocks, canPublish,
+      me: ctx.me, org, article, csrf: ctx.csrf, canPublish,
       images: await assets.list(ctx.me.accountId, org.id),
-      values: { ...formFromDocument(doc), title, slug, summary,
+      values: { body, title, slug, summary,
                 heroAssetId: heroAssetId ?? '', tags: form.tags ?? '' },
       ...extra,
     }));
-
-  if (structural) return render();
 
   if (!title) return render({ status: 422, error: 'The article needs a headline.' });
   if (!slug) return render({ status: 422,

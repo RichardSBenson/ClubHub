@@ -50,8 +50,7 @@ const signIn = async (email) => {
 /** A whole article in one post, the way the form submits it. */
 const compose = (over = {}) => ({
   title: 'Eleven grade to 8th kyu', slug: '', summary: 'A good morning.',
-  blockCount: '1', b0_type: 'paragraph',
-  b0_text: 'Saturday was the largest grading since 2019.',
+  body: 'Saturday was the largest grading since 2019.',
   tags: 'grading, whanganui', heroAssetId: '', op: 'save', ...over,
 });
 
@@ -73,6 +72,9 @@ console.log('\nWRITING ONE');
   ok('the slug came from the headline', !!row);
   ok('it starts as a draft', row?.status === 'draft');
   ok('the body was kept', JSON.stringify(row?.body).includes('largest grading'));
+  ok('and stored as a paragraph block, not as text',
+    row?.body?.blocks?.[0]?.type === 'paragraph',
+    JSON.stringify(row?.body));
   ok('and the tags were split and tidied',
     JSON.stringify(row?.tags) === JSON.stringify(['grading', 'whanganui']),
     JSON.stringify(row?.tags));
@@ -90,7 +92,7 @@ console.log('\nWHAT IS REFUSED');
     noTitle.status === 422 && noTitle.html.includes('needs a headline'));
 
   const noBody = await req('/o/moknz/news/new',
-    { method: 'POST', form: compose({ b0_text: '', slug: 'empty-one' }) });
+    { method: 'POST', form: compose({ body: '', slug: 'empty-one' }) });
   ok('and one with nothing in it',
     noBody.status === 422 && noBody.html.includes('nothing in this article'),
     noBody.status);

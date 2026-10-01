@@ -52,6 +52,7 @@ const EXTRA = [
 function discover(dir = ROOT, found = []) {
   for (const entry of readdirSync(dir, { withFileTypes: true })) {
     if (entry.name === 'node_modules' || entry.name === 'dist'
+        || entry.name === 'vendor'
         || entry.name.startsWith('.')) continue;
     const full = join(dir, entry.name);
     if (entry.isDirectory()) discover(full, found);

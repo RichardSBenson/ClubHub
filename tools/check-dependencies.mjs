@@ -35,7 +35,10 @@ function walk(dir, out = []) {
   if (!fs.existsSync(dir)) return out;
   for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
     const p = path.join(dir, e.name);
-    if (e.isDirectory()) { if (e.name !== 'node_modules') walk(p, out); }
+    // vendor/ is browser files copied from npm, not this project's layers.
+    if (e.isDirectory()) {
+      if (!['node_modules', 'vendor', '.claude'].includes(e.name)) walk(p, out);
+    }
     else if (e.name.endsWith('.mjs')) out.push(p);
   }
   return out;

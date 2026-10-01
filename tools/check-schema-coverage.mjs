@@ -107,7 +107,11 @@ const camel = (s) => {
 
 function sources(dir = ROOT, found = []) {
   for (const entry of readdirSync(dir, { withFileTypes: true })) {
-    if (['node_modules', 'dist', '.git', '.claude'].includes(entry.name)) continue;
+    // vendor/ too: 327KB of minified third-party JavaScript contains most
+    // short words by accident, and a column counted as used because it
+    // appears inside CodeMirror is worse than no check at all.
+    if (['node_modules', 'dist', '.git', '.claude', 'vendor']
+        .includes(entry.name)) continue;
     const full = join(dir, entry.name);
     if (entry.isDirectory()) sources(full, found);
     // This file is excluded from its own search. Every column name appears in

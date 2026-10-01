@@ -3,6 +3,7 @@ import { describe as auditDescribe, weight as auditWeight }
   from '../content/audit.mjs';
 import { highlight as searchHighlight, linkTo as searchLinkTo }
   from '../content/search.mjs';
+import { WRITING_HELP } from '../content/document-text.mjs';
 import path from 'node:path';
 import { BLOCKS } from '../content/blocks.mjs';
 import { BLOCK_MENU } from '../content/page-form.mjs';
@@ -123,7 +124,16 @@ header .find{display:flex;gap:6px;align-items:center;margin-left:auto;
 header .find input{padding:6px 10px;border-radius:6px;border:1px solid #3A3A3C;
   background:#1C1C1E;color:#F2F2F7;min-width:150px;font-size:14px}
 header .find label{color:#BDBDBF;font-size:13px}
-@media (max-width:640px){header .find input{min-width:90px}}`;
+@media (max-width:640px){header .find input{min-width:90px}}
+textarea.writing{width:100%;min-height:320px;font:15px/1.6 ui-monospace,
+  SFMono-Regular,Menlo,monospace}
+.editor-toolbar button.mde-text{width:auto;padding:0 9px;font-size:13px;
+  font-weight:600}
+.hint-block{margin:10px 0 18px}
+.hint-block summary{cursor:pointer;color:#BDBDBF;font-size:14px}
+table.writing-help{margin-top:8px}
+table.writing-help td{padding:3px 12px 3px 0;font-size:14px}
+table.writing-help code{background:#1C1C1E;padding:2px 6px;border-radius:4px}`;
 
 function page({ title, me, body, csrf, query = '' }) {
   return `<!DOCTYPE html><html lang="en-NZ"><head>
@@ -1535,15 +1545,6 @@ export const mediaLibrary = ({ me, csrf, org, assets = [], accepted = [],
     : `<div class="note">No images yet. Upload one above, then put its
         reference into an image block on a page.</div>`}` });
 
-const FIELD_LABELS_PAGE = {
-  text: 'Text', level: 'Heading level', items: 'One per line',
-  ordered: 'Numbered', attribution: 'Who said it', assetId: 'Image reference',
-  caption: 'Caption', alt: 'Describe the image for somebody who cannot see it',
-  tone: 'Tone', provider: 'Where the video is', id: 'Video reference',
-  heading: 'Heading', kind: 'Only this kind', limit: 'How many at most',
-  award: 'Which award',
-};
-
 const BLOCK_NAMES = Object.fromEntries(BLOCK_MENU);
 
 /**
@@ -1582,7 +1583,6 @@ export const pageEditor = ({ me, csrf, org, page: pg, values = {},
 
   <form method="post" action="${esc(action)}">
     <input type="hidden" name="_csrf" value="${esc(csrf ?? '')}">
-    <input type="hidden" name="blockCount" value="${blocks.length}">
 
     <fieldset>
       <legend>The page itself</legend>
@@ -1607,30 +1607,7 @@ export const pageEditor = ({ me, csrf, org, page: pg, values = {},
     </fieldset>
 
     <h2>What is on it</h2>
-    <p class="muted">${esc(SHORTHAND_HELP)} — anywhere you can type a sentence.</p>
-
-    ${blocks.map((b, i) => blockFieldset(b, i, values)).join('')}
-
-    ${blocks.length ? '' : `<div class="note">Nothing on this page yet.
-      Add something below.</div>`}
-
-    <fieldset>
-      <legend>Add something</legend>
-      <div class="row">
-        <div>
-          <select name="addType" style="max-width:280px">
-            ${BLOCK_MENU.map(([t, label]) => option(t, label, 'paragraph')).join('')}
-          </select>
-        </div>
-        <div>
-          <button class="btn quiet" type="submit" name="op" value="add">
-            Add it to the page</button>
-        </div>
-      </div>
-      <p class="hint">The three marked "live" fill themselves in from the
-        register — add the clubs block once and it stays right as clubs come
-        and go.</p>
-    </fieldset>
+    ${writingBox({ name: 'body', value: values.body ?? '' })}
 
     <div class="actions">
       <button class="btn" type="submit" name="op" value="save">
@@ -2117,7 +2094,6 @@ export const articleEditor = ({ me, csrf, org, article: a = null, values = {},
 
   <form method="post" action="${esc(action)}">
     <input type="hidden" name="_csrf" value="${esc(csrf ?? '')}">
-    <input type="hidden" name="blockCount" value="${blocks.length}">
 
     <fieldset>
       <legend>The article</legend>
@@ -2163,27 +2139,7 @@ export const articleEditor = ({ me, csrf, org, article: a = null, values = {},
     </fieldset>
 
     <h2>What it says</h2>
-    <p class="muted">${esc(SHORTHAND_HELP)} — anywhere you can type a sentence.</p>
-
-    ${blocks.map((b, i) => blockFieldset(b, i, values)).join('')}
-
-    ${blocks.length ? '' : `<div class="note">Nothing written yet.
-      Add something below.</div>`}
-
-    <fieldset>
-      <legend>Add something</legend>
-      <div class="row">
-        <div>
-          <select name="addType" style="max-width:280px">
-            ${BLOCK_MENU.map(([t, label]) => option(t, label, 'paragraph')).join('')}
-          </select>
-        </div>
-        <div>
-          <button class="btn quiet" type="submit" name="op" value="add">
-            Add it</button>
-        </div>
-      </div>
-    </fieldset>
+    ${writingBox({ name: 'body', value: values.body ?? '' })}
 
     <div class="actions">
       <button class="btn" type="submit" name="op" value="save">
@@ -2198,63 +2154,68 @@ export const articleEditor = ({ me, csrf, org, article: a = null, values = {},
   </form>` });
 };
 
-/** One block, as a set of inputs somebody can actually fill in. */
-function blockFieldset(block, i, values) {
-  const spec = BLOCKS[block.type];
-  if (!spec) return '';
-  const v = (name) => values[`b${i}_${name}`] ?? '';
 
-  const input = (name, kind) => {
-    const id = `b${i}_${name}`;
-    const label = FIELD_LABELS_PAGE[name] ?? name;
-
-    if (kind === 'rich[]') {
-      return `<label for="${id}">${esc(label)}</label>
-        <textarea id="${id}" name="${id}">${esc(v(name))}</textarea>`;
-    }
-    if (kind === 'rich') {
-      return `<label for="${id}">${esc(label)}</label>
-        <textarea id="${id}" name="${id}">${esc(v(name))}</textarea>`;
-    }
-    if (kind === 'boolean') {
-      return `<div class="check">
-        <input type="checkbox" id="${id}" name="${id}" value="1"${v(name) ? ' checked' : ''}>
-        <label for="${id}" style="margin:0;font-weight:400">${esc(label)}</label></div>`;
-    }
-    if (kind === 'number') {
-      return `<label for="${id}">${esc(label)}</label>
-        <input id="${id}" name="${id}" type="number" min="1" max="6"
-          value="${esc(v(name))}" style="max-width:120px">`;
-    }
-    if (kind.startsWith('enum:')) {
-      const choices = kind.slice(5).split(',');
-      return `<label for="${id}">${esc(label)}</label>
-        <select id="${id}" name="${id}" style="max-width:240px">
-          ${choices.map((c) => option(c, c, v(name))).join('')}
-        </select>`;
-    }
-    return `<label for="${id}">${esc(label)}</label>
-      <input id="${id}" name="${id}" maxlength="300" value="${esc(v(name))}"
-        style="max-width:560px">`;
-  };
-
+/**
+ * One box to write the whole thing in, with a toolbar when scripts are on.
+ *
+ * The textarea is the real editor. EasyMDE enhances it — a toolbar, a live
+ * preview — and when the script does not load, which in a hall with bad
+ * reception is a normal Tuesday, the box is still there and still works.
+ *
+ * The toolbar is configured with text labels rather than icons because the
+ * stock configuration expects Font Awesome, and vendoring a webfont to draw
+ * the letter B was not a trade worth making. "B" is also clearer than a
+ * glyph to somebody who has not used an editor like this before.
+ *
+ * Output is markdown TEXT, never HTML. It is parsed into blocks on save, so
+ * the stored document is the same shape it has always been.
+ */
+function writingBox({ name = 'body', value = '', rows = 18 }) {
   return `
-  <fieldset>
-    <legend>${esc(BLOCK_NAMES[block.type] ?? block.type)}</legend>
-    <input type="hidden" name="b${i}_type" value="${esc(block.type)}">
-    ${Object.entries(spec.fields).map(([name, kind]) => input(name, kind)).join('')}
-    ${Object.keys(spec.fields).length ? '' :
-      '<p class="muted">A line across the page. Nothing to fill in.</p>'}
-    <div class="actions" style="margin-top:14px">
-      <button class="btn quiet" type="submit" name="op" value="up:${i}"
-        title="Move up"${i === 0 ? ' disabled' : ''}>↑</button>
-      <button class="btn quiet" type="submit" name="op" value="down:${i}"
-        title="Move down">↓</button>
-      <button class="btn quiet right" type="submit" name="op" value="remove:${i}"
-        title="Remove this block">Remove</button>
-    </div>
-  </fieldset>`;
+  <textarea id="${esc(name)}" name="${esc(name)}" rows="${rows}"
+    class="writing">${esc(value)}</textarea>
+
+  <details class="hint-block">
+    <summary>How to write it</summary>
+    <table class="writing-help"><tbody>${WRITING_HELP.map(([ex, what]) =>
+      `<tr><td><code>${esc(ex)}</code></td><td>${esc(what)}</td></tr>`).join('')}
+    </tbody></table>
+  </details>
+
+  <link rel="stylesheet" href="/vendor/easymde.min.css">
+  <script src="/vendor/easymde.min.js" defer></script>
+  <script defer>
+    window.addEventListener('DOMContentLoaded', function () {
+      if (typeof EasyMDE !== 'function') return;   // script blocked or offline
+      var area = document.getElementById(${JSON.stringify(name)});
+      if (!area) return;
+      var label = function (text, action, title) {
+        return { name: title, action: action, title: title, text: text,
+                 className: 'mde-text' };
+      };
+      new EasyMDE({
+        element: area,
+        spellChecker: false,
+        autoDownloadFontAwesome: false,
+        status: false,
+        toolbar: [
+          label('B', EasyMDE.toggleBold, 'Bold'),
+          label('I', EasyMDE.toggleItalic, 'Italic'),
+          label('H', EasyMDE.toggleHeadingSmaller, 'Heading'),
+          '|',
+          label('Link', EasyMDE.drawLink, 'Link'),
+          label('List', EasyMDE.toggleUnorderedList, 'List'),
+          label('1.', EasyMDE.toggleOrderedList, 'Numbered list'),
+          label('Quote', EasyMDE.toggleBlockquote, 'Quotation'),
+          '|',
+          label('Preview', EasyMDE.togglePreview, 'Preview'),
+          label('Wide', EasyMDE.toggleSideBySide, 'Side by side'),
+        ],
+      });
+    });
+  </script>`;
 }
+
 
 export const error = ({ me, csrf, status, message }) => page({
   title: `Error ${status}`, me, csrf, body: `

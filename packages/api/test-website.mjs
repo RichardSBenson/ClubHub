@@ -48,14 +48,19 @@ const said = (loc) => decodeURIComponent(
   new URL(loc ?? '/', base).searchParams.get('done') ?? '');
 
 /** Everything the editor form would send, as a browser sends it. */
+// Written the way somebody types into the box, because that is now the only
+// way a page is written.
 const PAGE = {
   title: 'About our dojo', slug: 'about',
   metaDescription: 'Kyokushin karate in Whanganui since 1965.',
-  blockCount: '3',
-  b0_type: 'heading', b0_text: 'Who we are', b0_level: '2',
-  b1_type: 'paragraph',
-  b1_text: 'Founded by **Hanshi Doug** in 1965. See [our classes](/classes).',
-  b2_type: 'list', b2_items: 'Tuesdays 6pm\nThursdays 6pm',
+  body: [
+    '## Who we are',
+    '',
+    'Founded by **Hanshi Doug** in 1965. See [our classes](/classes).',
+    '',
+    '- Tuesdays 6pm',
+    '- Thursdays 6pm',
+  ].join('\n'),
 };
 
 // ---------------------------------------------------------------------------
@@ -78,16 +83,41 @@ console.log('\nSIGNED IN');
   ok('with somewhere to start', list.html.includes('/pages/new'));
 }
 
-console.log('\nTHE EDITOR NEEDS NO JAVASCRIPT AT ALL');
+console.log('\nTHE EDITOR STILL WORKS WITH NO JAVASCRIPT');
 {
+  // This used to assert that the admin contained no script tag at all. That
+  // was a proxy for the property that matters — the editor works in a hall
+  // with no signal — and the proxy stopped being right when the writing box
+  // gained an optional toolbar.
+  //
+  // So the property is checked directly, and more strictly than the proxy
+  // was: the thing you type into is a plain textarea that is already in the
+  // HTML, nothing is rendered by script, no handler is inline, and any script
+  // comes from this origin and is deferred. The test two blocks down posts
+  // this form without running a line of JavaScript and expects it to save,
+  // which is the real proof.
   const f = await req('/o/whanganui/pages/new');
   ok('it renders', f.status === 200);
-  ok('there is not a single script tag',
-    !/<script/i.test(f.html), 'a script tag is present');
-  ok('nor an inline event handler',
-    !/\son(click|change|input|submit)=/i.test(f.html), 'inline handler present');
-  ok('every block type is on the menu',
-    f.html.includes('value="paragraph"') && f.html.includes('value="dojoList"'));
+
+  ok('what you type into is a plain textarea, present in the HTML',
+    /<textarea[^>]*name="body"/.test(f.html), 'no textarea named body');
+
+  ok('no inline event handler',
+    !/\son(click|change|input|submit|load)=/i.test(f.html),
+    'inline handler present');
+
+  const srcs = [...f.html.matchAll(/<script[^>]*\ssrc="([^"]+)"/gi)]
+    .map((m) => m[1]);
+  ok('every script is served from this origin, never a CDN',
+    srcs.every((src) => src.startsWith('/')), srcs.join(', '));
+  ok('and deferred, so it cannot block the page',
+    [...f.html.matchAll(/<script\b[^>]*>/gi)]
+      .filter((m) => /\ssrc=/.test(m[0]))
+      .every((m) => /\sdefer\b/.test(m[0])),
+    [...f.html.matchAll(/<script\b[^>]*>/gi)].map((m) => m[0]).join(' '));
+
+  ok('the live blocks are explained rather than hidden in a menu',
+    f.html.includes('{{clubs}}'), 'no mention of the live blocks');
   ok('and the shorthand is explained rather than being a secret',
     f.html.includes('**bold**'), 'no shorthand help');
 }
@@ -135,46 +165,67 @@ console.log('\nOPENING IT AGAIN SHOWS WHAT WAS TYPED');
     r.html.includes('Founded by **Hanshi Doug** in 1965.')
     && r.html.includes('[our classes](/classes)'),
     'shorthand did not round-trip');
-  ok('the list is still one item per line',
-    r.html.includes('Tuesdays 6pm\nThursdays 6pm'), 'list did not round-trip');
+  ok('the list comes back as the lines that were typed',
+    r.html.includes('- Tuesdays 6pm') && r.html.includes('- Thursdays 6pm'),
+    'list did not round-trip');
+  ok('and the heading as a heading',
+    r.html.includes('## Who we are'), 'heading did not round-trip');
 }
 
-console.log('\nTHE BUTTONS THAT MOVE THINGS DO NOT SAVE ANYTHING');
+console.log('\nREORDERING IS EDITING THE TEXT');
 {
+  // The up, down, add and remove buttons are gone with the block-by-block
+  // editor. In one box you move a block by moving its lines, which is both
+  // simpler and the thing people already know how to do.
   const before = await count(
     `select count(*)::int n from page_revision where page_id=$1`,
     [globalThis.__id]);
 
-  const r = await req(`/o/whanganui/pages/${globalThis.__id}`,
-    { method: 'POST', form: { ...PAGE, op: 'down:0' } });
-  ok('the editor comes straight back', r.status === 200);
-  ok('with the blocks in the new order',
-    r.html.indexOf('Founded by') < r.html.indexOf('Who we are'),
-    'order unchanged in the form');
+  const swapped = [
+    'Founded by **Hanshi Doug** in 1965. See [our classes](/classes).',
+    '',
+    '## Who we are',
+    '',
+    '- Tuesdays 6pm',
+    '- Thursdays 6pm',
+  ].join('\n');
 
-  ok('nothing was written', await count(
-    `select count(*)::int n from page_revision where page_id=$1`,
-    [globalThis.__id]) === before);
+  const r = await req(`/o/whanganui/pages/${globalThis.__id}`,
+    { method: 'POST', form: { ...PAGE, body: swapped, op: 'save' } });
+  ok('saving the reordered text works', r.status === 302, r.status);
 
   const stored = await one('select body from page where id=$1', [globalThis.__id]);
-  ok('and the stored page is untouched',
-    stored.body.blocks[0].type === 'heading', stored.body.blocks[0].type);
+  ok('and the stored blocks are in the new order',
+    stored.body.blocks[0].type === 'paragraph'
+    && stored.body.blocks[1].type === 'heading',
+    stored.body.blocks.map((b) => b.type).join());
+  ok('a save was recorded, because this time something was saved',
+    await count(`select count(*)::int n from page_revision where page_id=$1`,
+      [globalThis.__id]) > before);
+
+  // Put it back the way the rest of the file expects.
+  await req(`/o/whanganui/pages/${globalThis.__id}`,
+    { method: 'POST', form: { ...PAGE, op: 'save' } });
 }
 
-console.log('\nADDING AND REMOVING BLOCKS');
+console.log('\nTHE LIVE BLOCKS CAN BE TYPED');
 {
-  const added = await req(`/o/whanganui/pages/${globalThis.__id}`,
-    { method: 'POST', form: { ...PAGE, op: 'add', addType: 'dojoList' } });
-  ok('a live clubs block is added to the form',
-    added.html.includes('b3_type" value="dojoList"'), 'not added');
-  ok('with four blocks now', added.html.includes('name="blockCount" value="4"'));
+  const withClubs = await req(`/o/whanganui/pages/${globalThis.__id}`,
+    { method: 'POST', form: { ...PAGE, op: 'save',
+      body: `${PAGE.body}\n\n{{clubs heading=Where_we_train}}` } });
+  ok('a page with a live clubs block saves', withClubs.status === 302,
+    withClubs.status);
 
-  const removed = await req(`/o/whanganui/pages/${globalThis.__id}`,
-    { method: 'POST', form: { ...PAGE, op: 'remove:2' } });
-  ok('removing leaves two', removed.html.includes('name="blockCount" value="2"'));
-  ok('and still nothing is saved until Save is pressed',
-    (await one('select body from page where id=$1', [globalThis.__id]))
-      .body.blocks.length === 3);
+  const stored = await one('select body from page where id=$1', [globalThis.__id]);
+  const live = stored.body.blocks.find((b) => b.type === 'dojoList');
+  ok('the block is stored as a live list, not as text', !!live,
+    stored.body.blocks.map((b) => b.type).join());
+  ok('with the heading that was typed', live?.heading === 'Where we train',
+    live?.heading);
+
+  // Back to the plain version for the rest of the file.
+  await req(`/o/whanganui/pages/${globalThis.__id}`,
+    { method: 'POST', form: { ...PAGE, op: 'save' } });
 }
 
 console.log('\nWHAT THE EDITOR WILL NOT SAVE');
@@ -298,12 +349,20 @@ console.log('\nRENAMING A PAGE RATHER THAN REWRITING IT');
 
 console.log('\nNOTHING PASTED IN CAN BECOME MARKUP ON THE LIVE SITE');
 {
+  // Through the writing box, which is where somebody pasting from a website
+  // or a Word document actually puts things. The box takes text and only
+  // text; none of this can reach a page as markup.
   const r = await req('/o/whanganui/pages/new', { method: 'POST', form: {
-    title: 'Pasted', slug: 'pasted', blockCount: '2',
-    b0_type: 'heading', b0_text: '<img src=x onerror=alert(1)>', b0_level: '2',
-    b1_type: 'paragraph',
-    b1_text: 'Click [here](javascript:alert(1)) <script>alert(1)</script>',
-    op: 'save' } });
+    title: 'Pasted', slug: 'pasted', op: 'save',
+    body: [
+      '## <img src=x onerror=alert(1)>',
+      '',
+      'Click [here](javascript:alert(1)) <script>alert(1)</script>',
+      '',
+      '!> <iframe src="https://evil.example"></iframe>',
+      '',
+      '![<svg onload=alert(1)>](not-a-real-asset)',
+    ].join('\n') } });
   ok('it saves without complaint', r.status === 302, String(r.status));
 
   const pg = await one(`select p.* from page p join organisation o
@@ -317,6 +376,15 @@ console.log('\nNOTHING PASTED IN CAN BECOME MARKUP ON THE LIVE SITE');
     !preview.html.includes('<script>alert'), 'script rendered');
   ok('and the javascript: address never became a link',
     !preview.html.includes('href="javascript:'), 'javascript href present');
+  ok('nor did an iframe survive the callout',
+    !preview.html.includes('<iframe'), 'iframe rendered');
+  ok('nor an svg in an image description',
+    !preview.html.includes('<svg'), 'svg rendered');
+
+  // And the stored document is still blocks, never markup.
+  ok('what was stored is structure, not HTML',
+    pg.body.blocks.every((b) => typeof b === 'object' && b.type),
+    JSON.stringify(pg.body).slice(0, 120));
 }
 
 console.log('\nWRITING SOMEBODY ELSE\'S WEBSITE');

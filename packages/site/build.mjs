@@ -227,6 +227,20 @@ for (const target of SITES) {
 
   await write('theme.css', R.themeCss(tokens, fonts));
 
+  // The admin's editor, copied into the static output so it is served from
+  // this origin. The admin's Content-Security-Policy is default-src 'self',
+  // and a CDN would have meant relaxing that on the screen where the most
+  // sensitive editing happens. Written once, at the root, not per federation.
+  if (atRoot) {
+    const vendor = new URL('../../vendor/easymde/', import.meta.url).pathname;
+    for (const file of ['easymde.min.js', 'easymde.min.css']) {
+      const to = path.join(OUT, 'vendor', file);
+      await fs.mkdir(path.dirname(to), { recursive: true });
+      await fs.copyFile(path.join(vendor, file), to);
+      written.push(`vendor/${file}`);
+    }
+  }
+
   for (const dojo of dojos) {
     const dojoEvents = await site.eventsFor(dojo.slug);
     await write(`${dojo.slug}/index.html`,
