@@ -836,7 +836,8 @@ export const grading = ({ me, csrf, org, candidates, ladder, done, error }) => {
  * national grading from their dojo page.
  */
 export const events = ({ me, csrf, org, own = [], inherited = [], zone,
-                         canSchedule = true, done, error }) => page({
+                         canSchedule = true, canAsk = false, waiting = [],
+                         done, error, rebuild }) => page({
   title: `Events — ${org.name}`, me, csrf, body: `
   <h1>Events</h1>
   <p class="sub">${esc(org.name)} ·
@@ -844,6 +845,22 @@ export const events = ({ me, csrf, org, own = [], inherited = [], zone,
 
   ${done ? `<div class="good">${esc(done)}</div>` : ''}
   ${error ? `<div class="bad">${esc(error)}</div>` : ''}
+  ${rebuild ? `<div class="note">${esc(rebuild)}</div>` : ''}
+
+  ${waiting.length ? `<h2>Asking to go on this calendar</h2>
+  <p class="muted">Events from the clubs beneath ${esc(org.name)}. Approving one
+    puts it on this website under your name; declining leaves it on the club's own.</p>
+  <table><tbody>${waiting.map((w) => `<tr>
+    <td>${esc(readable(w.starts_at, org.timezone, true))}</td>
+    <td><strong>${esc(w.title)}</strong>
+      <div class="muted">${esc(w.from_org)} · ${esc(kindLabel(w.kind))}${
+        w.venue_name ? ' · ' + esc(w.venue_name) : ''}</div></td>
+    <td><form method="post" action="/o/${esc(org.slug)}/event-requests/${esc(w.id)}/decide"
+        style="display:inline">
+      <input type="hidden" name="_csrf" value="${esc(csrf ?? '')}">
+      <button class="btn" name="answer" value="approve" type="submit">Put it on our calendar</button>
+      <button class="btn quiet" name="answer" value="decline" type="submit">Decline</button>
+    </form></td></tr>`).join('')}</tbody></table>` : ''}
 
   ${canSchedule
     ? `<p><a class="btn" href="/o/${esc(org.slug)}/events/new">Add an event</a></p>`
@@ -857,8 +874,15 @@ export const events = ({ me, csrf, org, own = [], inherited = [], zone,
       <td><strong>${esc(e.title)}</strong>
         ${e.venueName ? `<div class="muted">${esc(e.venueName)}</div>` : ''}</td>
       <td class="hide-sm">${esc(kindLabel(e.kind))}</td>
-      <td>${statusTag(e.status)}</td>
-      <td>${canSchedule ? `<a class="btn quiet"
+      <td>${statusTag(e.status)}${reachTag(e.publishUpState, canAsk)}</td>
+      <td>${canAsk && e.status === 'published' && e.visibility !== 'own_org'
+          && ['none', 'declined'].includes(e.publishUpState ?? 'none')
+        ? `<form method="post" style="display:inline"
+            action="/o/${esc(org.slug)}/events/${esc(String(e.slug))}/ask">
+            <input type="hidden" name="_csrf" value="${esc(csrf ?? '')}">
+            <button class="btn quiet" type="submit">Ask the federation to list it</button></form>`
+        : ''}
+        ${canSchedule ? `<a class="btn quiet"
         href="/o/${esc(org.slug)}/events/${esc(String(e.slug))}/edit">Edit</a>` : ''}
         ${ENTERABLE.has(e.kind) ? `<a class="btn quiet"
           href="/o/${esc(org.slug)}/events/${esc(String(e.slug))}/entries">Entries</a>`
@@ -892,6 +916,12 @@ const KIND_LABELS = {
   social: 'Social', other: 'Other',
 };
 const kindLabel = (k) => KIND_LABELS[k] ?? k;
+
+const reachTag = (state, show) => !show ? '' : ({
+  requested: ' <span class="tag">Waiting for the federation</span>',
+  approved: ' <span class="tag ok">On the federation\'s calendar</span>',
+  declined: ' <span class="tag no">Federation declined</span>',
+}[state] ?? '');
 
 const VISIBILITY_LABELS = {
   public: 'Anyone, including the public website',
@@ -1118,8 +1148,9 @@ export const eventForm = ({ me, csrf, org, values = {}, zone, error,
       <legend>Where it appears</legend>
       ${checkbox('publishDown', 'Show on the calendars below this organisation',
         !!v('publishDown'), 'Every club under it sees it on their own page.')}
-      ${checkbox('publishUp', 'Ask for it to appear on the parent calendar',
-        !!v('publishUp'), 'The parent has to approve it.')}
+      <p class="muted">To ask for it to appear on the federation's calendar,
+        publish it and use "Ask the federation to list it" on the Events list.
+        The federation decides.</p>
     </fieldset>
 
     <div class="actions">

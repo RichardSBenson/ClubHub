@@ -324,14 +324,19 @@ export class JsonSiteContent {
         const from = orgs.find((o) => o.id === e.organisationId);
         if (!from) return false;
         if (from.id === target.id) return true;
-        return e.publishDown && descendsFrom(target, from, orgs);
+        if (e.publishDown && descendsFrom(target, from, orgs)) return true;
+        // A club's event reaches its federation only if the federation said yes.
+        return e.publishUp === true && e.publishUpState === 'approved'
+          && descendsFrom(from, target, orgs);
       })
       .map((e) => {
         const from = orgs.find((o) => o.id === e.organisationId);
         return { ...e, starts_at: e.startsAt, ends_at: e.endsAt,
                  venue_name: e.venueName, entries_close: e.entriesClose,
                  from_org: from.name, from_slug: from.slug,
-                 is_own: from.id === target.id };
+                 is_own: from.id === target.id,
+                 slug: from.id !== target.id && descendsFrom(from, target, orgs)
+                   ? `${e.slug}-${from.slug}` : e.slug };
       })
       .sort((a, b) => String(a.startsAt).localeCompare(String(b.startsAt)));
   }

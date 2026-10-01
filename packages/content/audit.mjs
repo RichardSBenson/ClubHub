@@ -124,6 +124,13 @@ export function describe(entry) {
       return `changed the site menu to ${(a.items ?? []).length} item`
         + ((a.items ?? []).length === 1 ? '' : 's');
 
+    case 'event_publish_up_asked':
+      return `asked for ${a.title ? quote(a.title) : 'an event'} to go on the federation's calendar`;
+    case 'event_publish_up':
+      return a.publish_up_state === 'approved'
+        ? `approved ${a.title ? quote(a.title) : 'an event'} for this calendar`
+        : `declined ${a.title ? quote(a.title) : 'an event'}`;
+
     case 'theme_apply':
       return `changed the website's look to ${a.name ? quote(a.name) : 'a new theme'}`;
     case 'theme_reset':
@@ -187,6 +194,8 @@ export const ACTIONS = Object.freeze([
   ['instructor_save', 'Instructor profile changed'],
   ['instructor_remove', 'Instructor removed from site'],
   ['navigation_save', 'Menu changed'],
+  ['event_publish_up_asked', 'Event listing requested'],
+  ['event_publish_up', 'Event listing decided'],
   ['theme_apply', 'Website look changed'],
   ['theme_reset', 'Website look reset'],
   ['club_page_saved', 'Club page edited'],

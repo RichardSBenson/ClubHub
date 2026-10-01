@@ -859,30 +859,92 @@ export const events = {
       order by e.starts_at`, [orgSlug, isMember, viewerRankOrder]);
   },
 
-  /** A dojo asks for its event to appear on the parent calendar. */
+  /** Events beneath this organisation that are waiting on its decision. */
+  async awaitingDecision(actor, orgId) {
+    await assertRole(actor, orgId, MANAGE);
+    const { rows } = await pool.query(`
+      select e.id, e.title, e.kind, e.summary, e.starts_at, e.venue_name,
+             o.name as from_org, o.slug as from_slug
+      from event e
+      join organisation o on o.id = e.organisation_id
+      join organisation root on root.id = $1 and o.path <@ root.path
+      where e.publish_up_state = 'requested' and e.status = 'published'
+        and o.id <> $1
+      order by e.starts_at`, [orgId]);
+    return rows;
+  },
+
+  /**
+   * A dojo asks for its event to appear on the parent calendar.
+   *
+   * Same rule as an article: it has to be live on the dojo's own calendar
+   * first, because what is being asked for is the federation's endorsement of
+   * something that already exists, not a place to draft it.
+   */
   async requestPublishUp(actor, eventId) {
     const ev = await one('select * from event where id = $1', [eventId]);
     if (!ev) throw new NotFound('Event');
     await assertRole(actor, ev.organisation_id, MANAGE);
     if (ev.visibility === 'own_org')
       throw new Invalid('A dojo-only event cannot be published upward');
-    return one(`
+    if (ev.status !== 'published')
+      throw new Invalid('Publish it on your own calendar before asking for it to '
+        + 'appear on the federation\'s.');
+    const up = await one(`select 1 from organisation where id = $1 and parent_id is not null`,
+      [ev.organisation_id]);
+    if (!up) throw new Invalid('There is no federation above this organisation to ask.');
+    const row = await one(`
       update event set publish_up = true, publish_up_state = 'requested'
       where id = $1 returning *`, [eventId]);
+    await pool.query(`
+      insert into audit_log (account_id, organisation_id, action, entity,
+                             entity_id, before, after)
+      values ($1,$2,'event_publish_up_asked','event',$3,$4,$5)`,
+      [actor, ev.organisation_id, eventId,
+       JSON.stringify({ publish_up_state: ev.publish_up_state }),
+       JSON.stringify({ publish_up_state: 'requested', title: ev.title })]);
+    return row;
   },
 
-  /** The parent approves or declines. */
-  async decidePublishUp(actor, eventId, approve) {
+  /**
+   * The federation decides.
+   *
+   * Declining leaves the event on the dojo's own calendar and page; what is
+   * refused is a place on the federation's.
+   */
+  async decidePublishUp(actor, eventId, approve, { decidedBy = null } = {}) {
     const ev = await one(`
       select e.*, o.parent_id from event e
       join organisation o on o.id = e.organisation_id where e.id = $1`, [eventId]);
     if (!ev) throw new NotFound('Event');
     if (!ev.parent_id) throw new Invalid('No parent organisation');
-    await assertRole(actor, ev.parent_id, MANAGE);
-    return one(`
+    const by = decidedBy ?? ev.parent_id;
+    await assertRole(actor, by, MANAGE);
+
+    // Strictly above the event's own organisation, or a dojo would approve
+    // itself.
+    const beneath = await one(`
+      select 1 from organisation mine, organisation theirs
+      where mine.id = $1 and theirs.id = $2
+        and theirs.path <@ mine.path and theirs.id <> mine.id`,
+      [by, ev.organisation_id]);
+    if (!beneath)
+      throw new Invalid('That event does not sit beneath this organisation.');
+    if (ev.publish_up_state !== 'requested')
+      throw new Invalid('Nobody is asking for that event to be listed.');
+
+    const row = await one(`
       update event set publish_up_state = $2, publish_up = $3
       where id = $1 returning *`,
       [eventId, approve ? 'approved' : 'declined', approve]);
+    await pool.query(`
+      insert into audit_log (account_id, organisation_id, action, entity,
+                             entity_id, before, after)
+      values ($1,$2,'event_publish_up','event',$3,$4,$5)`,
+      [actor, by, eventId,
+       JSON.stringify({ publish_up_state: ev.publish_up_state }),
+       JSON.stringify({ publish_up_state: row.publish_up_state, title: row.title })]);
+    return row;
   },
 
   /** Can this person enter? Grade, age and membership all checked. */

@@ -1967,6 +1967,11 @@ async function mayWriteAt(ctx, orgId) {
   return authz.hasRoleAt(ctx.me.accountId, orgId, MAY_WRITE);
 }
 
+async function mayManageAt(ctx, orgId) {
+  const { authz } = await calendar();
+  return authz.hasRoleAt(ctx.me.accountId, orgId, ['owner', 'administrator']);
+}
+
 async function mayScheduleAt(ctx, orgId) {
   const { authz } = await calendar();
   return authz.hasRoleAt(ctx.me.accountId, orgId, MAY_SCHEDULE);
@@ -2015,7 +2020,6 @@ function eventFieldsFrom(form, zone) {
     entriesClose: toInstant(text('entriesClose'), zone),
     capacity: number('capacity'),
     publishDown: !!form.publishDown,
-    publishUp: !!form.publishUp,
     guardianUnder: number('guardianUnder'),
     consentVersion: text('consentVersion'),
     consentText: text('consentText'),
@@ -2056,8 +2060,14 @@ get('/o/:slug/events', async (ctx) => {
   return ctx.send(200, V.events({
     me: ctx.me, org, own, inherited, zone: org.timezone, csrf: ctx.csrf,
     canSchedule: await mayScheduleAt(ctx, org.id),
+    // Asking is for somebody who can speak for the organisation, and only
+    // makes sense where there is a federation above to ask.
+    canAsk: !!org.parent_id && await mayManageAt(ctx, org.id),
+    waiting: await mayManageAt(ctx, org.id)
+      ? await events.awaitingDecision(ctx.me.accountId, org.id) : [],
     done: ctx.url.searchParams.get('done'),
     error: ctx.url.searchParams.get('error'),
+    rebuild: ctx.url.searchParams.get('rebuild'),
   }));
 });
 
@@ -2081,8 +2091,10 @@ post('/o/:slug/events/new', async (ctx) => {
       ...eventFieldsFrom(form, org.timezone),
       status: form.status === 'published' ? 'published' : 'draft',
     });
+    const rebuild = await requestRebuild({ reason: `event ${org.slug}` });
     return ctx.redirect(`/o/${org.slug}/events?done=`
-      + encodeURIComponent(`"${saved.title}" saved.`));
+      + encodeURIComponent(`"${saved.title}" saved.`)
+      + '&rebuild=' + encodeURIComponent(rebuild.detail));
   } catch (e) {
     // Back to the form with what they typed still in it. Re-rendering an empty
     // form after a refusal is how somebody loses fifteen fields to a typo in
@@ -2121,8 +2133,10 @@ post('/o/:slug/events/:eventSlug/edit', async (ctx) => {
       ...eventFieldsFrom(form, org.timezone),
       status: form.status,
     });
+    const rebuild = await requestRebuild({ reason: `event ${org.slug}` });
     return ctx.redirect(`/o/${org.slug}/events?done=`
-      + encodeURIComponent(`"${saved.title}" updated.`));
+      + encodeURIComponent(`"${saved.title}" updated.`)
+      + '&rebuild=' + encodeURIComponent(rebuild.detail));
   } catch (e) {
     return ctx.send(e.status ?? 422, V.eventForm({
       me: ctx.me, org, csrf: ctx.csrf, isNew: false, status: existing.status,
@@ -2146,8 +2160,54 @@ post('/o/:slug/events/:eventSlug/cancel', async (ctx) => {
     return ctx.redirect(
       `/o/${org.slug}/events?error=${encodeURIComponent(e.message)}`);
   }
+  const rebuild = await requestRebuild({ reason: `event ${org.slug}` });
   return ctx.redirect(`/o/${org.slug}/events?done=`
-    + encodeURIComponent(`"${existing.title}" is cancelled.`));
+    + encodeURIComponent(`"${existing.title}" is cancelled.`)
+    + '&rebuild=' + encodeURIComponent(rebuild.detail));
+});
+
+// The club asks; the federation answers. Same shape as an article, and for the
+// same reason: a club may put what it likes on its own page, but the
+// federation's calendar carries the federation's name.
+post('/o/:slug/events/:eventSlug/ask', async (ctx) => {
+  const org = await organisationFor(ctx, { toSchedule: true });
+  await ctx.form();
+  const { repo } = await calendar();
+  const back = `/o/${org.slug}/events`;
+  const existing = await repo.bySlug(org.id, ctx.params.eventSlug);
+  if (!existing) throw new NotFound('Event');
+  try {
+    const ev = await events.requestPublishUp(ctx.me.accountId, existing.id);
+    return ctx.redirect(`${back}?done=` + encodeURIComponent(
+      `Asked for "${ev.title}" to appear on the federation's calendar.`));
+  } catch (e) {
+    if (e instanceof Invalid)
+      return ctx.redirect(`${back}?error=${encodeURIComponent(e.message)}`);
+    throw e;
+  }
+});
+
+/** Posted at the deciding organisation, whose calendar it would appear on. */
+post('/o/:slug/event-requests/:eventId/decide', async (ctx) => {
+  const org = await organisationFor(ctx, { toSchedule: true });
+  const form = await ctx.form();
+  const approve = form.answer === 'approve';
+  const back = `/o/${org.slug}/events`;
+  try {
+    const ev = await events.decidePublishUp(ctx.me.accountId, ctx.params.eventId,
+      approve, { decidedBy: org.id });
+    const rebuild = approve
+      ? await requestRebuild({ reason: `approve event ${ev.slug}` })
+      : { detail: 'Nothing to rebuild — it was not on the site.' };
+    return ctx.redirect(`${back}?done=` + encodeURIComponent(approve
+      ? `"${ev.title}" now appears on this calendar.`
+      : `"${ev.title}" was declined. It stays on their own calendar.`)
+      + '&rebuild=' + encodeURIComponent(rebuild.detail));
+  } catch (e) {
+    if (e instanceof Invalid)
+      return ctx.redirect(`${back}?error=${encodeURIComponent(e.message)}`);
+    throw e;
+  }
 });
 
 // ---------------------------------------------------------------------------

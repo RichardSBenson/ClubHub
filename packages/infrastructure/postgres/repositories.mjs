@@ -295,15 +295,32 @@ export class PostgresSiteContent {
   }
 
   async eventsFor(orgSlug) {
+    // Three ways onto a calendar: it is this organisation's own; an ancestor
+    // published it downward; or a descendant asked to be on it and this
+    // organisation agreed. Never a sibling's, and never a descendant's that
+    // nobody approved — the federation's name on an event reads as its
+    // endorsement, so that decision is the federation's.
+    //
+    // An event that arrives from a club beneath gets the club's slug on the
+    // end of its own, because event slugs are unique per organisation and
+    // two organisations will both, sooner or later, run "grading-december".
     const { rows } = await this.pool.query(`
-      select e.id, e.title, e.slug, e.kind, e.summary, e.starts_at, e.ends_at,
+      select e.id, e.title,
+             case when o.path <@ target.path and o.id <> target.id
+                  then e.slug || '-' || o.slug else e.slug end as slug,
+             e.kind, e.summary, e.starts_at, e.ends_at,
              e.venue_name, e.visibility, e.entries_close,
              o.name as from_org, o.slug as from_slug, (o.id = target.id) as is_own
       from organisation target
-      join organisation o on target.path <@ o.path
-      join event e on e.organisation_id = o.id
+      join event e on true
+      join organisation o on o.id = e.organisation_id
       where target.slug = $1 and e.status='published' and e.visibility='public'
-        and (e.organisation_id = target.id or e.publish_down)
+        and (
+          o.id = target.id
+          or (e.publish_down and target.path <@ o.path)
+          or (e.publish_up and e.publish_up_state = 'approved'
+              and o.path <@ target.path)
+        )
       order by e.starts_at`, [orgSlug]);
     return rows;
   }
