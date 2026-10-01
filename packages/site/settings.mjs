@@ -23,7 +23,10 @@ export class SettingsError extends Error {
 
 const HEX = /^#[0-9a-fA-F]{6}$/;
 
-const HOME_SECTIONS = ['hero','dojoGrid','photoBand','events','news','pathway','lineage'];
+// Only what the renderer actually builds. photoBand, pathway and lineage were
+// accepted here for a long time and rendered nothing, so a site that listed one
+// looked exactly like a site that did not.
+const HOME_SECTIONS = ['hero','dojoGrid','events','news'];
 const DOJO_SECTIONS = ['hero','facts','startAnyWeek','times','about','events','findUs'];
 
 /**
@@ -34,10 +37,9 @@ const DOJO_SECTIONS = ['hero','facts','startAnyWeek','times','about','events','f
 const VOCABULARY = {
   club: 'Club', clubPlural: 'Clubs', grading: 'Grading', grade: 'Grade',
 };
-
 const DEFAULTS = {
-  colours: { primary:'#CE372C', accent:'#F0CE41', ink:'#161617',
-             canvas:'#F5F5F5', neutral:'#BDBDBF' },
+  colours: { primary:'#15171A', accent:'#F2C94C', ink:'#15171A',
+             canvas:'#FFFFFF', neutral:'#9AA5AC' },
   fonts: { display:'Georgia', body:'system-ui' },
   homePage: { sections:['hero','dojoGrid','events','news'] },
   dojoPage: { sections: DOJO_SECTIONS },
@@ -69,6 +71,44 @@ export function loadSettings(dir) {
   return complete(clean(raw));
 }
 
+/**
+ * The full set of colour tokens from the five a person chooses.
+ *
+ * Pulled out of complete() so a theme file and a settings file derive their
+ * colours identically: a theme that looks one way in the previewer and
+ * another on the site would be a bug nobody could explain.
+ *
+ * `overrides` are tokens somebody set by hand and wants kept as they are.
+ */
+export function tokensFor(c, overrides = {}) {
+  const derived = deriveTokens([
+    { hex: c.primary, share: 0.4 },
+    { hex: c.accent, share: 0.2 },
+    { hex: c.neutral, share: 0.4 },
+  ]);
+
+  const tokens = {
+    ...derived.tokens,
+    primary: c.primary, accent: c.accent, ink: c.ink,
+    canvas: c.canvas, neutral: c.neutral,
+    primaryText: overrides.primaryText ?? forceContrast(c.primary, c.canvas, 4.5),
+    primaryTextStrong: overrides.primaryTextStrong
+      ?? forceContrast(c.primary, c.canvas, 7),
+    primaryHover: overrides.primaryHover ?? forceContrast(c.primary, c.canvas, 7),
+    inkSoft: overrides.inkSoft ?? derived.tokens.inkSoft,
+    canvasAlt: overrides.canvasAlt ?? derived.tokens.canvasAlt,
+    muted: overrides.muted ?? forceContrast(c.neutral, c.canvas, 4.5),
+  };
+  return { tokens, warnings: derived.warnings };
+}
+
+/** Whether these tokens leave anything unreadable. Problems fail; notes inform. */
+export function readability(tokens) {
+  const problems = [], notes = [];
+  checkReadability(tokens, problems, notes);
+  return { problems, notes };
+}
+
 function complete(s) {
   const problems = [];
   const c = { ...DEFAULTS.colours, ...(s.colours ?? {}) };
@@ -82,24 +122,8 @@ function complete(s) {
 
   // Derive the rest from the five the person chose, the same way the crest
   // engine does, so a hand-picked palette behaves like a generated one.
-  const derived = deriveTokens([
-    { hex: c.primary, share: 0.4 },
-    { hex: c.accent, share: 0.2 },
-    { hex: c.neutral, share: 0.4 },
-  ]);
-
-  const tokens = {
-    ...derived.tokens,
-    primary: c.primary, accent: c.accent, ink: c.ink,
-    canvas: c.canvas, neutral: c.neutral,
-    primaryText: s.colours?.primaryText ?? forceContrast(c.primary, c.canvas, 4.5),
-    primaryTextStrong: s.colours?.primaryTextStrong
-      ?? forceContrast(c.primary, c.canvas, 7),
-    primaryHover: s.colours?.primaryHover ?? forceContrast(c.primary, c.canvas, 7),
-    inkSoft: s.colours?.inkSoft ?? derived.tokens.inkSoft,
-    canvasAlt: s.colours?.canvasAlt ?? derived.tokens.canvasAlt,
-    muted: s.colours?.muted ?? forceContrast(c.neutral, c.canvas, 4.5),
-  };
+  const derived = tokensFor(c, s.colours ?? {});
+  const tokens = derived.tokens;
 
   const notes = [];
   checkReadability(tokens, problems, notes);

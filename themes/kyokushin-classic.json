@@ -1,0 +1,37 @@
+{
+  "format": "honbu-theme",
+  "version": 1,
+  "name": "Kyokushin Classic",
+  "description": "Red and gold on near-black, with type that carries kanji. The look the Mas Oyama federation launched with.",
+  "author": "Honbu",
+  "colours": {
+    "primary": "#CE372C",
+    "accent": "#F0CE41",
+    "ink": "#161617",
+    "canvas": "#F5F5F5",
+    "neutral": "#BDBDBF"
+  },
+  "fonts": {
+    "display": "Shippori Mincho",
+    "body": "Zen Kaku Gothic New"
+  },
+  "homePage": {
+    "sections": [
+      "hero",
+      "dojoGrid",
+      "events",
+      "news"
+    ]
+  },
+  "dojoPage": {
+    "sections": [
+      "hero",
+      "facts",
+      "startAnyWeek",
+      "times",
+      "about",
+      "events",
+      "findUs"
+    ]
+  }
+}

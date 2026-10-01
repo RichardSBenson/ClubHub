@@ -33,10 +33,12 @@
 import crypto from 'node:crypto';
 import { URL } from 'node:url';
 import { pool, orgs, people, rank, events, competition, pages, assets, news,
-         instructors, navigation, audit, search, clubPages,
+         instructors, navigation, audit, search, clubPages, appearance,
          Forbidden, NotFound, Invalid } from './data.mjs';
 import * as auth from './auth.mjs';
 import * as V from './views.mjs';
+import { BUILT_IN } from '../site/builtin-themes.mjs';
+import { readTheme, serialise } from '../site/theme.mjs';
 import { currentStore } from '../infrastructure/factory.mjs';
 import { messengerFrom } from '../infrastructure/messaging/messengers.mjs';
 import { SendSignInLink } from '../core/application/send-sign-in-link.mjs';
@@ -758,6 +760,76 @@ post('/o/:slug/menu', async (ctx) => {
       return ctx.redirect(`${back}?error=${encodeURIComponent(e.message)}`);
     throw e;
   }
+});
+
+// ---- appearance ------------------------------------------------------------
+//
+// The federation's look: a built-in theme, an imported one, or the default.
+// A club has no look of its own, so these are federation screens only.
+
+const builtInList = () => Object.entries(BUILT_IN)
+  .map(([key, t]) => ({ key, ...t }));
+
+async function appearanceScreen(ctx, org, extra = {}) {
+  const stored = await appearance.current(ctx.me.accountId, org.id);
+  const q = ctx.url.searchParams;
+  return ctx.send(extra.status ?? 200, V.appearanceEditor({
+    me: ctx.me, org, csrf: ctx.csrf, builtIn: builtInList(),
+    current: stored ? (readTheme(stored).theme ?? null) : null,
+    done: q.get('done'), error: q.get('error'), rebuild: q.get('rebuild'),
+    ...extra,
+  }));
+}
+
+get('/o/:slug/appearance', async (ctx) => {
+  const org = await organisationFor(ctx, { toWrite: true });
+  if (org.type === 'club') return ctx.redirect(`/o/${org.slug}/club-page`);
+  return appearanceScreen(ctx, org);
+});
+
+post('/o/:slug/appearance', async (ctx) => {
+  const org = await organisationFor(ctx, { toWrite: true });
+  if (org.type === 'club') throw new Forbidden('A club uses its federation\'s look.');
+  const form = await ctx.form();
+  const pasted = String(form.theme_json ?? '');
+  const doc = form.builtin ? BUILT_IN[form.builtin] : pasted;
+  if (!doc) return appearanceScreen(ctx, org, { status: 422, pasted,
+    error: 'Choose a theme or paste a theme file.' });
+  const read = readTheme(doc);
+  if (!read.ok) return appearanceScreen(ctx, org, { status: 422, pasted,
+    problems: read.problems });
+  try {
+    await appearance.apply(ctx.me.accountId, org.id, read.theme);
+  } catch (e) {
+    if (e instanceof Invalid)
+      return appearanceScreen(ctx, org, { status: 422, pasted, error: e.message });
+    throw e;
+  }
+  const rebuild = await requestRebuild({ reason: `appearance ${org.slug}` });
+  return ctx.redirect(`/o/${org.slug}/appearance?done=${
+    encodeURIComponent(`Now using "${read.theme.name}".`)}`
+    + '&rebuild=' + encodeURIComponent(rebuild.detail));
+});
+
+post('/o/:slug/appearance/reset', async (ctx) => {
+  const org = await organisationFor(ctx, { toWrite: true });
+  if (org.type === 'club') throw new Forbidden('A club uses its federation\'s look.');
+  await ctx.form();
+  await appearance.reset(ctx.me.accountId, org.id);
+  const rebuild = await requestRebuild({ reason: `appearance reset ${org.slug}` });
+  return ctx.redirect(`/o/${org.slug}/appearance?done=${
+    encodeURIComponent('Back to the default look.')}`
+    + '&rebuild=' + encodeURIComponent(rebuild.detail));
+});
+
+get('/o/:slug/appearance/export', async (ctx) => {
+  const org = await organisationFor(ctx, { toWrite: true });
+  if (org.type === 'club') return ctx.redirect(`/o/${org.slug}/club-page`);
+  const stored = await appearance.current(ctx.me.accountId, org.id);
+  const read = stored ? readTheme(stored) : null;
+  if (!read?.ok) return ctx.redirect(`/o/${org.slug}/appearance?error=${
+    encodeURIComponent('There is no theme chosen here to download yet.')}`);
+  return ctx.download(`${org.slug}-theme.json`, 'application/json', serialise(read.theme));
 });
 
 // ---- a club's page on the federation's website -----------------------------
@@ -2172,6 +2244,15 @@ export async function handler(req, res) {
         ...(setCookies.length ? { 'set-cookie': setCookies } : {}),
       });
       res.end(html);
+    },
+
+    download(filename, type, text) {
+      res.writeHead(200, {
+        'content-type': `${type}; charset=utf-8`,
+        'content-disposition': `attachment; filename="${filename.replace(/[^\w.-]/g, '_')}"`,
+        ...SECURITY_HEADERS,
+      });
+      res.end(text);
     },
 
     redirect(to) {

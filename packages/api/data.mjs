@@ -1231,6 +1231,7 @@ export const billing = {
 
 import { validate, excerpt, toText } from '../content/blocks.mjs';
 import { assertMayPublish } from '../core/domain/instructing.mjs';
+import { readTheme } from '../site/theme.mjs';
 import { destinations, problemsWithNavigation, navigationFrom, MAX_ITEMS }
   from '../content/navigation.mjs';
 import { readQuery, fold } from '../content/search.mjs';
@@ -1892,6 +1893,55 @@ export const navigation = {
       [actor, orgId, JSON.stringify({ items: clean })]);
 
     return row?.settings?.navigation?.items ?? clean;
+  },
+};
+
+// ---------------------------------------------------------------------------
+// appearance
+//
+// A federation's look is stored on the organisation, like its menu, and is
+// validated by the same reader the build uses, so what is saved is exactly
+// what will be built. A club has no look of its own: its page is the
+// federation speaking in the federation's design.
+// ---------------------------------------------------------------------------
+
+export const appearance = {
+  async current(actor, orgId) {
+    await assertRole(actor, orgId, WRITE_PAGES);
+    const org = await one('select settings from organisation where id=$1', [orgId]);
+    return org?.settings?.theme ?? null;
+  },
+
+  async apply(actor, orgId, doc) {
+    await assertRole(actor, orgId, MANAGE);
+    const read = readTheme(doc);
+    if (!read.ok) throw new Invalid(read.problems.join(' '));
+    const before = (await one('select settings from organisation where id=$1', [orgId]))
+      ?.settings?.theme ?? null;
+    await one(`
+      update organisation
+         set settings = jsonb_set(settings, '{theme}', $2::jsonb, true),
+             updated_at = now()
+       where id = $1 returning id`, [orgId, JSON.stringify(read.theme)]);
+    await pool.query(`
+      insert into audit_log (account_id, organisation_id, action, entity,
+                             entity_id, before, after)
+      values ($1,$2,'theme_apply','organisation',$2,$3,$4)`,
+      [actor, orgId, before ? JSON.stringify({ name: before.name }) : null,
+       JSON.stringify({ name: read.theme.name })]);
+    return read;
+  },
+
+  /** Back to the deployment's own look (settings file, then defaults). */
+  async reset(actor, orgId) {
+    await assertRole(actor, orgId, MANAGE);
+    await one(`
+      update organisation set settings = settings - 'theme', updated_at = now()
+       where id = $1 returning id`, [orgId]);
+    await pool.query(`
+      insert into audit_log (account_id, organisation_id, action, entity,
+                             entity_id, after)
+      values ($1,$2,'theme_reset','organisation',$2,'{}')`, [actor, orgId]);
   },
 };
 

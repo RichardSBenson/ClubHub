@@ -1,0 +1,37 @@
+{
+  "format": "honbu-theme",
+  "version": 1,
+  "name": "Ink",
+  "description": "Black and white with one warm highlight. Calm, lets the photographs and the words do the work.",
+  "author": "Honbu",
+  "colours": {
+    "primary": "#15171A",
+    "accent": "#F2C94C",
+    "ink": "#15171A",
+    "canvas": "#FFFFFF",
+    "neutral": "#9AA5AC"
+  },
+  "fonts": {
+    "display": "Source Serif 4",
+    "body": "Inter"
+  },
+  "homePage": {
+    "sections": [
+      "hero",
+      "dojoGrid",
+      "events",
+      "news"
+    ]
+  },
+  "dojoPage": {
+    "sections": [
+      "hero",
+      "facts",
+      "startAnyWeek",
+      "times",
+      "about",
+      "events",
+      "findUs"
+    ]
+  }
+}

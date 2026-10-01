@@ -290,6 +290,7 @@ export function rail({ org, vocabulary = {}, can = {}, path = '' }) {
     link(`${base}/news`, 'News'),
     link(`${base}/media`, 'Images'),
     link(`${base}/menu`, 'Menu'),
+    !isClub && can.manage && link(`${base}/appearance`, 'Appearance'),
     link(`${base}/instructors`, 'Instructors'),
     isClub ? link(`${base}/club-page`, `${club} page`)
            : link(`${base}/club-pages`, `${club} pages`),
@@ -2634,3 +2635,60 @@ export const error = ({ me, csrf, status, message }) => page({
   <h1>${status}</h1>
   <div class="bad">${esc(message)}</div>
   <p><a class="btn quiet" href="/dashboard">Back</a></p>` });
+
+/**
+ * Appearance: choose a built-in theme, import one, or download this one.
+ *
+ * Import is paste-a-file rather than upload, so the screen works without
+ * JavaScript and the file is read by the same validator the build uses.
+ */
+export const appearanceEditor = ({ me, csrf, org, current, builtIn = [],
+                                   preview = null, pasted = '', problems = [],
+                                   done, error, rebuild }) => {
+  const swatches = (t) => ['primary', 'accent', 'ink', 'canvas', 'neutral']
+    .map((k) => `<span title="${k} ${esc(t.colours[k])}" style="display:inline-block;`
+      + `width:22px;height:22px;border:1px solid #0003;margin-right:2px;background:${
+        esc(t.colours[k])}"></span>`).join('');
+  const action = `/o/${esc(org.slug)}/appearance`;
+  return page({ title: `Appearance — ${org.name}`, me, csrf, body: `
+  <h1>Appearance</h1>
+  <p class="sub">${esc(org.name)} · colours, fonts and which sections appear.
+    Words stay yours; a theme never carries any.</p>
+  ${done ? `<div class="good">${esc(done)}</div>` : ''}
+  ${error ? `<div class="bad">${esc(error)}</div>` : ''}
+  ${rebuild ? `<div class="note">${esc(rebuild)}</div>` : ''}
+  ${problems.length ? `<div class="bad"><strong>That theme was not used:</strong><ul>${
+    problems.map((p) => `<li>${esc(p)}</li>`).join('')}</ul></div>` : ''}
+
+  <h2>Now</h2>
+  ${current
+    ? `<p><strong>${esc(current.name)}</strong> ${swatches(current)}
+       <span class="muted">${esc(current.fonts.display)} / ${esc(current.fonts.body)}</span></p>
+       <form method="post" action="${action}/reset" style="display:inline">
+         <input type="hidden" name="_csrf" value="${esc(csrf ?? '')}">
+         <button class="btn quiet" type="submit">Go back to the default look</button></form>
+       <a class="btn quiet" href="${action}/export">Download this theme</a>`
+    : `<p class="muted">Nothing chosen here, so the site uses the deployment's
+       settings file, or the neutral default.</p>`}
+
+  <h2>Built-in themes</h2>
+  ${builtIn.map((t) => `<form method="post" action="${action}" class="row"
+      style="align-items:center;margin-bottom:8px">
+      <input type="hidden" name="_csrf" value="${esc(csrf ?? '')}">
+      <input type="hidden" name="builtin" value="${esc(t.key)}">
+      <div><strong>${esc(t.name)}</strong> ${swatches(t)}<br>
+        <span class="muted">${esc(t.description ?? '')}</span></div>
+      <div><button class="btn" type="submit">Use this</button></div></form>`).join('')}
+
+  <h2>Import a theme</h2>
+  <p class="muted">Paste a theme file (JSON). It is checked before anything
+    changes: only colours, fonts and section order are accepted, and a palette
+    that would be hard to read is refused.</p>
+  <form method="post" action="${action}">
+    <input type="hidden" name="_csrf" value="${esc(csrf ?? '')}">
+    <label for="theme_json">Theme file</label>
+    <textarea id="theme_json" name="theme_json" rows="12" spellcheck="false"
+      style="font-family:monospace">${esc(pasted)}</textarea>
+    <div class="actions"><button class="btn" type="submit">Check and use</button></div>
+  </form>`, });
+};

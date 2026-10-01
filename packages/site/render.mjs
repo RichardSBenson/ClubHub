@@ -277,25 +277,57 @@ ${body}
 // pages
 // ---------------------------------------------------------------------------
 
+export const DOJO_DEFAULT = ['hero', 'facts', 'startAnyWeek', 'times', 'about', 'events', 'findUs'];
+export const HOME_DEFAULT = ['hero', 'dojoGrid', 'events', 'news'];
+
+/**
+ * Sections are laid out in the order a federation chose. `hero` and `facts`
+ * are full-width bands; the rest share one narrow column, so consecutive
+ * narrow ones are grouped under a single wrapper rather than each opening its
+ * own. A name nobody built is skipped, never rendered as an empty box.
+ */
+function arrange(order, parts, bands) {
+  const out = [];
+  let column = [];
+  const flush = () => {
+    if (column.length) {
+      out.push(`<section><div class="wrap narrow">${column.join('\n')}</div></section>`);
+      column = [];
+    }
+  };
+  for (const name of order) {
+    const html = parts[name]?.();
+    if (!html) continue;
+    if (bands.has(name)) { flush(); out.push(html); } else column.push(html);
+  }
+  flush();
+  return out.join('\n');
+}
+
 export function dojoPage({ dojo, federation, events, origin, fonts, nav,
-                           base = '', vocabulary = {} }) {
+                           base = '', vocabulary = {},
+                           sections = DOJO_DEFAULT, startAnyWeekText = null,
+                           showFirstClassFree = true }) {
   const at = (p) => `${base}${p}`;
   const groups = groupSessions(dojo.sessions ?? []);
   const town = dojo.name;
   const daysLine = groups.length
     ? [...new Set(groups.flatMap((g) => g.days))].join(', ')
     : 'Training nights to confirm';
+  const free = showFirstClassFree && dojo.first_class_free;
 
-  const body = `
+  const parts = {
+    hero: () => `
 <div class="hero${dojo.hero_url ? ' photo' : ''}"${dojo.hero_url
   ? ` style="background-image:linear-gradient(rgba(22,22,23,.62),rgba(22,22,23,.62)),url('${esc(dojo.hero_url)}')"`
   : ''}><div class="wrap">
   <h1>${esc(federation.name)} in ${esc(town)}</h1>
   <p>${esc(capitalise(artOf(federation)))} for adults and children. ${esc(daysLine)}.${
-    dojo.first_class_free ? ' Your first class is free.' : ''}</p>
+    free ? ' Your first class is free.' : ''}</p>
   <a class="btn" href="#visit">Come to a class</a>
-</div></div>
+</div></div>`,
 
+    facts: () => `
 <div class="facts"><div class="wrap">
   <div><b>WHERE</b><p>${esc(dojo.venue_name ?? 'Venue to confirm')}
     <small>${esc([dojo.suburb, dojo.city, dojo.postcode].filter(Boolean).join(', ') || 'Address to confirm')}</small></p></div>
@@ -306,11 +338,14 @@ export function dojoPage({ dojo, federation, events, origin, fonts, nav,
       ? `<a href="tel:${esc(dojo.phone.replace(/\s/g,''))}" style="color:var(--canvas)">${esc(dojo.phone)}</a>`
       : 'Phone to confirm'}
     <small>${esc(dojo.email ?? '')}</small></p></div>
-</div></div>
+</div></div>`,
 
-<section><div class="wrap narrow">
-  <div class="notice">You can start any week — there is no term to wait for.</div>
-  <h2>Training times</h2>
+    // A claim on the federation's behalf, so it is only made when the
+    // federation wrote it. It used to be hardcoded for everybody.
+    startAnyWeek: () => startAnyWeekText
+      ? `<div class="notice">${esc(startAnyWeekText)}</div>` : '',
+
+    times: () => `<h2>Training times</h2>
   ${groups.length ? `<table class="times">
     <thead><tr><th>Class</th><th>Day</th><th>Time</th></tr></thead>
     <tbody>${groups.map((g) => `<tr>
@@ -318,13 +353,13 @@ export function dojoPage({ dojo, federation, events, origin, fonts, nav,
       <td>${esc(g.days.join(' & '))}</td>
       <td>${time(g.starts)} – ${time(g.ends)}</td></tr>`).join('')}
     </tbody></table>`
-    : '<p>Training times to be confirmed.</p>'}
+    : '<p>Training times to be confirmed.</p>'}`,
 
-  ${dojo.blurb ? `<h2 style="margin-top:40px">About this dojo</h2>
+    about: () => dojo.blurb ? `<h2 style="margin-top:40px">About this ${esc(clubWord(vocabulary))}</h2>
     <p>${esc(dojo.blurb)}</p>
-    ${dojo.who_trains ? `<p>${esc(dojo.who_trains)}</p>` : ''}` : ''}
+    ${dojo.who_trains ? `<p>${esc(dojo.who_trains)}</p>` : ''}` : '',
 
-  ${events.length ? `<h2 style="margin-top:40px">What's on</h2>
+    events: () => events.length ? `<h2 style="margin-top:40px">What's on</h2>
   <ul class="events">${events.map((e) => {
     const d = new Date(e.starts_at);
     return `<li>
@@ -332,12 +367,21 @@ export function dojoPage({ dojo, federation, events, origin, fonts, nav,
       <div>${e.is_own ? '' : `<span class="tag">${esc(e.from_org)}</span>`}
         <h3><a href="${at(`/events/${esc(e.slug)}`)}">${esc(e.title)}</a></h3>
         <p>${esc(e.venue_name ?? '')}</p></div></li>`;
-  }).join('')}</ul>` : ''}
+  }).join('')}</ul>` : '',
 
-  <h2 id="visit" style="margin-top:40px">Finding us</h2>
+    findUs: () => `<h2 id="visit" style="margin-top:40px">Finding us</h2>
   <p>${esc(dojo.venue_name ?? '')}<br>${esc([dojo.address_line, dojo.suburb, dojo.city].filter(Boolean).join(', '))}
-  ${dojo.directions ? `<br>${esc(dojo.directions)}` : ''}</p>
-</div></section>`;
+  ${dojo.directions ? `<br>${esc(dojo.directions)}` : ''}</p>`,
+  };
+
+  // "Come to a class" points at #visit, so a layout without findUs would
+  // leave the button going nowhere. Facts too: where, when and who to ask is
+  // the reason anybody is on this page.
+  const order = [...sections];
+  if (!order.includes('facts')) order.splice(Math.min(1, order.length), 0, 'facts');
+  if (!order.includes('findUs')) order.push('findUs');
+
+  const body = arrange(order, parts, new Set(['hero', 'facts']));
 
   return layout({
     title: `${capitalise(artOf(federation))} in ${town} — ${federation.name}`,
@@ -615,29 +659,34 @@ export function articlePage({ article, html, federation, origin, fonts, nav,
  * empty settings file still renders something.
  */
 export function homePage({ federation, dojos, events, articles, origin, fonts,
-                           nav, homeCopy = {}, base = '', vocabulary = {} }) {
+                           nav, homeCopy = {}, base = '', vocabulary = {},
+                           sections = HOME_DEFAULT }) {
   const at = (p) => `${base}${p}`;
   const heading = homeCopy.heroHeading ?? 'Everyone starts somewhere.';
   const heroText = homeCopy.heroText
     ?? `${capitalise(artOf(federation))} taught at ${dojos.length} `
-     + `${clubsWordOf(vocabulary)}. Your first class is free.`;
+     + `${clubsWordOf(vocabulary)}.`;
   const heroButton = homeCopy.heroButton ?? `Find your ${clubWord(vocabulary)}`;
 
-  const body = `
+  const parts = {
+    hero: () => `
 <div class="hero"><div class="wrap">
   <h1>${esc(heading)}</h1>
   <p>${esc(heroText)}</p>
   <a class="btn" href="${at('/find-a-dojo')}">${esc(heroButton)}</a>
   <a class="btn ghost" href="${at('/events')}" style="margin-left:8px">Events</a>
-</div></div>
+</div></div>`,
 
-<section><div class="wrap">
+    // Only what each club has said. "Book a free class" was printed under
+    // every club whether it offered one or not.
+    dojoGrid: () => dojos.length ? `<section><div class="wrap">
   <h2>Where we train</h2>
   <div class="grid">${dojos.slice(0,16).map((d) =>
-    `<a href="${at(`/${esc(d.slug)}`)}"><strong>${esc(d.name)}</strong><span>Book a free class</span></a>`).join('')}</div>
-</div></section>
+    `<a href="${at(`/${esc(d.slug)}`)}"><strong>${esc(d.name)}</strong><span>${
+      d.first_class_free ? 'First class free' : 'See times'}</span></a>`).join('')}</div>
+</div></section>` : '',
 
-${events.length ? `<section style="background:var(--canvas-alt)"><div class="wrap">
+    events: () => events.length ? `<section style="background:var(--canvas-alt)"><div class="wrap">
   <h2>Coming up</h2>
   <ul class="events">${events.slice(0,5).map((e) => {
     const d = new Date(e.starts_at);
@@ -646,9 +695,9 @@ ${events.length ? `<section style="background:var(--canvas-alt)"><div class="wra
       <div><h3><a href="${at(`/events/${esc(e.slug)}`)}">${esc(e.title)}</a></h3>
       <p>${esc(e.venue_name ?? e.from_org ?? '')}</p></div></li>`;
   }).join('')}</ul>
-</div></section>` : ''}
+</div></section>` : '',
 
-${articles.length ? `<section><div class="wrap">
+    news: () => articles.length ? `<section><div class="wrap">
   <h2>News</h2>
   <ul class="events">${articles.map((a) =>
     `<li><div class="d"><b>${new Date(a.published_at).getDate()}</b>
@@ -656,12 +705,16 @@ ${articles.length ? `<section><div class="wrap">
       <div>${a.about_org ? `<span class="tag">${esc(a.about_org)}</span>` : ''}
       <h3><a href="${at(`/news/${esc(a.slug)}`)}">${esc(a.title)}</a></h3>
       <p>${esc(a.summary ?? '')}</p></div></li>`).join('')}</ul>
-</div></section>` : ''}`;
+</div></section>` : '',
+  };
+
+  // Every home-page section is its own full-width band.
+  const body = sections.map((name) => parts[name]?.() ?? '').filter(Boolean).join('\n');
 
   return layout({
     title: `${federation.name} — ${capitalise(artOf(federation))}`,
     description: `${capitalise(artOf(federation))}. ${dojos.length} ${clubsWordOf(vocabulary)} ` +
-      `nationwide, all welcoming beginners. Your first class is free.`,
+      `nationwide.`,
     canonical: `${origin}${base}`,
     jsonLd: [{
       '@context':'https://schema.org','@type':'SportsOrganization',

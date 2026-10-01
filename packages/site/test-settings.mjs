@@ -85,7 +85,7 @@ console.log('\nNO FILE AT ALL STILL BUILDS');
 {
   const empty = fs.mkdtempSync(path.join(os.tmpdir(), 'honbu-empty-'));
   const s = loadSettings(empty);
-  ok('sensible defaults', s.tokens.primary === '#CE372C' && s.navigation.length === 0);
+  ok('sensible defaults — neutral, not any federation\'s colours', s.tokens.primary === '#15171A' && s.navigation.length === 0);
 }
 
 console.log(`\n${pass} passed, ${fail} failed\n`);

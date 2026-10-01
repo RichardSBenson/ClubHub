@@ -1,0 +1,37 @@
+{
+  "format": "honbu-theme",
+  "version": 1,
+  "name": "Slate",
+  "description": "Cool blue-grey with a clear blue for actions. Modern and sporting without being loud.",
+  "author": "Honbu",
+  "colours": {
+    "primary": "#2543B8",
+    "accent": "#7DD3FC",
+    "ink": "#0F172A",
+    "canvas": "#F8FAFC",
+    "neutral": "#94A3B8"
+  },
+  "fonts": {
+    "display": "Archivo",
+    "body": "Inter"
+  },
+  "homePage": {
+    "sections": [
+      "hero",
+      "dojoGrid",
+      "events",
+      "news"
+    ]
+  },
+  "dojoPage": {
+    "sections": [
+      "hero",
+      "facts",
+      "startAnyWeek",
+      "times",
+      "about",
+      "events",
+      "findUs"
+    ]
+  }
+}

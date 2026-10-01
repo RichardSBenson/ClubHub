@@ -13,6 +13,7 @@ import { renderBlocks, excerpt } from '../content/blocks.mjs';
 import { extensionFor } from '../content/images.mjs';
 import { menuFor } from '../content/navigation.mjs';
 import { loadSettings, SettingsError } from './settings.mjs';
+import { readTheme, lookOf } from './theme.mjs';
 import * as R from './render.mjs';
 
 // Relative to the repository, not the working directory — so it lands in the
@@ -243,8 +244,32 @@ for (const target of SITES) {
 
   const clubsWord = vocabulary.clubPlural ?? vocabulary.club ?? 'Clubs';
   const brand = await site.brand(federation.id);
-  const tokens = { ...(brand?.tokens ?? {}), ...(atRoot ? rootSettings.tokens : {}) };
-  const fonts = { ...(brand?.fonts ?? {}), ...(atRoot ? rootSettings.fonts : {}) };
+  // How it looks, in order of authority: what the federation chose in its own
+  // admin (a stored theme), then the settings file for an install that has
+  // never opened the admin, then the defaults. The same order navigation uses,
+  // for the same reason — the screen a person can reach should beat a file
+  // they would have to edit in GitHub on a phone.
+  let look = null;
+  if (orgSettings.theme) {
+    const read = readTheme(orgSettings.theme);
+    if (read.ok) look = lookOf(read.theme);
+    else {
+      // A stored theme that no longer validates (a later version tightened a
+      // rule) costs the federation its theme, loudly, and not its website.
+      console.warn(`\n  ⚠ ${federation.name}'s stored theme is not valid, so it was `
+        + `ignored:\n      ${read.problems.join('\n      ')}\n`);
+    }
+  }
+  const tokens = look ? look.tokens
+    : { ...(brand?.tokens ?? {}), ...(atRoot ? rootSettings.tokens : {}) };
+  const fonts = look ? look.fonts
+    : { ...(brand?.fonts ?? {}), ...(atRoot ? rootSettings.fonts : {}) };
+
+  const fromFile = (key) => atRoot ? rootSettings[key] : orgSettings[key];
+  const homeSections = look?.homeSections ?? fromFile('homePage')?.sections;
+  const dojoSections = look?.dojoSections ?? fromFile('dojoPage')?.sections;
+  // Words, not look: these stay the federation's own whatever theme is chosen.
+  const dojoCopy = strip(fromFile('dojoPage') ?? {});
 
 
   const base = target.base;
@@ -377,7 +402,9 @@ for (const target of SITES) {
   for (const dojo of dojos) {
     const dojoEvents = await site.eventsFor(dojo.slug);
     await write(`${dojo.slug}/index.html`,
-      R.dojoPage({ dojo, events: dojoEvents, ...shared }));
+      R.dojoPage({ dojo, events: dojoEvents, ...shared,
+        sections: dojoSections, startAnyWeekText: dojoCopy.startAnyWeekText ?? null,
+        showFirstClassFree: dojoCopy.showFirstClassFree !== false }));
   }
 
   await write('find-a-dojo/index.html', R.findADojoPage({ dojos, ...shared }));
@@ -419,6 +446,7 @@ for (const target of SITES) {
   await write('index.html', R.homePage({
     dojos, events: evs, articles,
     homeCopy: atRoot ? (rootSettings.homePage ?? {}) : strip(orgSettings.homePage ?? {}),
+    sections: homeSections,
     ...shared,
   }));
 

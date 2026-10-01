@@ -63,7 +63,7 @@
   "homePage": {
     "_readme": [
       "Which sections appear, and in what order. Remove one to hide it.",
-      "Options: hero, dojoGrid, photoBand, events, news, pathway, lineage"
+      "Options: hero, dojoGrid, events, news"
     ],
     "sections": [
       "hero",

@@ -124,6 +124,11 @@ export function describe(entry) {
       return `changed the site menu to ${(a.items ?? []).length} item`
         + ((a.items ?? []).length === 1 ? '' : 's');
 
+    case 'theme_apply':
+      return `changed the website's look to ${a.name ? quote(a.name) : 'a new theme'}`;
+    case 'theme_reset':
+      return `returned the website to its default look`;
+
     case 'club_page_saved':
       return `edited the page for ${a.club ? quote(a.club) : 'a club'}`;
     case 'club_page_requested':
@@ -182,6 +187,8 @@ export const ACTIONS = Object.freeze([
   ['instructor_save', 'Instructor profile changed'],
   ['instructor_remove', 'Instructor removed from site'],
   ['navigation_save', 'Menu changed'],
+  ['theme_apply', 'Website look changed'],
+  ['theme_reset', 'Website look reset'],
   ['club_page_saved', 'Club page edited'],
   ['club_page_requested', 'Club page requested'],
   ['club_page_approved', 'Club page approved'],
