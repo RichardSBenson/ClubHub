@@ -124,6 +124,15 @@ export function describe(entry) {
       return `changed the site menu to ${(a.items ?? []).length} item`
         + ((a.items ?? []).length === 1 ? '' : 's');
 
+    case 'club_profile_saved': {
+      const was = b ?? {};
+      const bits = [];
+      if (was.name && a.name && was.name !== a.name) bits.push(`renamed it from ${quote(was.name)} to ${quote(a.name)}`);
+      if (was.status && a.status && was.status !== a.status)
+        bits.push(a.status === 'dormant' ? 'put the club on a break' : 'marked the club as running again');
+      return bits.length ? bits.join(' and ') : `updated the club's details`;
+    }
+
     case 'club_added':
       return `added the club ${a.name ? quote(a.name) : ''}`.trim();
 
@@ -198,6 +207,7 @@ export const ACTIONS = Object.freeze([
   ['instructor_remove', 'Instructor removed from site'],
   ['navigation_save', 'Menu changed'],
   ['club_added', 'Club added'],
+  ['club_profile_saved', 'Club details changed'],
   ['event_publish_up_asked', 'Event listing requested'],
   ['event_publish_up', 'Event listing decided'],
   ['theme_apply', 'Website look changed'],

@@ -1294,6 +1294,8 @@ export const billing = {
 import { validate, excerpt, toText } from '../content/blocks.mjs';
 import { assertMayPublish } from '../core/domain/instructing.mjs';
 import { readTheme } from '../site/theme.mjs';
+import { problemsWithClubProfile, changesTheSite }
+  from '../core/domain/club-profile.mjs';
 import { problemsWithNewClub, clubSlugFrom, hasAdministrator }
   from '../core/domain/new-club.mjs';
 import { destinations, problemsWithNavigation, navigationFrom, MAX_ITEMS }
@@ -2064,6 +2066,73 @@ export const clubs = {
       }
     }
     return { club, admin };
+  },
+};
+
+// ---------------------------------------------------------------------------
+// a club's own profile
+// ---------------------------------------------------------------------------
+
+export const clubProfile = {
+  /** The club, and who runs it, who trains in it, and what is coming up. */
+  async get(actor, orgId) {
+    await assertRole(actor, orgId, MANAGE);
+    const club = await one(`select * from organisation where id=$1 and type='club'`, [orgId]);
+    if (!club) throw new NotFound('Club');
+
+    const { rows: administrators } = await pool.query(`
+      select a.email, p.first_name, p.last_name, g.role
+      from grant_role g
+      join account a on a.id = g.account_id
+      left join person p on p.id = a.person_id
+      where g.organisation_id = $1 and g.role in ('owner','administrator')
+      order by g.granted_at`, [orgId]);
+
+    const counts = await one(`
+      select
+        (select count(*)::int from affiliation
+          where organisation_id=$1 and ends is null and status='active') as members,
+        (select count(*)::int from affiliation
+          where organisation_id=$1 and ends is null and status='active'
+            and role in ('instructor','coach')) as instructors,
+        (select count(*)::int from event
+          where organisation_id=$1 and status='published'
+            and starts_at > now()) as upcoming`, [orgId]);
+
+    const page = await one(`select published, page_requested_at from dojo_profile
+      where organisation_id=$1`, [orgId]);
+    const parent = await one('select name, slug from organisation where id=$1', [club.parent_id]);
+    return { club, parent, administrators, counts, page };
+  },
+
+  async save(actor, orgId, input) {
+    await assertRole(actor, orgId, MANAGE);
+    const before = await one(`select * from organisation where id=$1 and type='club'`, [orgId]);
+    if (!before) throw new NotFound('Club');
+
+    const problems = problemsWithClubProfile(input);
+    if (problems.length) throw new Invalid(problems.join(' '));
+
+    const row = await one(`
+      update organisation
+         set name=$2, short_name=$3, founded=$4::date, timezone=$5, status=$6,
+             updated_at=now()
+       where id=$1 returning *`,
+      [orgId, input.name, input.shortName, input.founded, input.timezone, input.status]);
+
+    const was = { name: before.name, status: before.status, timezone: before.timezone,
+                  short_name: before.short_name,
+                  founded: before.founded ? String(before.founded.toISOString?.().slice(0, 10) ?? before.founded) : null };
+    const now = { name: row.name, status: row.status, timezone: row.timezone,
+                  short_name: row.short_name,
+                  founded: row.founded ? String(row.founded.toISOString?.().slice(0, 10) ?? row.founded) : null };
+    await pool.query(`
+      insert into audit_log (account_id, organisation_id, action, entity,
+                             entity_id, before, after)
+      values ($1,$2,'club_profile_saved','organisation',$2,$3,$4)`,
+      [actor, orgId, JSON.stringify(was), JSON.stringify(now)]);
+
+    return { club: row, siteChanged: changesTheSite(before, row) };
   },
 };
 
