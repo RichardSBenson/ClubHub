@@ -170,6 +170,8 @@ const theirSession = await one(`select * from training_session where organisatio
        values ($1,'Private grading squad',2,'18:00','19:00') returning *`, [theirs.id]);
 const theirFee = await one(`insert into fee_schedule (organisation_id, label, amount_cents, period, applies_to, effective_from)
   values ($1,'Private committee price',9900,'annual','adult','2026-01-01') returning *`, [theirs.id]);
+const theirRecord = await one(`insert into grading_record (person_id, grade_id, awarded_on, awarded_by_org, result, certificate_no)
+  values ($1,(select id from grade order by rank_order limit 1),'2024-01-01',$2,'pass','ISO-PRIVATE-1') returning *`, [theirPerson.id, theirs.id]);
 const theirPayment = await one(`
   insert into payment (organisation_id, person_id, amount_cents, status)
   values ($1,$2,5000,'pending') returning *`, [theirs.id, theirPerson.id]);
@@ -205,6 +207,8 @@ function pathFor(pattern) {
     affiliationId: theirAffiliation.id,
     sessionId: theirSession.id,
     feeId: theirFee.id,
+    recordId: theirRecord.id,
+    entryId: '00000000-0000-0000-0000-000000000000',
     name: 'members',
     clubId: theirs.id,
     token: 'not-a-real-token',

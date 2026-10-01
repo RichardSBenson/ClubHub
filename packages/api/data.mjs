@@ -214,7 +214,7 @@ export const people = {
       from person p where p.id = $1`, [personId]);
 
     const history = await q(`
-      select g.label, g.rank_order, g.is_dan, gr.awarded_on, gr.result,
+      select gr.id as record_id, g.label, g.rank_order, g.is_dan, gr.awarded_on, gr.result,
              gr.certificate_no, o.name as awarded_by, gr.ratified_on
       from grading_record gr
       join grade g on g.id = gr.grade_id
@@ -799,7 +799,7 @@ export const rank = {
    * award that grade, or the panel is too small or too junior.
    */
   async award(actor, { personId, gradeId, awardedByOrg, awardedOn, panel = [],
-                       eventId = null, result = 'pass' }) {
+                       eventId = null, result = 'pass' }, client = null) {
     await assertRole(actor, awardedByOrg, REGISTER);
 
     const grade = await one('select * from grade where id = $1', [gradeId]);
@@ -827,12 +827,14 @@ export const rank = {
           `Every examiner must hold ${auth.panel_must_hold} or above`);
     }
 
-    return one(`
+    // Inside somebody else's transaction when one is passed, so a whole
+    // grading night can be awarded together or not at all.
+    return (await (client ?? pool).query(`
       insert into grading_record
         (person_id, grade_id, awarded_on, awarded_by_org, event_id, result, panel)
       values ($1,$2,$3,$4,$5,$6,$7::jsonb) returning *`,
       [personId, gradeId, awardedOn, awardedByOrg, eventId, result,
-       JSON.stringify(panel.map((id) => ({ person_id: id })))]);
+       JSON.stringify(panel.map((id) => ({ person_id: id })))])).rows[0];
   },
 };
 
@@ -2249,7 +2251,11 @@ export const myself = {
       select o.name, o.slug, a.role, a.status, a.paid_until::text as paid_until
       from affiliation a join organisation o on o.id = a.organisation_id
       where a.person_id=$1 and a.ends is null order by o.name`, [personId]);
-    return { how, person, private: priv, grade, memberships };
+    const certificates = await q(`select gr.id, g.label, gr.awarded_on::text as awarded_on, gr.certificate_no
+      from grading_record gr join grade g on g.id = gr.grade_id
+      where gr.person_id = $1 and gr.certificate_no is not null and gr.result in ('pass','provisional')
+      order by gr.awarded_on desc`, [personId]);
+    return { how, person, private: priv, grade, memberships, certificates };
   },
 
   /** Only the fields a person may change about themselves. */
@@ -4156,5 +4162,271 @@ export const reports = {
     return { columns: [['date', 'Date'], ['number', 'Member number'], ['first_name', 'First name'], ['last_name', 'Last name'],
       ['grade', 'Grade'], ['result', 'Result'], ['awarded_by', 'Awarded by'], ['certificate', 'Certificate'],
       ['ratified_on', 'Ratified'], ['event', 'Event']].map(([key, label]) => ({ key, label })), rows };
+  },
+};
+
+// ---------------------------------------------------------------------------
+// grading events: enter, sit, finalise, certify
+// ---------------------------------------------------------------------------
+
+import { OUTCOMES, AWARDS, problemsWithResults, certificateNumber, entriesOpen }
+  from '../core/domain/grading.mjs';
+
+const UTC_ISO = (col) => `to_char(${col} at time zone 'UTC','YYYY-MM-DD"T"HH24:MI:SS"Z"')`;
+
+async function gradingEvent(eventId) {
+  const ev = await one(`select e.id, e.organisation_id, e.title, e.slug, e.status, e.kind,
+      ${UTC_ISO('e.starts_at')} as starts_iso, o.name as organiser, o.slug as organiser_slug, o.timezone,
+      ${UTC_ISO('e.entries_open')} as entries_open, ${UTC_ISO('e.entries_close')} as entries_close,
+      coalesce(g.fee_cents, 0) as fee_cents, to_char(g.finalised_on,'YYYY-MM-DD') as finalised_on,
+      (g.event_id is not null) as has_setup
+    from event e join organisation o on o.id = e.organisation_id
+    left join grading_event g on g.event_id = e.id where e.id = $1`, [eventId]);
+  if (!ev || ev.kind !== 'grading') throw new NotFound('Grading');
+  return ev;
+}
+
+/** A club may deal with an event its own organisation, or one above it, runs. */
+async function clubSeesEvent(clubId, ev) {
+  return !!(await one(`select 1 from organisation c join organisation o on o.id = $2
+    where c.id = $1 and c.path <@ o.path
+      and (c.id = o.id or exists (select 1 from event e where e.id = $3 and e.publish_down))`, [clubId, ev.organisation_id, ev.id]));
+}
+
+const entryRows = (eventId, clubId = null) => q(`
+  select en.id as entry_id, en.status, en.person_id, en.notes as entry_notes,
+         p.display_number, nullif(trim(concat_ws(' ', p.first_name, p.last_name)), '') as name,
+         c.name as club, c.id as club_id, g.id as grade_id, g.label as grade, g.is_dan,
+         cg.label as holds, ge.outcome, ge.notes, ge.record_id,
+         (select py.status from payment py where py.event_entry_id = en.id and py.status <> 'void'
+            order by py.created_at desc limit 1) as payment
+  from event_entry en
+  join grading_entry ge on ge.entry_id = en.id
+  join grade g on g.id = ge.grade_id
+  join person p on p.id = en.person_id
+  left join organisation c on c.id = en.entered_for_org
+  left join person_current_grade cg on cg.person_id = p.id
+  where en.event_id = $1 and ($2::uuid is null or en.entered_for_org = $2)
+  order by c.name, p.last_name, p.first_name`, [eventId, clubId]);
+
+export const gradings = {
+  /** Grading events this organisation may see: its own, and those above it open to its clubs. */
+  async list(actor, orgId) {
+    await assertRole(actor, orgId, REGISTER);
+    const org = await one('select * from organisation where id=$1', [orgId]);
+    if (!org) throw new NotFound('Organisation');
+    const rows = await q(`
+      select e.id, e.title, e.status, ${UTC_ISO('e.starts_at')} as starts_iso, o.name as organiser,
+             (e.organisation_id = $1) as own, coalesce(g.fee_cents, 0) as fee_cents,
+             to_char(g.finalised_on,'YYYY-MM-DD') as finalised_on,
+             (select count(*)::int from event_entry en where en.event_id = e.id and en.status <> 'withdrawn'
+                and ($2::boolean is false or en.entered_for_org = $1 or e.organisation_id = $1)) as entered
+      from organisation me join organisation o on me.path <@ o.path
+      join event e on e.organisation_id = o.id and e.kind = 'grading'
+      left join grading_event g on g.event_id = e.id
+      where me.id = $1 and e.status in ('published','completed')
+        and (e.organisation_id = me.id or e.publish_down)
+        and e.starts_at > now() - interval '120 days'
+      order by e.starts_at desc`, [orgId, org.type === 'club']);
+    return { org, events: rows };
+  },
+
+  /** What one grading looks like to one organisation: its entries, who it could enter, and — if it runs it — the results. */
+  async get(actor, orgId, eventId) {
+    await assertRole(actor, orgId, REGISTER);
+    const ev = await gradingEvent(eventId);
+    const org = await one('select * from organisation where id=$1', [orgId]);
+    const organiser = ev.organisation_id === orgId;
+    if (!organiser && !(org.type === 'club' && await clubSeesEvent(orgId, ev))) throw new NotFound('Grading');
+    const open = entriesOpen({ ...ev, status: ev.status }, new Date().toISOString().replace(/\.\d+Z$/, 'Z'));
+
+    const entries = await entryRows(eventId, organiser ? null : orgId);
+    let candidates = [];
+    if (org.type === 'club') {
+      const fed = await orgs.ladderOwnerOf(orgId) ?? org;
+      const have = new Set(entries.filter((e) => e.status !== 'withdrawn').map((e) => e.person_id));
+      const members = await q(`select p.id, p.display_number,
+          nullif(trim(concat_ws(' ', p.first_name, p.last_name)), '') as name
+        from affiliation a join person p on p.id = a.person_id
+        where a.organisation_id = $1 and a.ends is null and a.status = 'active' and a.role = 'member'
+        order by p.last_name, p.first_name`, [orgId]);
+      for (const m of members) {
+        if (have.has(m.id)) continue;
+        const el = await rank.eligibility(m.id, fed.id);
+        candidates.push({ ...m, holds: el.holds ?? null, next: el.next ?? null, eligible: !!el.eligible,
+          unmet: el.unmet ?? [el.reason].filter(Boolean) });
+      }
+    }
+    const panelOptions = organiser ? await q(`select p.display_number, nullif(trim(concat_ws(' ', p.first_name, p.last_name)), '') as name,
+        cg.label as grade from person p join person_current_grade cg on cg.person_id = p.id
+        where cg.is_dan order by cg.rank_order desc, p.last_name limit 60`) : [];
+    const today = (await one(`select to_char((now() at time zone $1)::date,'YYYY-MM-DD') as d`, [ev.timezone])).d;
+    return { org, ev, organiser, open, entries, candidates, panelOptions, today };
+  },
+
+  async setFee(actor, eventId, feeCents) {
+    const ev = await gradingEvent(eventId);
+    await assertRole(actor, ev.organisation_id, REGISTER);
+    const n = Math.round(Number(feeCents) * 100);
+    if (!Number.isFinite(n) || n < 0 || n > 100_000_00) throw new Invalid('The fee should be a dollar amount like 45 or 45.50.');
+    if (ev.finalised_on) throw new Invalid('This grading is finished.');
+    await q(`insert into grading_event (event_id, fee_cents) values ($1,$2)
+      on conflict (event_id) do update set fee_cents = excluded.fee_cents`, [eventId, n]);
+    await q(`insert into audit_log (account_id, organisation_id, action, entity, entity_id, after)
+      values ($1,$2,'grading_fee_set','event',$3,$4)`, [actor, ev.organisation_id, eventId, JSON.stringify({ fee_cents: n })]);
+  },
+
+  /** A club registrar enters members. Anybody who has not met the syllabus is refused, by name. */
+  async enter(actor, clubId, eventId, personIds) {
+    await assertRole(actor, clubId, REGISTER);
+    const ev = await gradingEvent(eventId);
+    const club = await one('select * from organisation where id=$1', [clubId]);
+    if (club.type !== 'club' || !(await clubSeesEvent(clubId, ev))) throw new NotFound('Grading');
+    const open = entriesOpen(ev, new Date().toISOString().replace(/\.\d+Z$/, 'Z'));
+    if (!open.open) throw new Invalid(open.why);
+    if (!personIds.length) throw new Invalid('Tick the members to enter.');
+
+    const fed = await orgs.ladderOwnerOf(clubId) ?? club;
+    const plan = [];
+    for (const id of personIds) {
+      const m = await one(`select p.id, nullif(trim(concat_ws(' ', p.first_name, p.last_name)), '') as name
+        from affiliation a join person p on p.id = a.person_id
+        where a.organisation_id = $1 and a.person_id = $2 and a.ends is null and a.status = 'active' and a.role = 'member'`, [clubId, id]);
+      if (!m) throw new Invalid('Somebody ticked is not a current member of this club.');
+      const el = await rank.eligibility(id, fed.id);
+      if (!el.eligible) throw new Invalid(`${m.name} is not ready: ${(el.unmet ?? [el.reason]).join(', ')}.`);
+      plan.push({ m, gradeId: el.nextGradeId });
+    }
+    const gradeRows = await q('select id, label, is_dan from grade where id = any($1::uuid[])', [plan.map((p) => p.gradeId)]);
+    const root = await one(`select id from organisation where parent_id is null and $1::ltree <@ path`, [fed.path ?? club.path])
+      ?? { id: fed.id };
+
+    const client = await pool.connect();
+    try {
+      await client.query('begin');
+      for (const { m, gradeId } of plan) {
+        const g = gradeRows.find((r) => r.id === gradeId);
+        const kind = g.is_dan ? 'dan_grading' : 'kyu_grading';
+        const fee = ev.fee_cents;
+        const existing = (await client.query(`select id, status from event_entry where event_id=$1 and person_id=$2`, [eventId, m.id])).rows[0];
+        let entryId;
+        if (existing && existing.status !== 'withdrawn') throw new Invalid(`${m.name} is already entered.`);
+        if (existing) {
+          entryId = existing.id;
+          await client.query(`update event_entry set status='entered', entered_by=$2, entered_for_org=$3, amount_cents=$4, updated_at=now() where id=$1`,
+            [entryId, actor, clubId, fee || null]);
+          await client.query(`update grading_entry set grade_id=$2, outcome=null, notes=null, record_id=null where entry_id=$1`, [entryId, gradeId]);
+        } else {
+          entryId = (await client.query(`insert into event_entry (event_id, person_id, entered_by, entered_for_org, amount_cents, status)
+            values ($1,$2,$3,$4,$5,'entered') returning id`, [eventId, m.id, actor, clubId, fee || null])).rows[0].id;
+          await client.query(`insert into grading_entry (entry_id, grade_id) values ($1,$2)`, [entryId, gradeId]);
+        }
+        if (fee > 0) {
+          const payee = payeeFor(kind, { clubId, organiserId: ev.organisation_id, federationId: root.id });
+          const { rows: [pay] } = await client.query(`insert into payment (organisation_id, person_id, event_entry_id, amount_cents, currency, status, requested_by)
+            values ($1,$2,$3,$4,'NZD','pending',$5) returning id`, [payee, m.id, entryId, fee, actor]);
+          await client.query(`insert into payment_line (payment_id, kind, description, amount_cents, event_entry_id)
+            values ($1,$2,$3,$4,$5)`, [pay.id, kind, `${g.label} grading — ${ev.title}`, fee, entryId]);
+        }
+        await client.query(`insert into audit_log (account_id, organisation_id, action, entity, entity_id, after)
+          values ($1,$2,'grading_entered','event_entry',$3,$4)`, [actor, clubId, entryId, JSON.stringify({ event: ev.title, grade: g.label, fee_cents: fee })]);
+      }
+      await client.query('commit');
+    } catch (e) { await client.query('rollback'); throw e; } finally { client.release(); }
+    return { entered: plan.length };
+  },
+
+  async withdraw(actor, orgId, entryId) {
+    const e = await one(`select en.id, en.event_id, en.entered_for_org, ev.organisation_id from event_entry en
+      join grading_entry ge on ge.entry_id = en.id join event ev on ev.id = en.event_id where en.id=$1`, [entryId]);
+    if (!e) throw new NotFound('Entry');
+    if (orgId !== e.entered_for_org && orgId !== e.organisation_id) throw new NotFound('Entry');
+    await assertRole(actor, orgId, REGISTER);
+    const ev = await gradingEvent(e.event_id);
+    if (ev.finalised_on) throw new Invalid('This grading is finished.');
+    await competition.withdraw(actor, entryId, 'Withdrawn from grading');
+  },
+
+  /**
+   * The night is over. Record every result, award the passes, number the
+   * certificates — in one transaction, so a bad panel or a missing result
+   * leaves the register exactly as it was.
+   */
+  async finalise(actor, eventId, { results, panelNumbers, date }) {
+    const ev = await gradingEvent(eventId);
+    await assertRole(actor, ev.organisation_id, REGISTER);
+    if (ev.finalised_on) throw new Invalid('This grading has already been finalised.');
+    const today = (await one(`select to_char((now() at time zone $1)::date,'YYYY-MM-DD') as d`, [ev.timezone])).d;
+    const entries = await entryRows(eventId);
+    const panel = [];
+    const unknown = [];
+    for (const n of panelNumbers) {
+      const p = await one(`select id from person where upper(display_number) = $1`, [n]);
+      if (p) panel.push(p.id); else unknown.push(n);
+    }
+    if (unknown.length) throw new Invalid(`No member found for ${unknown.join(', ')}.`);
+    const problems = problemsWithResults({ entries, results, panel: panelNumbers, date }, today);
+    if (problems.length) throw new Invalid(problems.join(' '));
+
+    const root = await one(`select r.id, coalesce(r.short_name, r.slug) as prefix from organisation o
+      join organisation r on r.parent_id is null and o.path <@ r.path where o.id = $1`, [ev.organisation_id]);
+    const client = await pool.connect();
+    const awarded = [];
+    try {
+      await client.query('begin');
+      for (const e of entries.filter((x) => x.status !== 'withdrawn')) {
+        const { outcome, notes } = results[e.entry_id];
+        let recordId = null;
+        if (AWARDS.has(outcome)) {
+          const rec = await rank.award(actor, { personId: e.person_id, gradeId: e.grade_id, awardedByOrg: ev.organisation_id,
+            awardedOn: date, panel, eventId, result: outcome }, client);
+          const { rows: [c] } = await client.query(`insert into certificate_counter (federation_id, year, last_number)
+            values ($1, $2, 1) on conflict (federation_id, year) do update set last_number = certificate_counter.last_number + 1
+            returning last_number`, [root.id, +date.slice(0, 4)]);
+          const no = certificateNumber(root.prefix, +date.slice(0, 4), c.last_number);
+          await client.query('update grading_record set certificate_no=$2 where id=$1', [rec.id, no]);
+          recordId = rec.id;
+          awarded.push({ person: e.name, grade: e.grade, certificate: no });
+        } else if (outcome === 'fail') {
+          recordId = (await client.query(`insert into grading_record (person_id, grade_id, awarded_on, awarded_by_org, event_id, result, panel)
+            values ($1,$2,$3,$4,$5,'fail',$6::jsonb) returning id`, [e.person_id, e.grade_id, date, ev.organisation_id, eventId,
+            JSON.stringify(panel.map((id) => ({ person_id: id })))])).rows[0].id;
+        }
+        await client.query(`update grading_entry set outcome=$2, notes=$3, record_id=$4 where entry_id=$1`, [e.entry_id, outcome, notes || null, recordId]);
+        await client.query(`update event_entry set status='confirmed', updated_at=now() where id=$1`, [e.entry_id]);
+      }
+      await client.query(`insert into grading_event (event_id, finalised_on, finalised_by) values ($1,$2,$3)
+        on conflict (event_id) do update set finalised_on = excluded.finalised_on, finalised_by = excluded.finalised_by`, [eventId, today, actor]);
+      await client.query(`update event set status='completed', updated_at=now() where id=$1`, [eventId]);
+      await client.query(`insert into audit_log (account_id, organisation_id, action, entity, entity_id, after)
+        values ($1,$2,'grading_finalised','event',$3,$4)`, [actor, ev.organisation_id, eventId,
+        JSON.stringify({ title: ev.title, passed: awarded.length, entered: entries.length })]);
+      await client.query('commit');
+    } catch (e) { await client.query('rollback'); throw e; } finally { client.release(); }
+    return { awarded };
+  },
+
+  /** The certificate for one grading record. For the person, their guardian, or their club's and the organiser's staff. */
+  async certificate(actor, personId, recordId) {
+    const r = await one(`
+      select gr.id, gr.person_id, gr.awarded_on::text as awarded_on, gr.certificate_no, gr.result, gr.panel, gr.awarded_by_org,
+             g.label as grade, g.is_dan, p.display_number, nullif(trim(concat_ws(' ', p.first_name, p.last_name)), '') as name,
+             o.name as awarded_by, e.title as event,
+             (select r2.name from organisation r2 where r2.parent_id is null and o.path <@ r2.path) as federation
+      from grading_record gr join grade g on g.id = gr.grade_id join person p on p.id = gr.person_id
+      join organisation o on o.id = gr.awarded_by_org left join event e on e.id = gr.event_id
+      where gr.id = $1 and gr.person_id = $2`, [recordId, personId]);
+    if (!r || !r.certificate_no || !['pass', 'provisional'].includes(r.result)) throw new NotFound('Certificate');
+    const self = await family.mayActFor(actor, personId);
+    if (!self) {
+      let ok = (await one('select has_role_at($1,$2,$3) as ok', [actor, r.awarded_by_org, REGISTER]))?.ok;
+      if (!ok) for (const h of await homesOf(personId))
+        if ((await one('select has_role_at($1,$2,$3) as ok', [actor, h, REGISTER]))?.ok) { ok = true; break; }
+      if (!ok) throw new Forbidden();
+    }
+    const examiners = r.panel?.length ? await q(`select p.display_number, nullif(trim(concat_ws(' ', p.first_name, p.last_name)), '') as name, cg.label as grade
+      from person p left join person_current_grade cg on cg.person_id = p.id where p.id = any($1::uuid[]) order by cg.rank_order desc nulls last`,
+      [r.panel.map((x) => x.person_id)]) : [];
+    return { ...r, examiners };
   },
 };

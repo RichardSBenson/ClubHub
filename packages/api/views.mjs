@@ -282,6 +282,7 @@ export function rail({ org, vocabulary = {}, can = {}, path = '' }) {
     link(`${base}/roster`, 'Roll'),
     can.register && link(`${base}/members/new`, 'Add a member'),
     can.register && link(`${base}/members/import`, 'Import a roll'),
+    can.register && link(`${base}/gradings`, 'Grading events'),
     can.register && link(`${base}/grading`, vocabulary.grading ?? 'Grading'),
     isClub && can.teach && link(`${base}/attendance`, 'Attendance'),
     isClub && can.teach && link(`${base}/newcomers`, 'Newcomers'),
@@ -461,7 +462,8 @@ export const person = ({ me, csrf, person, history, affiliations, eligibility,
     <thead><tr><th>Grade</th><th>Awarded</th><th class="hide-sm">By</th>
       <th class="hide-sm">Ratified</th></tr></thead>
     <tbody>${history.map((h) => `<tr>
-      <td><strong>${esc(h.label)}</strong></td>
+      <td><strong>${esc(h.label)}</strong>${h.result === 'fail' ? ' <span class="muted">(not passed)</span>' : ''}${h.certificate_no
+        ? ` <a href="/p/${esc(person.id)}/certificate/${esc(h.record_id)}">Certificate</a>` : ''}</td>
       <td>${String(new Date(h.awarded_on).toISOString().slice(0,10))}</td>
       <td class="hide-sm">${esc(h.awarded_by)}</td>
       <td class="hide-sm">${h.ratified_on
@@ -2931,7 +2933,7 @@ export const myHome = ({ me, csrf, self, dependants = [] }) => page({
     nothing to show here. Ask your club to link it.</div>`}` });
 
 /** One person, as they and their guardians may see and change it. */
-export const myPerson = ({ me, csrf, how, person, private: priv = {}, grade, memberships = [],
+export const myPerson = ({ me, csrf, how, person, private: priv = {}, grade, memberships = [], certificates = [],
                            values = null, error, done }) => {
   const v = (k, fallback) => esc(values?.[k] ?? fallback ?? '');
   const mine = how === 'self';
@@ -2944,6 +2946,7 @@ export const myPerson = ({ me, csrf, how, person, private: priv = {}, grade, mem
 
   <h2>Their place in the club</h2>
   <p>${grade ? `Current grade: <strong>${esc(grade.label)}</strong>` : '<span class="muted">No grade recorded yet.</span>'}</p>
+  ${certificates.length ? `<p>Certificates: ${certificates.map((c) => `<a href="/p/${esc(person.id)}/certificate/${esc(c.id)}">${esc(c.label)} (${esc(c.awarded_on)})</a>`).join(' · ')}</p>` : ''}
   ${memberships.length ? `<ul class="plain">${memberships.map((m) => `<li>
     <strong>${esc(m.name)}</strong> — ${esc(m.role)}, ${esc(m.status)}${
       m.paid_until ? `, paid until ${esc(m.paid_until)}` : ''}</li>`).join('')}</ul>` : ''}
@@ -3577,3 +3580,114 @@ export const reportScreen = ({ me, csrf, org, report }) => {
   </tbody></table>${report.rows.length > SHOWN ? `<p class="muted">Showing the first ${SHOWN}. The download has all of them.</p>` : ''}`
     : '<p class="muted">Nothing to show.</p>'}` });
 };
+
+
+// ---------------------------------------------------------------------------
+// grading events
+// ---------------------------------------------------------------------------
+
+const money = (c) => `$${(c / 100).toFixed(2)}`;
+const nz = (iso, tz = 'Pacific/Auckland') => iso
+  ? new Date(iso).toLocaleString('en-NZ', { timeZone: tz, dateStyle: 'medium', timeStyle: 'short' }) : '';
+
+export const gradingEventsScreen = ({ me, csrf, org, events = [] }) => page({
+  title: `${org.name} — grading events`, me, csrf, body: `
+  <h1>Grading events</h1>
+  <p class="sub">${org.type === 'club' ? 'Enter your members into gradings run by you or by your federation.' : 'Gradings you run, and the results.'}
+    Schedule a new one under <a href="/o/${esc(org.slug)}/events">Events</a> (kind: grading).
+    To record a result with no event, use <a href="/o/${esc(org.slug)}/grading">Grading</a>.</p>
+  ${events.length ? `<table><thead><tr><th>Grading</th><th>When</th><th>Run by</th><th>Fee</th><th>Entered</th></tr></thead><tbody>
+  ${events.map((e) => `<tr><td><a href="/o/${esc(org.slug)}/gradings/${esc(e.id)}">${esc(e.title)}</a></td>
+    <td>${esc(nz(e.starts_iso, org.timezone))}</td><td>${esc(e.organiser)}</td>
+    <td>${e.fee_cents ? money(e.fee_cents) : '—'}</td>
+    <td>${e.finalised_on ? `Finished ${esc(e.finalised_on)}` : e.entered}</td></tr>`).join('')}</tbody></table>`
+    : '<p class="muted">No gradings are scheduled.</p>'}` });
+
+export const gradingEventScreen = ({ me, csrf, org, ev, organiser, open, entries = [], candidates = [],
+                                     panelOptions = [], today, values = {}, done, error }) => {
+  const tok = `<input type="hidden" name="_csrf" value="${esc(csrf ?? '')}">`;
+  const base = `/o/${esc(org.slug)}/gradings/${esc(ev.id)}`;
+  const live = entries.filter((e) => e.status !== 'withdrawn');
+  const chosen = (id) => values.results?.[id]?.outcome ?? '';
+  return page({ title: `${ev.title} — grading`, me, csrf, body: `
+  <p><a href="/o/${esc(org.slug)}/gradings">← Grading events</a></p>
+  <h1>${esc(ev.title)}</h1>
+  <p class="sub">${esc(nz(ev.starts_iso, ev.timezone))} · run by ${esc(ev.organiser)} · fee ${ev.fee_cents ? money(ev.fee_cents) : 'none'}
+    ${ev.finalised_on ? ` · <strong>finished ${esc(ev.finalised_on)}</strong>` : ''}</p>
+  ${done ? `<div class="good">${esc(done)}</div>` : ''}
+  ${error ? `<div class="bad">${esc(error)}</div>` : ''}
+
+  ${organiser && !ev.finalised_on ? `<form method="post" action="${base}/fee">${tok}
+    <label for="fee">Grading fee (dollars)</label>
+    <input id="fee" name="fee" value="${ev.fee_cents ? (ev.fee_cents / 100).toFixed(2) : ''}" inputmode="decimal" maxlength="9">
+    <p class="muted">Kyu fees go to the member's club; black belt fees go to the federation.</p>
+    <button class="btn secondary" type="submit">Save fee</button></form>` : ''}
+
+  ${org.type === 'club' ? `<h2>Enter members</h2>
+  ${open.open ? (candidates.length ? `<form method="post" action="${base}/enter">${tok}
+    <table><thead><tr><th></th><th>Name</th><th>Holds</th><th>Sitting for</th></tr></thead><tbody>
+    ${candidates.map((c) => `<tr><td><input type="checkbox" name="pick_${esc(c.id)}" value="1" style="width:auto"${c.eligible ? '' : ' disabled'}></td>
+      <td>${esc(c.name)}</td><td>${esc(c.holds ?? '—')}</td>
+      <td>${c.eligible ? esc(c.next) : `<span class="muted">${esc(c.unmet.join(', '))}</span>`}</td></tr>`).join('')}</tbody></table>
+    <p><button class="btn" type="submit">Enter ticked members</button></p></form>`
+      : '<p class="muted">Everybody is entered, or nobody is a member yet.</p>')
+    : `<p class="muted">${esc(open.why)}</p>`}` : ''}
+
+  <h2>${organiser ? 'Everybody entered' : 'Your entries'}</h2>
+  ${organiser && !ev.finalised_on && live.length ? `<form method="post" action="${base}/results">${tok}` : '<div>'}
+  ${entries.length ? `<table><thead><tr><th>Name</th><th>Club</th><th>Holds</th><th>Sitting for</th><th>Payment</th>
+    <th>${organiser ? (ev.finalised_on ? 'Result' : 'Result') : 'Result'}</th><th></th></tr></thead><tbody>
+  ${entries.map((e) => `<tr${e.status === 'withdrawn' ? ' class="muted"' : ''}>
+    <td>${esc(e.name)} <span class="muted">${esc(e.display_number ?? '')}</span></td><td>${esc(e.club ?? '')}</td>
+    <td>${esc(e.holds ?? '—')}</td><td>${esc(e.grade)}</td><td>${esc(e.payment ?? (ev.fee_cents ? '' : 'no fee'))}</td>
+    <td>${e.status === 'withdrawn' ? 'Withdrawn'
+      : ev.finalised_on ? esc({ pass: 'Passed', provisional: 'Provisional', fail: 'Did not pass', absent: 'Did not attend' }[e.outcome] ?? '')
+      : organiser ? `<select name="result_${esc(e.entry_id)}" aria-label="Result for ${esc(e.name)}">
+          <option value="">—</option>${[['pass', 'Passed'], ['provisional', 'Provisional pass'], ['fail', 'Did not pass'], ['absent', 'Did not attend']]
+            .map(([v, l]) => `<option value="${v}"${chosen(e.entry_id) === v ? ' selected' : ''}>${l}</option>`).join('')}</select>
+          <input name="note_${esc(e.entry_id)}" placeholder="Note" maxlength="300" aria-label="Note for ${esc(e.name)}">` : ''}</td>
+    <td>${e.status !== 'withdrawn' && !ev.finalised_on
+      ? `<button class="btn quiet" type="submit" form="w_${esc(e.entry_id)}">Withdraw</button>` : ''}
+      ${e.record_id && e.outcome && ['pass', 'provisional'].includes(e.outcome) ? `<a href="/p/${esc(e.person_id)}/certificate/${esc(e.record_id)}">Certificate</a>` : ''}</td></tr>`).join('')}
+  </tbody></table>` : '<p class="muted">Nobody is entered yet.</p>'}
+  ${organiser && !ev.finalised_on && live.length ? `
+    <h3>Finalise</h3>
+    <label for="date">Date of the grading</label><input id="date" name="date" value="${esc(values.date ?? today)}" maxlength="10">
+    <label for="panel">Examining panel <span class="muted">(member numbers, separated by spaces or commas)</span></label>
+    <input id="panel" name="panel" value="${esc(values.panel ?? '')}" maxlength="200">
+    ${panelOptions.length ? `<p class="muted">Black belts: ${panelOptions.slice(0, 12).map((p) => `${esc(p.name)} ${esc(p.display_number)} (${esc(p.grade)})`).join(' · ')}</p>` : ''}
+    <p class="muted">Finalising puts every pass in the register, issues certificate numbers, and cannot be undone here.</p>
+    <p><button class="btn" type="submit">Finalise grading</button></p></form>` : '</div>'}
+  ${entries.filter((e) => e.status !== 'withdrawn' && !ev.finalised_on).map((e) => `<form id="w_${esc(e.entry_id)}" method="post" action="${base}/withdraw/${esc(e.entry_id)}">${tok}</form>`).join('')}` });
+};
+
+export const certificate = ({ cert }) => `<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1"><title>Certificate — ${esc(cert.name)}</title>
+<style>
+  :root{color-scheme:light}
+  body{margin:0;background:#f3f1ec;font-family:Georgia,'Times New Roman',serif;color:#1a1a1a}
+  .sheet{box-sizing:border-box;max-width:900px;margin:24px auto;padding:56px 48px;background:#fff;border:10px double #8a1c1c;text-align:center}
+  .fed{letter-spacing:.2em;text-transform:uppercase;font-size:14px;color:#8a1c1c}
+  h1{font-size:40px;margin:18px 0 6px;font-weight:normal}
+  .name{font-size:36px;margin:24px 0 8px;border-bottom:1px solid #999;display:inline-block;padding:0 28px 6px}
+  .grade{font-size:28px;margin:12px 0;color:#8a1c1c}
+  .meta{margin-top:28px;font-size:15px;color:#444;line-height:1.7}
+  .panel{margin-top:28px;font-size:14px;color:#444}
+  .no{margin-top:30px;font-size:12px;color:#777;letter-spacing:.08em}
+  .bar{max-width:900px;margin:12px auto;text-align:right;font:14px system-ui,sans-serif}
+  .bar button{padding:8px 14px;font:inherit;cursor:pointer}
+  @media print{body{background:#fff}.sheet{margin:0;max-width:none;border-width:10px}.bar{display:none}}
+</style></head><body>
+<div class="bar">Print this page (Ctrl/Cmd + P) or choose “Save as PDF”.</div>
+<div class="sheet">
+  <div class="fed">${esc(cert.federation ?? cert.awarded_by)}</div>
+  <h1>Certificate of Grading</h1>
+  <p>This certifies that</p>
+  <div class="name">${esc(cert.name)}</div>
+  <p>has been awarded the grade of</p>
+  <div class="grade">${esc(cert.grade)}${cert.result === 'provisional' ? ' (provisional)' : ''}</div>
+  <div class="meta">Awarded on ${esc(cert.awarded_on)} by ${esc(cert.awarded_by)}${cert.event ? `<br>${esc(cert.event)}` : ''}</div>
+  ${cert.examiners.length ? `<div class="panel"><strong>Examining panel</strong><br>${cert.examiners.map((x) =>
+    `${esc(x.name)}${x.grade ? `, ${esc(x.grade)}` : ''}`).join('<br>')}</div>` : ''}
+  <div class="no">Member ${esc(cert.display_number)} · Certificate ${esc(cert.certificate_no)}</div>
+</div></body></html>`;

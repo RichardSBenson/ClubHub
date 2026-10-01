@@ -177,6 +177,12 @@ export function describe(entry) {
       return 'removed a newcomer who is not continuing';
     case 'report_exported':
       return `downloaded the ${a.report ?? ''} report (${a.rows ?? 0} rows)`;
+    case 'grading_fee_set':
+      return `set the grading fee to $${((a.fee_cents ?? 0) / 100).toFixed(2)}`;
+    case 'grading_entered':
+      return `entered somebody for ${a.grade ? quote(a.grade) : 'a grade'} at ${a.event ? quote(a.event) : 'a grading'}`;
+    case 'grading_finalised':
+      return `finalised the grading ${a.title ? quote(a.title) : ''}: ${a.passed ?? 0} of ${a.entered ?? 0} awarded`.replace('  ', ' ');
     case 'roll_taken':
       return `took the roll for ${a.label ? quote(a.label) : 'a class'} on ${a.date ?? 'a day'}: ${a.came ?? 0} came`
         + (b?.came != null && b.came !== a.came ? ` (was ${b.came})` : '');
@@ -264,6 +270,9 @@ export const ACTIONS = Object.freeze([
   ['club_profile_saved', 'Club details changed'],
   ['message_sent', 'Message sent'],
   ['roll_taken', 'Roll taken'],
+  ['grading_fee_set', 'Grading fee set'],
+  ['grading_entered', 'Entered for grading'],
+  ['grading_finalised', 'Grading finalised'],
   ['report_exported', 'Report downloaded'],
   ['newcomer_added', 'Newcomer added'],
   ['newcomer_joined', 'Newcomer became a member'],
