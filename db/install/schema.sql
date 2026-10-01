@@ -1525,3 +1525,28 @@ create table instructor_profile (
 
 create index instructor_profile_org_idx
   on instructor_profile (organisation_id, sort_order, person_id);
+
+-- ---------------------------------------------------------------------------
+--  019 — the audit log is append-only
+--
+--  Inserts allowed; updates and deletes refused at the database, by everybody,
+--  including the application's own connection. The value of this table is that
+--  it answers a question even when the answer is inconvenient, and that is
+--  only true if it cannot be tidied up afterwards.
+-- ---------------------------------------------------------------------------
+
+create or replace function audit_log_refuse_change() returns trigger
+language plpgsql as $$
+begin
+  raise exception
+    'audit_log is append-only: % is not permitted. The point of this table '
+    'is that it still says what happened when that is inconvenient.',
+    tg_op
+    using errcode = 'restrict_violation';
+end $$;
+
+create trigger audit_log_is_append_only
+  before update or delete on audit_log
+  for each row execute function audit_log_refuse_change();
+
+create index audit_log_actor_idx on audit_log (account_id, at desc);

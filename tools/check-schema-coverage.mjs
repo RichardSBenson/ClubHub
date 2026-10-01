@@ -122,7 +122,22 @@ function sources(dir = ROOT, found = []) {
 
 // ---------------------------------------------------------------------------
 
-const blob = sources().map((f) => readFileSync(f, 'utf8')).join('\n');
+/**
+ * Comments stripped before searching.
+ *
+ * Columns are named after ordinary English words — resolved, published, hits,
+ * period — and a search across whole files matched them in prose. A sentence
+ * in a comment saying "names are resolved here" is not internal_link.resolved
+ * being read by anything, and counting it as such is how this check would
+ * quietly stop checking.
+ */
+const withoutComments = (text) => text
+  .replace(/\/\*[\s\S]*?\*\//g, ' ')
+  .replace(/(^|[^:])\/\/[^\n]*/g, '$1 ');
+
+const blob = sources()
+  .map((f) => withoutComments(readFileSync(f, 'utf8')))
+  .join('\n');
 
 const { rows } = await pool.query(`
   select table_name, column_name

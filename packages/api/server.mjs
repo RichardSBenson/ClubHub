@@ -33,7 +33,8 @@
 import crypto from 'node:crypto';
 import { URL } from 'node:url';
 import { pool, orgs, people, rank, events, competition, pages, assets, news,
-         instructors, navigation, Forbidden, NotFound, Invalid } from './data.mjs';
+         instructors, navigation, audit,
+         Forbidden, NotFound, Invalid } from './data.mjs';
 import * as auth from './auth.mjs';
 import * as V from './views.mjs';
 import { currentStore } from '../infrastructure/factory.mjs';
@@ -45,6 +46,7 @@ import { repositories } from '../infrastructure/factory.mjs';
 import { toInstant, toLocalInput } from './zones.mjs';
 import { readMultipart, BadUpload } from './multipart.mjs';
 import { destinations, menuFor, MAX_ITEMS } from '../content/navigation.mjs';
+import { ACTIONS as AUDIT_ACTIONS } from '../content/audit.mjs';
 import { identify, NotAnImage, ACCEPTED, MAX_BYTES }
   from '../content/images.mjs';
 import { parseTable, planImport } from '../core/domain/roll-import.mjs';
@@ -315,9 +317,22 @@ get('/p/:id', async (ctx) => {
     : null;
 
   const canEdit = record.at ? await mayRegisterAt(ctx, record.at.id) : false;
+  // Only for somebody who may manage the organisation — the history of a
+  // record says who changed what about a person, and that is not for everyone
+  // who can see the record itself.
+  const mayManage = record.at
+    ? await mayPublishAt(ctx, record.at.id).catch(() => false) : false;
+
   return ctx.send(200, V.person({
     me: ctx.me, ...record, eligibility, csrf: ctx.csrf, canEdit,
     titles: await people.titlesOf(ctx.me.accountId, ctx.params.id),
+    // Named `changes`, not `history`: this view already has a `history`, and
+    // it is the grading history. Overwriting it with the audit log would have
+    // replaced somebody's grades with a list of edits.
+    changes: mayManage && record.at
+      ? await audit.forEntity(ctx.me.accountId, record.at.id, 'person',
+                              ctx.params.id, { limit: 20 })
+      : [],
     access: canEdit ? await people.accessFor(ctx.me.accountId, record.person.id)
                     : null,
   }));
@@ -641,6 +656,42 @@ const previewBanner = (org, pg) => `
   <a href="/o/${org.slug}/pages/${pg.id}"
     style="margin-left:auto;color:#F0CE41">Back to editing</a>
 </div>`;
+
+// ---- the audit log ---------------------------------------------------------
+
+/**
+ * What has happened here.
+ *
+ * MANAGE only, and scoped to the subtree by the query: this screen says who
+ * did what to whom, which is the most sensitive reading in the system. A club
+ * administrator sees their own club's history and not the federation's.
+ */
+get('/o/:slug/history', async (ctx) => {
+  const org = await organisationFor(ctx, { toWrite: true });
+  const q = ctx.url.searchParams;
+
+  const since = {
+    week: () => new Date(Date.now() - 7 * 864e5).toISOString(),
+    month: () => new Date(Date.now() - 30 * 864e5).toISOString(),
+    year: () => new Date(Date.now() - 365 * 864e5).toISOString(),
+  }[q.get('since')]?.() ?? null;
+
+  const entries = await audit.forOrganisation(ctx.me.accountId, org.id, {
+    action: q.get('action') || null,
+    accountId: q.get('who') || null,
+    since,
+    before: q.get('before') || null,
+    limit: 100,
+  });
+
+  return ctx.send(200, V.history({
+    me: ctx.me, org, csrf: ctx.csrf, entries,
+    actors: await audit.actorsAt(ctx.me.accountId, org.id),
+    actions: AUDIT_ACTIONS,
+    filters: { action: q.get('action') ?? '', who: q.get('who') ?? '',
+               since: q.get('since') ?? '' },
+  }));
+});
 
 // ---- the site menu ---------------------------------------------------------
 

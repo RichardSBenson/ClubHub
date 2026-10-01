@@ -1,4 +1,6 @@
 import fs from 'node:fs';
+import { describe as auditDescribe, weight as auditWeight }
+  from '../content/audit.mjs';
 import path from 'node:path';
 import { BLOCKS } from '../content/blocks.mjs';
 import { BLOCK_MENU } from '../content/page-form.mjs';
@@ -208,6 +210,7 @@ export const roster = ({ me, csrf, org, roster, canRegister = false,
   <h1>${esc(org.name)}</h1>
   <p class="sub">${roster.length} on the roll ·
     <a href="/o/${esc(org.slug)}/grading">Run a grading</a> ·
+    <a href="/o/${esc(org.slug)}/history">History</a> ·
     <a href="/o/${esc(org.slug)}/events">Events</a> ·
     <a href="/o/${esc(org.slug)}/pages">Website</a></p>
 
@@ -231,7 +234,7 @@ export const roster = ({ me, csrf, org, roster, canRegister = false,
     : '<div class="note">Nobody on the roll yet.</div>'}` });
 
 export const person = ({ me, csrf, person, history, affiliations, eligibility,
-                        titles = [],
+                        titles = [], changes = [],
                         canEdit = false, access = null, link = null,
                         linkExpires = 15, error = null }) => page({
   title: `${person.first_name} ${person.last_name}`, me, csrf, body: `
@@ -254,6 +257,18 @@ export const person = ({ me, csrf, person, history, affiliations, eligibility,
        ${eligibility.months.has} months at grade, ${eligibility.sessions.has} sessions since.</div>`
     : `<div class="note"><strong>Not yet eligible for ${esc(eligibility.next)}.</strong>
        Needs ${eligibility.unmet.map(esc).join(', ')}.</div>`) : ''}
+
+  ${changes.length ? `<h2>Changes to this record</h2>
+  <p class="muted">Who changed what, and when. Cannot be edited or deleted.</p>
+  <table>
+    <thead><tr><th class="hide-sm">When</th><th>Who</th><th>What</th></tr></thead>
+    <tbody>${changes.map((c) => `<tr>
+      <td class="hide-sm muted">${esc(new Date(c.at).toISOString()
+        .slice(0, 16).replace('T', ' '))}</td>
+      <td>${esc(c.actorName)}</td>
+      <td>${esc(auditDescribe(c))}</td>
+    </tr>`).join('')}</tbody>
+  </table>` : ''}
 
   <h2>Grading history</h2>
   ${history.length ? `<table>
@@ -1632,6 +1647,110 @@ export const pageEditor = ({ me, csrf, org, page: pg, values = {},
             <button class="btn quiet" type="submit">Go back to this</button>
           </form>` : '')}</td>
     </tr>`).join('')}</tbody></table>` : ''}` });
+};
+
+/**
+ * What has happened here.
+ *
+ * Thirteen places in this system write to the audit log and nothing read it
+ * until this screen. Federations argue about records — who graded whom, who
+ * took a page down, who put a child's photograph on a website — and the
+ * answer has been in the database the whole time with no way to ask.
+ *
+ * Every line names a person, says what they did in a sentence, and gives the
+ * time. Not an action code and a uuid: those are a row in a table, and a row
+ * in a table does not settle an argument.
+ */
+export const history = ({ me, csrf, org, entries = [], actors = [],
+                          actions = [], filters = {} }) => {
+  const when = (at) => {
+    const d = new Date(at);
+    return d.toISOString().slice(0, 16).replace('T', ' ');
+  };
+
+  const day = (at) => new Date(at).toISOString().slice(0, 10);
+
+  // Grouped by day, because "what happened on the 14th" is how somebody asks.
+  const days = [];
+  for (const e of entries) {
+    const d = day(e.at);
+    if (!days.length || days[days.length - 1].day !== d)
+      days.push({ day: d, rows: [] });
+    days[days.length - 1].rows.push(e);
+  }
+
+  const mark = (e) => {
+    const w = auditWeight(e);
+    if (w === 'notable') return '<span class="tag ok">access</span>';
+    if (w === 'removal') return '<span class="tag no">removed</span>';
+    return '';
+  };
+
+  const oldest = entries.length ? entries[entries.length - 1].id : null;
+
+  return page({ title: `History — ${org.name}`, me, csrf, body: `
+  <h1>History</h1>
+  <p class="sub">${esc(org.name)} ·
+    <a href="/o/${esc(org.slug)}/roster">Back to the roll</a></p>
+
+  <form method="get" action="/o/${esc(org.slug)}/history" class="card">
+    <div class="row">
+      <div>
+        <label for="action">What</label>
+        <select id="action" name="action">
+          <option value="">Everything</option>
+          ${actions.map(([value, label]) => `<option value="${esc(value)}"${
+            filters.action === value ? ' selected' : ''}>${esc(label)}</option>`).join('')}
+        </select>
+      </div>
+      <div>
+        <label for="who">Who</label>
+        <select id="who" name="who">
+          <option value="">Anybody</option>
+          ${actors.map((a) => `<option value="${esc(a.accountId)}"${
+            filters.who === a.accountId ? ' selected' : ''}>${esc(a.name)}</option>`).join('')}
+        </select>
+      </div>
+      <div>
+        <label for="since">When</label>
+        <select id="since" name="since">
+          <option value=""${filters.since === '' ? ' selected' : ''}>All of it</option>
+          <option value="week"${filters.since === 'week' ? ' selected' : ''}>Last week</option>
+          <option value="month"${filters.since === 'month' ? ' selected' : ''}>Last month</option>
+          <option value="year"${filters.since === 'year' ? ' selected' : ''}>Last year</option>
+        </select>
+      </div>
+    </div>
+    <p><button class="btn quiet" type="submit">Show these</button>
+      <a class="btn quiet" href="/o/${esc(org.slug)}/history">Clear</a></p>
+  </form>
+
+  ${entries.length ? days.map((d) => `
+  <h2>${esc(d.day)}</h2>
+  <table>
+    <thead><tr><th class="hide-sm">Time</th><th>Who</th><th>What</th>
+      <th class="hide-sm">Where</th></tr></thead>
+    <tbody>${d.rows.map((e) => `<tr>
+      <td class="hide-sm muted">${esc(when(e.at).slice(11))}</td>
+      <td><strong>${esc(e.actorName)}</strong></td>
+      <td>${esc(auditDescribe(e))} ${mark(e)}</td>
+      <td class="hide-sm muted">${esc(e.organisationName ?? '')}</td>
+    </tr>`).join('')}</tbody>
+  </table>`).join('')
+    : `<div class="note">Nothing recorded yet for these. Every enrolment,
+        grading, upload and publication is written here as it happens —
+        an empty list means it has not happened, not that it was not kept.</div>`}
+
+  ${entries.length >= 100 ? `<p><a class="btn quiet"
+    href="/o/${esc(org.slug)}/history?before=${esc(oldest)}${
+      filters.action ? `&action=${esc(filters.action)}` : ''}${
+      filters.who ? `&who=${esc(filters.who)}` : ''}${
+      filters.since ? `&since=${esc(filters.since)}` : ''}">Older</a></p>` : ''}
+
+  <p class="muted" style="margin-top:24px">This record cannot be edited or
+    deleted, by anybody, including whoever runs the server. That is enforced
+    by the database rather than by permissions — the value of it is that it
+    still says what happened when that is inconvenient.</p>` });
 };
 
 /**

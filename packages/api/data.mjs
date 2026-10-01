@@ -1893,3 +1893,97 @@ export const navigation = {
     return row?.settings?.navigation?.items ?? clean;
   },
 };
+
+// ---------------------------------------------------------------------------
+// the audit log
+//
+// Thirteen places write to it and, until this, nothing read it. Reading is
+// restricted to MANAGE and scoped to the subtree, because the log says who did
+// what to whom: a club's administrator may see their own club's history and
+// not the federation's, exactly as with every other record.
+// ---------------------------------------------------------------------------
+
+export const audit = {
+  /**
+   * What has happened at this organisation and anything beneath it.
+   *
+   * Names are resolved here rather than in the view: an audit entry naming a
+   * uuid is a row in a table, and the point of this screen is that somebody
+   * can settle an argument with it.
+   */
+  async forOrganisation(actor, orgId, {
+    action = null, accountId = null, since = null, limit = 100, before = null,
+  } = {}) {
+    await assertRole(actor, orgId, MANAGE);
+
+    const { rows } = await pool.query(`
+      select l.id, l.at, l.action, l.entity, l.entity_id as "entityId",
+             l.before, l.after,
+             l.account_id as "accountId",
+             coalesce(
+               nullif(trim(concat_ws(' ', ap.first_name, ap.last_name)), ''),
+               acct.email, 'the system') as "actorName",
+             o.name as "organisationName", o.slug as "organisationSlug",
+             -- Whatever the entry was about, if it is a person we still hold.
+             nullif(trim(concat_ws(' ', sp.first_name, sp.last_name)), '')
+               as "subjectName"
+      from audit_log l
+      join organisation o on o.id = l.organisation_id
+      join organisation root on root.id = $1 and o.path <@ root.path
+      left join account acct on acct.id = l.account_id
+      left join person ap on ap.id = acct.person_id
+      left join person sp on sp.id = l.entity_id and l.entity = 'person'
+      where ($2::text is null or l.action = $2)
+        and ($3::uuid is null or l.account_id = $3)
+        and ($4::timestamptz is null or l.at >= $4)
+        and ($5::bigint is null or l.id < $5)
+      order by l.id desc
+      limit least($6::int, 500)`,
+      [orgId, action, accountId, since, before, limit]);
+
+    return rows;
+  },
+
+  /**
+   * Everything that has happened to one record.
+   *
+   * Asked from a person's own page, which is where somebody looks when a
+   * grading or a member number is disputed.
+   */
+  async forEntity(actor, orgId, entity, entityId, { limit = 50 } = {}) {
+    await assertRole(actor, orgId, MANAGE);
+    const { rows } = await pool.query(`
+      select l.id, l.at, l.action, l.entity, l.entity_id as "entityId",
+             l.before, l.after,
+             coalesce(
+               nullif(trim(concat_ws(' ', ap.first_name, ap.last_name)), ''),
+               acct.email, 'the system') as "actorName"
+      from audit_log l
+      join organisation o on o.id = l.organisation_id
+      join organisation root on root.id = $1 and o.path <@ root.path
+      left join account acct on acct.id = l.account_id
+      left join person ap on ap.id = acct.person_id
+      where l.entity = $2 and l.entity_id = $3
+      order by l.id desc
+      limit least($4::int, 200)`, [orgId, entity, entityId, limit]);
+    return rows;
+  },
+
+  /** Who has done things here, for a filter that lists real names. */
+  async actorsAt(actor, orgId) {
+    await assertRole(actor, orgId, MANAGE);
+    const { rows } = await pool.query(`
+      select distinct l.account_id as "accountId",
+             coalesce(
+               nullif(trim(concat_ws(' ', p.first_name, p.last_name)), ''),
+               a.email, 'the system') as name
+      from audit_log l
+      join organisation o on o.id = l.organisation_id
+      join organisation root on root.id = $1 and o.path <@ root.path
+      left join account a on a.id = l.account_id
+      left join person p on p.id = a.person_id
+      where l.account_id is not null
+      order by name`, [orgId]);
+    return rows;
+  },
+};
