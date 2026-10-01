@@ -283,6 +283,7 @@ export function rail({ org, vocabulary = {}, can = {}, path = '' }) {
     can.register && link(`${base}/members/new`, 'Add a member'),
     can.register && link(`${base}/members/import`, 'Import a roll'),
     can.register && link(`${base}/grading`, vocabulary.grading ?? 'Grading'),
+    isClub && can.teach && link(`${base}/attendance`, 'Attendance'),
     isClub && can.register && link(`${base}/renewals`, 'Renewals'),
     can.manage && link(`${base}/messages`, 'Messages'),
     can.manage && link(`${base}/payments`, 'Payments'),
@@ -411,7 +412,7 @@ export const roster = ({ me, csrf, org, roster, canRegister = false,
     : '<div class="note">Nobody on the roll yet.</div>'}` });
 
 export const person = ({ me, csrf, person, history, affiliations, eligibility,
-                        titles = [], changes = [], guardians = null,
+                        titles = [], changes = [], guardians = null, training = null,
                         canEdit = false, access = null, link = null,
                         linkExpires = 15, error = null }) => page({
   title: `${person.first_name} ${person.last_name}`, me, csrf, body: `
@@ -434,6 +435,12 @@ export const person = ({ me, csrf, person, history, affiliations, eligibility,
        ${eligibility.months.has} months at grade, ${eligibility.sessions.has} sessions since.</div>`
     : `<div class="note"><strong>Not yet eligible for ${esc(eligibility.next)}.</strong>
        Needs ${eligibility.unmet.map(esc).join(', ')}.</div>`) : ''}
+
+  ${training ? `<h2>Training</h2>
+  <p>${training.ever ? `<strong>${training.last30}</strong> classes in the last 30 days,
+    <strong>${training.last90}</strong> in the last 90. Last seen ${esc(training.last_seen)}.
+    <span class="muted">${training.ever} in all.</span>`
+    : '<span class="muted">No classes recorded yet.</span>'}</p>` : ''}
 
   ${changes.length ? `<h2>Changes to this record</h2>
   <p class="muted">Who changed what, and when. Cannot be edited or deleted.</p>
@@ -3405,3 +3412,68 @@ export const renewalsScreen = ({ me, csrf, org, today, rows = [], prices = [], c
     ${r.fee_exempt ? `<form method="post" action="/o/${esc(org.slug)}/renewals/${esc(r.affiliation_id)}/carry-on" style="display:inline">
       <input type="hidden" name="_csrf" value="${esc(csrf ?? '')}"><button class="btn quiet">Carry membership on a year</button></form>` : ''}</td></tr>`).join('')}</tbody></table>` : ''}` });
 };
+
+
+// ---------------------------------------------------------------------------
+// classes and attendance
+// ---------------------------------------------------------------------------
+
+const DAY_NAMES = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+
+export const attendanceScreen = ({ me, csrf, org, today, day, classes = [], hasTimetable,
+                                   notSeen = [], busiest = [], days, totals, done, error }) => page({
+  title: `${org.name} — attendance`, me, csrf, body: `
+  <h1>Attendance</h1>
+  <p class="sub">The roll is who came. Taking it is also what makes “sessions since the last grading” true.</p>
+  ${done ? `<div class="good">${esc(done)}</div>` : ''}
+  ${error ? `<div class="bad">${esc(error)}</div>` : ''}
+
+  <h2>${esc(DAY_NAMES[new Date(`${day}T00:00:00Z`).getUTCDay()])} ${esc(day)}${day === today ? ' · today' : ''}</h2>
+  <form method="get" action="/o/${esc(org.slug)}/attendance">
+    <label for="date">Another day</label>
+    <input id="date" name="date" value="${esc(day)}" maxlength="10" size="12">
+    <button class="btn quiet" type="submit">Show</button>
+  </form>
+  ${classes.length ? `<table><thead><tr><th>Class</th><th>Time</th><th>Came</th><th></th></tr></thead><tbody>${
+    classes.map((c) => `<tr><td>${esc(c.label)}</td><td>${esc(c.starts)}–${esc(c.ends)}</td>
+      <td>${c.came == null ? '<span class="muted">not taken</span>' : esc(String(c.came))}</td>
+      <td><a class="btn" href="/o/${esc(org.slug)}/attendance/${esc(c.id)}?date=${esc(day)}">${
+        c.came == null ? 'Take the roll' : 'Change'}</a></td></tr>`).join('')}</tbody></table>`
+    : hasTimetable ? '<p class="muted">No class runs on this day.</p>'
+    : `<div class="note">No classes yet. Add the times you train on <a href="/o/${esc(org.slug)}/club-page">the club's page</a>,
+        then take the roll here.</div>`}
+
+  <h2>The last ${days} days</h2>
+  <div class="row">
+    <div><strong>${totals.sessions}</strong> attendances</div>
+    <div><strong>${totals.people}</strong> different people</div>
+    <div><strong>${totals.perWeek}</strong> a week</div>
+  </div>
+  ${busiest.length ? `<p class="muted">Most regular: ${busiest.map((m) => `${esc(m.name)} (${m.recent})`).join(', ')}.</p>` : ''}
+  ${notSeen.length ? `<h3>Not seen in ${days} days</h3>
+  <p class="muted">Worth a kind word — it is not a penalty.</p>
+  <table><tbody>${notSeen.map((m) => `<tr><td><a href="/p/${esc(m.person_id)}">${esc(m.name)}</a></td>
+    <td class="muted">${m.last_seen ? `last seen ${esc(m.last_seen)}` : 'never recorded'}</td></tr>`).join('')}</tbody></table>`
+    : '<p class="muted">Everybody has been in recently.</p>'}` });
+
+export const rollScreen = ({ me, csrf, org, session, date, members = [], visitors = [], visitorText = '', error, done }) => page({
+  title: `${session.label} — roll`, me, csrf, body: `
+  <p><a href="/o/${esc(org.slug)}/attendance?date=${esc(date)}">← Attendance</a></p>
+  <h1>${esc(session.label)}</h1>
+  <p class="sub">${esc(DAY_NAMES[session.weekday])} ${esc(date)} · ${esc(session.starts)}–${esc(session.ends)}</p>
+  ${done ? `<div class="good">${esc(done)}</div>` : ''}
+  ${error ? `<div class="bad">${esc(error)}</div>` : ''}
+  <form method="post" action="/o/${esc(org.slug)}/attendance/${esc(session.id)}">
+    <input type="hidden" name="_csrf" value="${esc(csrf ?? '')}">
+    <input type="hidden" name="date" value="${esc(date)}">
+    <fieldset><legend>Who came?</legend>
+      ${members.length ? members.map((m) => `<label class="check"><input type="checkbox" name="here_${esc(m.person_id)}" value="1"${m.present ? ' checked' : ''}>
+        ${esc(m.name)}${m.age != null && m.age < 18 ? ` <span class="muted">(${m.age})</span>` : ''}</label>`).join('')
+        : '<p class="muted">Nobody is on the roll yet.</p>'}
+    </fieldset>
+    ${visitors.length ? `<fieldset><legend>Visitors already here</legend>${visitors.map((v) => `<label class="check">
+      <input type="checkbox" name="here_${esc(v.person_id)}" value="1" checked> ${esc(v.name)} <span class="muted">${esc(v.display_number ?? '')}</span></label>`).join('')}</fieldset>` : ''}
+    <label for="visitors">Visitors from another club <span class="muted">(member numbers, separated by spaces or commas)</span></label>
+    <input id="visitors" name="visitors" value="${esc(visitorText ?? '')}" maxlength="300">
+    <div class="actions"><button class="btn" type="submit">Save the roll</button></div>
+  </form>` });

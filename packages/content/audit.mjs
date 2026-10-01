@@ -169,6 +169,9 @@ export function describe(entry) {
       return `carried a membership on to ${a.paidUntil ?? 'a later date'} with no payment`;
     case 'reminders_setting':
       return a.enabled ? 'switched automatic fees reminders on' : 'switched automatic fees reminders off';
+    case 'roll_taken':
+      return `took the roll for ${a.label ? quote(a.label) : 'a class'} on ${a.date ?? 'a day'}: ${a.came ?? 0} came`
+        + (b?.came != null && b.came !== a.came ? ` (was ${b.came})` : '');
     case 'email_preference':
       return a.optedOut ? 'a member stopped getting announcement emails'
                         : 'a member started getting announcement emails again';
@@ -252,6 +255,7 @@ export const ACTIONS = Object.freeze([
   ['self_update', 'Member updated their own details'],
   ['club_profile_saved', 'Club details changed'],
   ['message_sent', 'Message sent'],
+  ['roll_taken', 'Roll taken'],
   ['reminders_setting', 'Automatic reminders changed'],
   ['payment_requested', 'Payment asked for'],
   ['payment_made', 'Payment made'],

@@ -1697,3 +1697,5 @@ alter table message add constraint message_audience_check
 alter table message drop constraint if exists message_kind_check;
 alter table message add constraint message_kind_check
   check (kind in ('announcement','event','renewal'));
+create index if not exists attendance_org_date_idx
+  on attendance (organisation_id, session_date desc);

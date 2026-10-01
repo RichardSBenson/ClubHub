@@ -68,7 +68,6 @@ const ACCOUNTED_FOR = {
   'redirect.last_hit_at': 'nothing counts redirect use yet',
 
   // --- recorded for the audit trail, never read back ------------------------
-  'attendance.recorded_by': 'written for the record; no screen reads it yet',
   'rebuild_queue.built_at': 'written by the queue; nothing reports on it yet',
 
   // --- real gaps, named rather than hidden ----------------------------------

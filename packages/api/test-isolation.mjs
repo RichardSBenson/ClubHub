@@ -165,6 +165,9 @@ ok('and an event on their calendar', !!theirEvent, 'no event at whanganui');
 }
 
 const theirAffiliation = await one(`select * from affiliation where organisation_id=$1 and ends is null limit 1`, [theirs.id]);
+const theirSession = await one(`select * from training_session where organisation_id=$1 limit 1`, [theirs.id])
+  ?? await one(`insert into training_session (organisation_id, label, weekday, starts, ends)
+       values ($1,'Private grading squad',2,'18:00','19:00') returning *`, [theirs.id]);
 const theirFee = await one(`insert into fee_schedule (organisation_id, label, amount_cents, period, applies_to, effective_from)
   values ($1,'Private committee price',9900,'annual','adult','2026-01-01') returning *`, [theirs.id]);
 const theirPayment = await one(`
@@ -200,6 +203,7 @@ function pathFor(pattern) {
     messageId: theirMessage.id,
     paymentId: theirPayment.id,
     affiliationId: theirAffiliation.id,
+    sessionId: theirSession.id,
     feeId: theirFee.id,
     clubId: theirs.id,
     token: 'not-a-real-token',

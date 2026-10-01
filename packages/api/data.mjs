@@ -3749,3 +3749,157 @@ export const reminders = {
     return report;
   },
 };
+
+// ---------------------------------------------------------------------------
+// classes and attendance
+//
+// A class is a line on the club's timetable. The roll for a class on a day is
+// the people who came. Instructors keep it; the same records are what grading
+// eligibility counts.
+// ---------------------------------------------------------------------------
+
+import { problemsWithSheet, classesOn, notSeenSince, perWeek, isDate, addDays, BACKFILL_DAYS }
+  from '../core/domain/attendance.mjs';
+
+const TEACHERS = ['owner', 'administrator', 'registrar', 'instructor'];
+
+const todayAt = async (org) =>
+  (await one(`select to_char((now() at time zone $1)::date,'YYYY-MM-DD') as d`, [org.timezone])).d;
+
+async function attendanceClub(orgId) {
+  const org = await one('select * from organisation where id=$1', [orgId]);
+  if (!org) throw new NotFound('Organisation');
+  if (org.type !== 'club') throw new Invalid('Attendance is kept by each club.');
+  return org;
+}
+
+export const attendance = {
+  /** The classes that run on a day, how many came, and who has not been seen lately. */
+  async overview(actor, orgId, { date = null, days = 30 } = {}) {
+    await assertRole(actor, orgId, TEACHERS);
+    const org = await attendanceClub(orgId);
+    const today = await todayAt(org);
+    const day = date && isDate(date) ? date : today;
+
+    const sessions = await q(`select id, label, weekday, to_char(starts,'HH24:MI') as starts,
+        to_char(ends,'HH24:MI') as ends from training_session
+      where organisation_id = $1 order by sort_order, weekday, starts`, [orgId]);
+    const counts = await q(`select session_id, count(*)::int as n from attendance
+      where organisation_id = $1 and session_date = $2::date group by session_id`, [orgId, day]);
+    const classes = classesOn(sessions, day).map((s) => ({
+      ...s, came: counts.find((c) => c.session_id === s.id)?.n ?? null }));
+
+    const members = await q(`
+      select p.id as person_id, p.display_number,
+             nullif(trim(concat_ws(' ', p.first_name, p.last_name)), '') as name,
+             to_char(a.starts, 'YYYY-MM-DD') as joined,
+             (select to_char(max(t.session_date), 'YYYY-MM-DD') from attendance t
+               where t.person_id = p.id) as last_seen,
+             (select count(*)::int from attendance t where t.person_id = p.id
+                and t.organisation_id = $1 and t.session_date > ($2::date - $3::int)) as recent
+      from affiliation a join person p on p.id = a.person_id
+      where a.organisation_id = $1 and a.ends is null and a.status = 'active'
+        and a.role in ('member','instructor','assistant')
+      order by p.last_name, p.first_name`, [orgId, today, days]);
+
+    const totals = await one(`select count(*)::int as sessions,
+        count(distinct person_id)::int as people from attendance
+      where organisation_id = $1 and session_date > ($2::date - $3::int)`, [orgId, today, days]);
+    return { org, today, day, classes, hasTimetable: sessions.length > 0,
+      notSeen: notSeenSince(members, today, days),
+      busiest: [...members].sort((a, b) => b.recent - a.recent).slice(0, 5).filter((m) => m.recent > 0),
+      days, totals: { ...totals, perWeek: perWeek(totals.sessions, days) } };
+  },
+
+  /** One class on one day: everybody the club might expect, and who is marked. */
+  async sheet(actor, orgId, sessionId, date) {
+    await assertRole(actor, orgId, TEACHERS);
+    const org = await attendanceClub(orgId);
+    const session = await one(`select id, label, weekday, to_char(starts,'HH24:MI') as starts,
+        to_char(ends,'HH24:MI') as ends from training_session where id=$1 and organisation_id=$2`,
+      [sessionId, orgId]);
+    if (!session) throw new NotFound('Class');
+    const today = await todayAt(org);
+    const problems = problemsWithSheet({ date, sessionWeekday: session.weekday }, today);
+    if (problems.length) throw new Invalid(problems.join(' '));
+
+    const here = await q(`select person_id from attendance where organisation_id=$1
+      and session_id=$2 and session_date=$3::date`, [orgId, sessionId, date]);
+    const present = new Set(here.map((r) => r.person_id));
+    const members = await q(`
+      select p.id as person_id, p.display_number,
+             nullif(trim(concat_ws(' ', p.first_name, p.last_name)), '') as name,
+             case when p.date_of_birth is null then null
+               else date_part('year', age($2::date, p.date_of_birth))::int end as age
+      from affiliation a join person p on p.id = a.person_id
+      where a.organisation_id = $1 and a.ends is null and a.status = 'active'
+        and a.role in ('member','instructor','assistant')
+      order by p.last_name, p.first_name`, [orgId, date]);
+    const memberIds = new Set(members.map((m) => m.person_id));
+    const visitors = (await q(`select p.id as person_id, p.display_number,
+        nullif(trim(concat_ws(' ', p.first_name, p.last_name)), '') as name
+      from attendance t join person p on p.id = t.person_id
+      where t.organisation_id=$1 and t.session_id=$2 and t.session_date=$3::date`, [orgId, sessionId, date]))
+      .filter((v) => !memberIds.has(v.person_id));
+    return { org, session, date, today, members: members.map((m) => ({ ...m, present: present.has(m.person_id) })), visitors };
+  },
+
+  /**
+   * Set the roll for a class on a day to exactly these people. Taking the roll
+   * twice is fine — it is a set, not a log of button presses.
+   */
+  async save(actor, orgId, sessionId, date, { personIds = [], visitorNumbers = [] }) {
+    const sheet = await attendance.sheet(actor, orgId, sessionId, date);   // authority, date, class
+    const allowed = new Set([...sheet.members, ...sheet.visitors].map((m) => m.person_id));
+    const ids = new Set(personIds.filter((id) => allowed.has(id)));
+
+    // A visitor is somebody from another club in the same federation.
+    const unknown = [];
+    for (const raw of visitorNumbers) {
+      const number = String(raw).trim().toUpperCase();
+      const v = await one(`select p.id from person p
+        where upper(p.display_number) = $1 and exists (
+          select 1 from affiliation a join organisation o on o.id = a.organisation_id
+          join organisation mine on mine.id = $2
+          where a.person_id = p.id and a.ends is null and a.status = 'active'
+            and subpath(o.path, 0, 1) = subpath(mine.path, 0, 1))`, [number, orgId]);
+      if (v) ids.add(v.id); else unknown.push(number);
+    }
+    if (unknown.length) throw new Invalid(`No member found for ${unknown.join(', ')}.`);
+
+    const by = (await one('select person_id from account where id=$1', [actor]))?.person_id ?? null;
+    const client = await pool.connect();
+    let before, after;
+    try {
+      await client.query('begin');
+      before = (await client.query(`select count(*)::int as n from attendance where organisation_id=$1
+        and session_id=$2 and session_date=$3::date`, [orgId, sessionId, date])).rows[0].n;
+      await client.query(`delete from attendance where organisation_id=$1 and session_id=$2
+        and session_date=$3::date and not (person_id = any($4::uuid[]))`, [orgId, sessionId, date, [...ids]]);
+      if (ids.size) await client.query(`insert into attendance (person_id, organisation_id, session_date, session_id, recorded_by)
+        select x, $1, $2::date, $3, $4 from unnest($5::uuid[]) as x
+        on conflict (person_id, organisation_id, session_date, session_id) do nothing`,
+        [orgId, date, sessionId, by, [...ids]]);
+      after = ids.size;
+      await client.query(`insert into audit_log (account_id, organisation_id, action, entity, entity_id, before, after)
+        values ($1,$2,'roll_taken','training_session',$3,$4,$5)`, [actor, orgId, sessionId,
+        JSON.stringify({ came: before }), JSON.stringify({ came: after, date, label: sheet.session.label,
+          visitors: visitorNumbers.length })]);
+      await client.query('commit');
+    } catch (e) { await client.query('rollback'); throw e; } finally { client.release(); }
+    return { came: after };
+  },
+
+  /** How much one person has trained. For those who look after them. */
+  async forPerson(actor, personId, orgId) {
+    await assertRole(actor, orgId, TEACHERS);
+    const org = await one('select timezone from organisation where id=$1', [orgId]);
+    const today = await todayAt(org);
+    return one(`select
+        count(*) filter (where session_date > ($2::date - 90))::int as last90,
+        count(*) filter (where session_date > ($2::date - 30))::int as last30,
+        count(*)::int as ever,
+        to_char(max(session_date), 'YYYY-MM-DD') as last_seen
+      from attendance where person_id = $1`, [personId, today]);
+  },
+};

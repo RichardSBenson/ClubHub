@@ -33,7 +33,7 @@
 import crypto from 'node:crypto';
 import { URL } from 'node:url';
 import { pool, orgs, people, rank, events, competition, pages, assets, news,
-         instructors, navigation, audit, search, clubPages, appearance, clubs, clubProfile, family, myself, memberEvents, messages, emailPreferences, payments, fees, renewals, reminders,
+         instructors, navigation, audit, search, clubPages, appearance, clubs, clubProfile, family, myself, memberEvents, messages, emailPreferences, payments, fees, renewals, reminders, attendance,
          Forbidden, NotFound, Invalid } from './data.mjs';
 import * as auth from './auth.mjs';
 import * as V from './views.mjs';
@@ -43,6 +43,7 @@ import { readNewClub } from '../core/domain/new-club.mjs';
 import { readMessage } from '../core/domain/messaging.mjs';
 import { readPayment, readPaymentRequest } from '../core/domain/payments.mjs';
 import { readFee, readExemption, reminderText } from '../core/domain/membership.mjs';
+import { readVisitors, isDate } from '../core/domain/attendance.mjs';
 import { paymentProviderFrom, isTestProvider } from '../infrastructure/payments/providers.mjs';
 import { BUILT_IN } from '../site/builtin-themes.mjs';
 import { readTheme, serialise } from '../site/theme.mjs';
@@ -350,6 +351,8 @@ get('/p/:id', async (ctx) => {
       ? await audit.forEntity(ctx.me.accountId, record.at.id, 'person',
                               ctx.params.id, { limit: 20 })
       : [],
+    training: record.at ? await attendance.forPerson(ctx.me.accountId, ctx.params.id, record.at.id)
+      .catch(() => null) : null,
     access: canEdit ? await people.accessFor(ctx.me.accountId, record.person.id)
                     : null,
     guardians: canEdit ? await family.guardiansOf(ctx.me.accountId, record.person.id)
@@ -1158,6 +1161,57 @@ post('/unsubscribe/:token', async (ctx) => {
   if (!await emailPreferences.setOptOut(ctx.params.token, form.optOut === '1'))
     throw new NotFound('This link');
   return ctx.redirect(`/unsubscribe/${ctx.params.token}?done=1`);
+});
+
+// ---- classes and attendance --------------------------------------------------
+//
+// Instructors take the roll. The timetable itself is the club's page.
+
+async function rollScreen(ctx, org, extra = {}) {
+  const sheet = await attendance.sheet(ctx.me.accountId, org.id, ctx.params.sessionId,
+    String(ctx.url.searchParams.get('date') ?? ''));
+  return ctx.send(extra.status ?? 200, V.rollScreen({ me: ctx.me, org, csrf: ctx.csrf, ...sheet,
+    done: ctx.url.searchParams.get('done'), ...extra }));
+}
+
+get('/o/:slug/attendance', async (ctx) => {
+  const org = await organisationFor(ctx);
+  if (org.type !== 'club') return ctx.redirect(`/o/${org.slug}/clubs`);
+  const wanted = String(ctx.url.searchParams.get('date') ?? '');
+  return ctx.send(200, V.attendanceScreen({ me: ctx.me, org, csrf: ctx.csrf,
+    ...(await attendance.overview(ctx.me.accountId, org.id, { date: isDate(wanted) ? wanted : null })),
+    done: ctx.url.searchParams.get('done') }));
+});
+
+get('/o/:slug/attendance/:sessionId', async (ctx) => {
+  const org = await organisationFor(ctx);
+  if (!UUID_RE.test(ctx.params.sessionId)) throw new NotFound('Class');
+  try { return await rollScreen(ctx, org); }
+  catch (e) {
+    if (e instanceof Invalid) return ctx.redirect(`/o/${org.slug}/attendance?error=${encodeURIComponent(e.message)}`);
+    throw e;
+  }
+});
+
+post('/o/:slug/attendance/:sessionId', async (ctx) => {
+  const org = await organisationFor(ctx);
+  const form = await ctx.form();
+  if (!UUID_RE.test(ctx.params.sessionId)) throw new NotFound('Class');
+  const date = String(form.date ?? '');
+  const personIds = Object.keys(form).filter((k) => k.startsWith('here_') && form[k] === '1')
+    .map((k) => k.slice(5)).filter((id) => UUID_RE.test(id));
+  try {
+    const out = await attendance.save(ctx.me.accountId, org.id, ctx.params.sessionId, date,
+      { personIds, visitorNumbers: readVisitors(form.visitors) });
+    return ctx.redirect(`/o/${org.slug}/attendance?date=${encodeURIComponent(date)}&done=${
+      encodeURIComponent(`Saved. ${out.came} came.`)}`);
+  } catch (e) {
+    if (e instanceof Invalid) {
+      ctx.url.searchParams.set('date', date);
+      return rollScreen(ctx, org, { status: 422, error: e.message, visitorText: form.visitors });
+    }
+    throw e;
+  }
 });
 
 // ---- what a club has been paid, and asking for more ---------------------------
@@ -2543,14 +2597,17 @@ async function organisationFor(ctx, { toSchedule = false,
 
   // What the side rail shows: this organisation, in its own words, and only
   // the parts this person may use.
-  const [vocabulary, register, write, manage] = await Promise.all([
+  const [vocabulary, register, write, manage, teach] = await Promise.all([
     orgs.vocabulary(org.id),
     mayRegisterAt(ctx, org.id),
     mayWriteAt(ctx, org.id),
     mayPublishAt(ctx, org.id),
+    pool.query('select has_role_at($1,$2,$3) as ok',
+      [ctx.me.accountId, org.id, ['owner', 'administrator', 'registrar', 'instructor']])
+      .then((r) => !!r.rows[0]?.ok),
   ]);
   ctx.rail = { org, vocabulary, path: ctx.url.pathname,
-               can: { register, write, manage } };
+               can: { register, write, manage, teach } };
   return org;
 }
 
