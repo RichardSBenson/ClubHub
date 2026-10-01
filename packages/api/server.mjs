@@ -33,7 +33,7 @@
 import crypto from 'node:crypto';
 import { URL } from 'node:url';
 import { pool, orgs, people, rank, events, competition, pages, assets, news,
-         instructors, navigation, audit, search, clubPages, appearance, clubs, clubProfile, family, myself,
+         instructors, navigation, audit, search, clubPages, appearance, clubs, clubProfile, family, myself, memberEvents,
          Forbidden, NotFound, Invalid } from './data.mjs';
 import * as auth from './auth.mjs';
 import * as V from './views.mjs';
@@ -401,6 +401,135 @@ get('/me', async (ctx) => {
   ctx.requireActor();
   const { self, dependants } = await family.mine(ctx.me.accountId);
   return ctx.send(200, V.myHome({ me: ctx.me, csrf: ctx.csrf, self, dependants }));
+});
+
+// ---- entering events as a member or a parent ------------------------------
+//
+// Registered before /me/:personId so that "events" is not read as somebody's id.
+// The authority is family.mayActFor (self, or a guardian of a minor), and the
+// event must be one memberEvents says is open to that person — the same query
+// is used to offer it and to accept it.
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+get('/me/events', async (ctx) => {
+  ctx.requireActor();
+  const { self, dependants } = await family.mine(ctx.me.accountId);
+  const groups = [];
+  for (const person of [self, ...dependants].filter(Boolean)) {
+    groups.push({ person, open: await memberEvents.openFor(person.id),
+                  entries: await memberEvents.entriesOf(person.id),
+                  how: person.id === self?.id ? 'self' : 'guardian' });
+  }
+  return ctx.send(200, V.myEvents({ me: ctx.me, csrf: ctx.csrf, groups,
+    done: ctx.url.searchParams.get('done') }));
+});
+
+/** Everything the form and the confirm step both need, worked out once. */
+async function memberEntryPlan(ctx, form = {}) {
+  const { eventId, personId } = ctx.params;
+  if (!UUID_RE.test(eventId) || !UUID_RE.test(personId)) throw new NotFound('Event');
+  const how = await family.assertMayActFor(ctx.me.accountId, personId);
+  const open = await memberEvents.get(personId, eventId);
+  if (!open) throw new NotFound('Event');
+
+  const { repo } = await calendar();
+  const event = await repo.byId(eventId);
+  if (!event) throw new NotFound('Event');
+  const setup = await engineSetupFor(eventId);
+  const mine = await myself.get(ctx.me.accountId, personId);
+  const eventDate = dayOf(event, open.host_timezone);
+  const { dependants } = await family.mine(ctx.me.accountId);
+  const relationship = dependants.find((d) => d.id === personId)?.relationship ?? null;
+
+  const chosen = setup.disciplines.filter((d) => form[`disc_${d.id}`]).map((d) => d.id);
+  const weightKg = String(form.weight ?? '').trim() || null;
+  const heightCm = String(form.height ?? '').trim() || null;
+
+  const competitor = new Competitor({
+    personId, name: `${mine.person.first_name} ${mine.person.last_name}`,
+    dateOfBirth: mine.person.date_of_birth, gender: mine.person.gender,
+    rankOrder: mine.grade?.rank_order ?? null, weightKg, heightCm,
+    clubName: open.home_name, isMember: true });
+  const need = consentNeeded(competitor, { eventDate, guardianUnder: event.guardianUnder ?? null });
+
+  const problems = [];
+  let placements = [], amountCents = null, ready = true, reasons = [];
+  if (setup.disciplines.length) {
+    if (!chosen.length) problems.push('Choose at least one thing to enter.');
+    else {
+      const placed = placeEntry({ disciplines: setup.disciplines,
+        divisionsByDiscipline: setup.engineDivisions }, competitor,
+        { eventDate, wanted: chosen });
+      placements = placed.placements; ready = placed.ready;
+      reasons = placed.placements.filter((p) => p.outcome !== 'placed')
+        .map((p) => `${p.discipline.name}: ${p.reasons.join('; ')}`);
+      amountCents = priceFor(chosen.length, setup.enginePrices, { isMember: true }).amountCents;
+    }
+  }
+
+  if (event.consentVersion) {
+    problems.push(...problemsWithConsent({ accepted: !!form.accepted,
+      acceptedName: form.acceptedName, version: event.consentVersion,
+      guardianName: how === 'guardian' ? form.acceptedName : '',
+      guardianContact: ctx.me.email }, need).map((t) => `${t[0].toUpperCase()}${t.slice(1)}.`));
+    if (need.guardian && how === 'self')
+      problems.push('Because of their age, a parent or guardian has to make this entry. '
+        + 'Ask them to sign in and enter you.');
+  }
+  if (!ready) problems.push(...reasons);
+
+  return { how, open, event, setup, mine, eventDate, relationship, competitor, need,
+           chosen, weightKg, heightCm, placements, amountCents, problems,
+           currency: setup.prices[0]?.currency ?? 'NZD' };
+}
+
+const memberEntryView = (ctx, plan, extra = {}) => V.memberEntryForm({
+  me: ctx.me, csrf: ctx.csrf, ...plan, ...extra });
+
+get('/me/events/:eventId/:personId', async (ctx) => {
+  ctx.requireActor();
+  const plan = await memberEntryPlan(ctx, {});
+  return ctx.send(200, memberEntryView(ctx, plan, { problems: [] }));
+});
+
+post('/me/events/:eventId/:personId', async (ctx) => {
+  ctx.requireActor();
+  const form = await ctx.form();
+  const plan = await memberEntryPlan(ctx, form);
+
+  if (plan.open.already_entered)
+    return ctx.redirect(`/me/events?done=${encodeURIComponent('Already entered.')}`);
+  if (plan.problems.length)
+    return ctx.send(422, memberEntryView(ctx, plan, { values: form }));
+
+  if (form.confirm !== 'yes')
+    return ctx.send(200, V.memberEntryPreview({ me: ctx.me, csrf: ctx.csrf, ...plan,
+      text: Object.fromEntries(Object.entries(form).filter(([k]) => k !== '_csrf' && k !== 'confirm')) }));
+
+  try {
+    await competition.enterCompetitor(ctx.me.accountId, plan.event.id, {
+      personId: ctx.params.personId, byFamily: true,
+      allowNoPlacements: !plan.setup.disciplines.length,
+      weightKg: plan.weightKg, heightCm: plan.heightCm, clubName: plan.open.home_name,
+      amountCents: plan.amountCents, currency: plan.currency,
+      placements: plan.placements.map((p) => ({
+        disciplineId: p.discipline.id, divisionId: p.division?.id ?? null,
+        placedBy: 'calculated', options: p.division?.options ?? {} })),
+      consent: plan.event.consentVersion ? {
+        version: plan.event.consentVersion, acceptedName: form.acceptedName, ip: ctx.ip,
+        guardian: plan.need.guardian
+          ? { name: form.acceptedName, relationship: plan.relationship ?? 'guardian',
+              contact: ctx.me.email }
+          : null } : null,
+    });
+  } catch (e) {
+    if (e instanceof Invalid)
+      return ctx.send(422, memberEntryView(ctx, { ...plan, problems: [e.message] }, { values: form }));
+    throw e;
+  }
+  return ctx.redirect(`/me/events?done=${encodeURIComponent(
+    `${plan.mine.person.first_name} is entered in ${plan.event.title}.`)}`);
 });
 
 get('/me/:personId', async (ctx) => {

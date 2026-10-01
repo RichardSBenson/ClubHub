@@ -176,6 +176,7 @@ function pathFor(pattern) {
     id: theirPerson ? theirPerson.id : '00000000-0000-0000-0000-000000000000',
     personId: theirPerson ? theirPerson.id : '00000000-0000-0000-0000-000000000000',
     linkId: theirLink.id,
+    eventId: theirEvent ? theirEvent.id : '00000000-0000-0000-0000-000000000000',
     // /p/:id/access — creating an account for somebody else's member is
     // exactly the kind of thing this probe exists to refuse.
     assetId: theirAsset.id,
@@ -224,6 +225,7 @@ const THEIR_WORDS = [
 const SCOPED = new Map([
   ['GET /search', 'everybody may search; the scoping is in the query'],
   ['GET /me', 'a person sees themselves and their own children; scoped by family.mayActFor'],
+  ['GET /me/events', 'what is open to the signed-in person and their children; scoped by memberEvents'],
 ]);
 
 console.log('\nEVERY ROUTE IS EITHER PUBLIC ON PURPOSE OR PROTECTED');
@@ -235,7 +237,7 @@ console.log('\nEVERY ROUTE IS EITHER PUBLIC ON PURPOSE OR PROTECTED');
     // scoped by path — an asset id carries its own federation — but it is
     // probed too, and the probe below is what proves it refuses.
     .filter((key) => !key.includes('/o/:slug') && !key.includes('/p/:id')
-                  && !key.includes('/a/:') && !key.includes('/me/:'));
+                  && !key.includes('/a/:') && !key.includes('/me/:') && !key.includes('/me/events/:'));
 
   ok(`all ${routes.length} routes are accounted for`,
     unclassified.length === 0,
@@ -303,11 +305,13 @@ console.log('\nSEARCHING FOR THEIRS FINDS NOTHING');
 
 console.log('\nTHEIR OWN HOME SHOWS NOTHING OF THEIRS');
 {
-  const r = await req('/me');
-  const leaked = THEIR_WORDS.filter((w) => r.html.includes(w));
-  ok('/me answers them, and contains nothing of theirs',
-    (r.status === 200 || r.status === 302) && !leaked.length,
-    `${r.status}${leaked.length ? ' leaked: ' + leaked.join(', ') : ''}`);
+  for (const path of ['/me', '/me/events']) {
+    const r = await req(path);
+    const leaked = THEIR_WORDS.filter((w) => r.html.includes(w));
+    ok(`${path} answers them, and contains nothing of theirs`,
+      (r.status === 200 || r.status === 302) && !leaked.length,
+      `${r.status}${leaked.length ? ' leaked: ' + leaked.join(', ') : ''}`);
+  }
 }
 
 console.log('\nAND NOTHING OF THEIRS CAN BE CHANGED');

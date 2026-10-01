@@ -1546,6 +1546,10 @@ export const entryList = ({ me, csrf, org, event, entries = [],
   const unplaced = entries.flatMap((e) =>
     e.selections.filter((s) => !s.division_id).map((s) => ({ entry: e, s })));
 
+  // An event with no disciplines (a grading, a seminar) has entries and no
+  // selections. They are named here, or the list counts people it never shows.
+  const attending = entries.filter((e) => !e.selections.length);
+
   const byDivision = {};
   for (const e of entries) {
     for (const s of e.selections) {
@@ -1568,6 +1572,19 @@ export const entryList = ({ me, csrf, org, event, entries = [],
     across ${Object.keys(byDivision).length}
     division${Object.keys(byDivision).length === 1 ? '' : 's'}${unplaced.length
       ? `, with ${unplaced.length} still to place` : ''}.</div>
+
+  ${attending.length ? `
+  <h2>Entered to attend</h2>
+  <table>
+    <thead><tr><th>Name</th><th class="hide-sm">Club</th><th class="hide-sm">Grade</th>
+      <th>Declaration</th></tr></thead>
+    <tbody>${attending.map((e) => `<tr>
+      <td><strong>${esc(e.first_name ?? '')} ${esc(e.last_name ?? '')}</strong>
+        <div class="muted">${esc(e.display_number ?? '')}${e.status === 'entered' ? '' : ' · ' + esc(e.status)}</div></td>
+      <td class="hide-sm">${esc(e.entered_for ?? e.club_name ?? '')}</td>
+      <td class="hide-sm">${e.grade ? esc(e.grade) : '<span class="muted">—</span>'}</td>
+      <td>${e.consents ? '<span class="tag ok">Signed</span>' : '<span class="muted">none</span>'}</td>
+    </tr>`).join('')}</tbody></table>` : ''}
 
   ${unplaced.length ? `
   <h2>Nobody has a division for these yet</h2>
@@ -2888,7 +2905,8 @@ export const myHome = ({ me, csrf, self, dependants = [] }) => page({
   <p class="sub">${esc(self.display_number ?? '')}</p>
   <div class="row">
     <div><h2>${esc(self.first_name)} ${esc(self.last_name)}</h2>
-      <p><a class="btn" href="/me/${esc(self.id)}">See and update my details</a></p></div>
+      <p><a class="btn" href="/me/${esc(self.id)}">See and update my details</a>
+        <a class="btn" href="/me/events">Events I can enter</a></p></div>
   </div>
   ${dependants.length ? `<h2>Children I look after</h2>
   <table><tbody>${dependants.map((d) => `<tr>
@@ -2951,3 +2969,86 @@ export const myPerson = ({ me, csrf, how, person, private: priv = {}, grade, mem
     <div class="actions"><button class="btn" type="submit">Save</button></div>
   </form>` });
 };
+
+const when = (instant, zone) => new Intl.DateTimeFormat('en-NZ', {
+  timeZone: zone || 'Pacific/Auckland', weekday: 'short', day: 'numeric', month: 'short',
+  year: 'numeric', hour: 'numeric', minute: '2-digit' }).format(new Date(instant));
+
+/** What is open to enter, and what has been entered, for me and my children. */
+export const myEvents = ({ me, csrf, groups = [], done }) => page({
+  title: 'Events', me, csrf, body: `
+  <h1>Events</h1>
+  <p class="sub"><a href="/me">Back to my details</a></p>
+  ${done ? `<div class="good">${esc(done)}</div>` : ''}
+  ${groups.length ? groups.map((g) => `
+  <h2>${g.how === 'self' ? 'For me' : `For ${esc(g.person.first_name)}`}</h2>
+  ${g.open.length ? `<table><thead><tr><th>When</th><th>Event</th><th></th></tr></thead><tbody>${
+    g.open.map((e) => `<tr>
+      <td>${esc(when(e.starts_at, e.host_timezone))}</td>
+      <td><strong>${esc(e.title)}</strong>
+        <div class="muted">${esc(e.host_name)}${e.venue_name ? ' · ' + esc(e.venue_name) : ''}${
+          e.entries_close ? ` · entries close ${esc(when(e.entries_close, e.host_timezone))}` : ''}</div></td>
+      <td><a class="btn" href="/me/events/${esc(e.id)}/${esc(g.person.id)}">Enter${
+        g.how === 'self' ? '' : ` ${esc(g.person.first_name)}`}</a></td></tr>`).join('')
+  }</tbody></table>` : '<p class="muted">Nothing is open for entries right now.</p>'}
+  ${g.entries.length ? `<h3>Already entered</h3><ul class="plain">${g.entries.map((x) => `<li>
+    <strong>${esc(x.title)}</strong> — ${esc(when(x.starts_at, x.host_timezone))}${
+      x.amount_cents != null ? ` · fee ${esc(cents(x.amount_cents, x.currency))}` : ''}</li>`).join('')}</ul>` : ''}
+  `).join('') : '<div class="note">This sign-in is not linked to a member record yet.</div>'}` });
+
+const consentBlock = ({ event, need, how, values = {} }) => event.consentVersion ? `
+  <fieldset><legend>${need.guardian ? 'A parent or guardian must agree' : 'Declaration'}</legend>
+    <div class="note" style="white-space:pre-wrap">${esc(event.consentText ?? '')}</div>
+    <label><input type="checkbox" name="accepted" value="1"${values.accepted ? ' checked' : ''}>
+      ${need.guardian
+        ? 'I am this person\'s parent or guardian and I agree to the declaration above.'
+        : how === 'guardian'
+          ? 'I agree to the declaration above on their behalf.'
+          : 'I agree to the declaration above.'}</label>
+    <label for="acceptedName">Type your full name to sign</label>
+    <input id="acceptedName" name="acceptedName" maxlength="120" value="${esc(values.acceptedName ?? '')}">
+  </fieldset>` : '';
+
+export const memberEntryForm = ({ me, csrf, how, open, event, setup, mine, eventDate,
+                                  need, problems = [], values = {} }) => page({
+  title: `Enter — ${event.title}`, me, csrf, body: `
+  <h1>${esc(event.title)}</h1>
+  <p class="sub">${esc(when(open.starts_at, open.host_timezone))} · ${esc(open.host_name)} ·
+    <a href="/me/events">Back</a></p>
+  <p>Entering <strong>${esc(mine.person.first_name)} ${esc(mine.person.last_name)}</strong>${
+    mine.grade ? ` (${esc(mine.grade.label)})` : ''}. Their age and grade come from the register.</p>
+  ${problems.length ? `<div class="bad"><ul>${problems.map((p) => `<li>${esc(p)}</li>`).join('')}</ul></div>` : ''}
+
+  <form method="post" action="/me/events/${esc(event.id)}/${esc(mine.person.id)}">
+    <input type="hidden" name="_csrf" value="${esc(csrf ?? '')}">
+    ${setup.disciplines.length ? `<fieldset><legend>What are they entering?</legend>
+      ${setup.disciplines.map((d) => `<label><input type="checkbox" name="disc_${esc(d.id)}"
+        value="1"${values[`disc_${d.id}`] ? ' checked' : ''}> ${esc(d.name)}${
+        d.summary ? ` <span class="muted">— ${esc(d.summary)}</span>` : ''}</label>`).join('')}
+      <div class="row">
+        <div><label for="weight">Weight (kg)</label>
+          <input id="weight" name="weight" type="number" step="0.01" min="0" max="400" value="${esc(values.weight ?? '')}"></div>
+        <div><label for="height">Height (cm)</label>
+          <input id="height" name="height" type="number" min="0" max="280" value="${esc(values.height ?? '')}"></div>
+      </div></fieldset>` : '<p class="muted">There is nothing to choose for this event — entering puts them on the list.</p>'}
+    ${consentBlock({ event, need, how, values })}
+    <div class="actions"><button class="btn" type="submit">Check my entry</button></div>
+  </form>` });
+
+export const memberEntryPreview = ({ me, csrf, how, open, event, mine, placements = [],
+                                     amountCents, currency, text = {} }) => page({
+  title: `Check — ${event.title}`, me, csrf, body: `
+  <h1>Check the entry</h1>
+  <p class="sub">${esc(event.title)} · <a href="/me/events">Cancel</a></p>
+  <div class="note"><strong>Nothing is saved until you confirm.</strong></div>
+  <p><strong>${esc(mine.person.first_name)} ${esc(mine.person.last_name)}</strong></p>
+  ${placements.length ? `<ul class="plain">${placements.map((p) => `<li>${esc(p.discipline.name)}${
+    p.division ? ` — <span class="tag ok">${esc(p.division.label)}</span>` : ''}</li>`).join('')}</ul>` : ''}
+  ${amountCents != null ? `<p>Entry fee: <strong>${esc(cents(amountCents, currency))}</strong>.
+    <span class="muted">Online payment is not switched on yet; the club will tell you how to pay.</span></p>` : ''}
+  <form method="post" action="/me/events/${esc(event.id)}/${esc(mine.person.id)}">
+    <input type="hidden" name="_csrf" value="${esc(csrf ?? '')}">
+    ${Object.entries(text).map(([k, v]) => `<input type="hidden" name="${esc(k)}" value="${esc(v)}">`).join('')}
+    <input type="hidden" name="confirm" value="yes">
+    <div class="actions"><button class="btn" type="submit">Confirm the entry</button></div>
+  </form>` });

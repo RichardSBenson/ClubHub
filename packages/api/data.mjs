@@ -1140,17 +1140,32 @@ export const competition = {
     weightKg = null, heightCm = null, yearsTraining = null, priorEvents = null,
     declaredGrade = null, clubName = null, placements = [],
     amountCents = null, currency = 'NZD', consent = null, notes = null,
+    byFamily = false, allowNoPlacements = false,
   }) {
     const ev = await one('select organisation_id from event where id = $1', [eventId]);
     if (!ev) throw new NotFound('Event');
-    // A club enters its own people, so the role is checked where they are
-    // being entered FROM, not at the host organisation — a dojo sensei has no
-    // grant at the federation running the tournament.
-    await assertRole(actor, enteredForOrg ?? ev.organisation_id, REGISTER);
+    if (byFamily) {
+      // A member, or the parent of a minor, entering somebody they are
+      // entitled to act for. The right is the family link, not a role at any
+      // organisation, and the event must be one that is open to that person.
+      if (!personId) throw new Invalid('An entry needs a person');
+      await family.assertMayActFor(actor, personId);
+      const open = await memberEvents.get(personId, eventId);
+      if (!open) throw new NotFound('Event');
+      enteredForOrg = open.home_org;
+    } else {
+      // A club enters its own people, so the role is checked where they are
+      // being entered FROM, not at the host organisation — a dojo sensei has no
+      // grant at the federation running the tournament.
+      await assertRole(actor, enteredForOrg ?? ev.organisation_id, REGISTER);
+    }
 
     if (!personId && !guest)
       throw new Invalid('An entry needs either a person or a guest');
-    if (!placements.length)
+    // An event with no disciplines (a grading, a seminar) is entered by turning
+    // up, so there is nothing to place. A competition with disciplines still
+    // needs at least one chosen.
+    if (!placements.length && !(allowNoPlacements))
       throw new Invalid('Nothing has been entered');
 
     const client = await pool.connect();
@@ -2200,7 +2215,7 @@ export const myself = {
     if (!person) throw new NotFound('Person');
     const priv = await one(`select address_line, suburb, city, postcode, emergency_name,
       emergency_phone, medical_notes from person_private where person_id=$1`, [personId]) ?? {};
-    const grade = await one(`select label, awarded_on::text as awarded_on
+    const grade = await one(`select label, rank_order, awarded_on::text as awarded_on
       from person_current_grade where person_id=$1`, [personId]);
     const { rows: memberships } = await pool.query(`
       select o.name, o.slug, a.role, a.status, a.paid_until::text as paid_until
@@ -2252,6 +2267,72 @@ export const myself = {
       await client.query('commit');
     } catch (e) { await client.query('rollback'); throw e; }
     finally { client.release(); }
+  },
+};
+
+// ---------------------------------------------------------------------------
+// what a member may enter
+//
+// The events a person's own club and the organisations above it have opened for
+// entries, filtered by the same visibility rules the public calendar uses. A
+// member is offered nothing they could not see, and the check made when they
+// submit is this same query, not a copy of it.
+// ---------------------------------------------------------------------------
+
+const ENTERABLE_KINDS = ['grading', 'tournament', 'fight_night', 'seminar', 'camp'];
+
+async function memberEventsQuery(personId, eventId = null) {
+    const { rows } = await pool.query(`
+      select e.id, e.title, e.slug, e.kind, e.summary, e.starts_at, e.venue_name,
+             e.entries_open, e.entries_close, e.visibility,
+             o.name as host_name, o.timezone as host_timezone,
+             club.id as home_org, club.name as home_name,
+             exists (select 1 from event_entry x
+                      where x.event_id = e.id and x.person_id = $1
+                        and x.status in ('entered','confirmed')) as already_entered
+      from affiliation a
+      join organisation club on club.id = a.organisation_id
+      join organisation o on club.path <@ o.path
+      join event e on e.organisation_id = o.id
+      left join person_current_grade g on g.person_id = a.person_id
+      where a.person_id = $1 and a.ends is null and a.role = 'member'
+        and a.status = 'active'
+        and e.status = 'published'
+        and (e.organisation_id = club.id or e.publish_down)
+        and e.kind = any($3::event_kind[])
+        and e.starts_at > now()
+        and (e.entries_open is null or e.entries_open <= now())
+        and (e.entries_close is null or e.entries_close > now())
+        and (e.visibility in ('public','members')
+             or (e.visibility = 'own_org' and e.organisation_id = club.id)
+             or (e.visibility = 'by_grade'
+                 and coalesce(g.rank_order, -1) >= coalesce(e.min_rank_order, 0)))
+        and ($2::uuid is null or e.id = $2)
+      order by e.starts_at`, [personId, eventId, ENTERABLE_KINDS]);
+    return rows;
+}
+
+export const memberEvents = {
+  /** What is open to this person to enter, and not already entered. */
+  async openFor(personId) {
+    return (await memberEventsQuery(personId)).filter((e) => !e.already_entered);
+  },
+
+  /** One event, if it is open to this person. */
+  async get(personId, eventId) {
+    return (await memberEventsQuery(personId, eventId))[0] ?? null;
+  },
+
+  /** What they have already entered. */
+  async entriesOf(personId) {
+    const { rows } = await pool.query(`
+      select x.id, x.status, x.amount_cents, x.currency, e.title, e.starts_at,
+             e.kind, o.timezone as host_timezone
+      from event_entry x join event e on e.id = x.event_id
+      join organisation o on o.id = e.organisation_id
+      where x.person_id = $1 and x.status in ('entered','confirmed')
+      order by e.starts_at`, [personId]);
+    return rows;
   },
 };
 
