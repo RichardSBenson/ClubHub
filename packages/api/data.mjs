@@ -15,6 +15,9 @@ import { problemsWithPerson, problemsWithMembership }
 import { payeeFor, groupByPayee, problemsWithPaymentRequest, problemsWithPayment, KINDS as PAY_KINDS }
   from '../core/domain/payments.mjs';
 import { isTestProvider } from '../infrastructure/payments/providers.mjs';
+import { PERIODS, extendedUntil, standing, feeFor, problemsWithFee, problemsWithExemption,
+         MANUAL_METHODS } from '../core/domain/membership.mjs';
+import { centsFrom } from '../core/domain/payments.mjs';
 import { problemsWithMessage, senderFor, chooseRecipients, renderBody }
   from '../core/domain/messaging.mjs';
 import crypto from 'node:crypto';
@@ -3255,7 +3258,7 @@ export const emailPreferences = {
 
 const PAYMENT_SELECT = `
   select py.id, py.organisation_id, py.person_id, py.amount_cents, py.currency, py.status,
-         py.method, py.detail, py.provider, py.provider_ref, py.created_at, py.settled_at,
+         py.method, py.detail, py.provider, py.provider_ref, py.created_at, py.settled_at, py.receipt_no,
          po.name as payee_name,
          nullif(trim(concat_ws(' ', p.first_name, p.last_name)), '') as person_name,
          p.display_number,
@@ -3266,22 +3269,60 @@ const PAYMENT_SELECT = `
   join organisation po on po.id = py.organisation_id
   left join person p on p.id = py.person_id`;
 
-async function settle(paymentId, ok, detail, { actor = null, ref = undefined } = {}) {
+/** A receipt number for cash: R-2026-0007. One counter per organisation per year. */
+async function nextReceipt(orgId) {
+  const r = await one(`
+    insert into receipt_counter (organisation_id, year, last_number)
+    values ($1, extract(year from now())::int, 1)
+    on conflict (organisation_id, year) do update set last_number = receipt_counter.last_number + 1
+    returning year, last_number`, [orgId]);
+  return `R-${r.year}-${String(r.last_number).padStart(4, '0')}`;
+}
+
+/**
+ * Carry a membership on. From the later of today and where it already runs to,
+ * so paying early loses nothing and paying late is not backdated.
+ */
+async function renewMembership(affiliationId, months) {
+  const a = await one(`select a.id, a.paid_until::text as paid_until, a.status,
+      to_char((now() at time zone o.timezone)::date, 'YYYY-MM-DD') as today
+    from affiliation a join organisation o on o.id = a.organisation_id where a.id = $1`, [affiliationId]);
+  if (!a) return null;
+  const until = extendedUntil(a.paid_until, a.today, months);
+  await pool.query(`update affiliation set paid_until = $2::date,
+      status = case when status = 'lapsed' then 'active' else status end where id = $1`,
+    [affiliationId, until]);
+  return until;
+}
+
+async function settle(paymentId, ok, detail, { actor = null, ref = undefined, manual = null } = {}) {
   const row = await one(`
     update payment set status = $2, detail = $3, updated_at = now(),
            settled_at = case when $2 = 'succeeded' then now() else settled_at end,
-           provider_ref = coalesce($4, provider_ref)
-     where id = $1 and status in ('awaiting','pending')
-     returning organisation_id, person_id, amount_cents`,
-    [paymentId, ok ? 'succeeded' : 'failed', detail, ref ?? null]);
+           provider_ref = coalesce($4, provider_ref),
+           method = coalesce($5, method), taken_by = coalesce($6, taken_by),
+           receipt_no = coalesce($7, receipt_no), provider = coalesce($8, provider)
+     where id = $1 and status in ('awaiting','pending','failed')
+     returning organisation_id, person_id, amount_cents, receipt_no`,
+    [paymentId, ok ? 'succeeded' : 'failed', detail, ref ?? null,
+     manual?.method ?? null, manual ? actor : null, manual?.receiptNo ?? null, manual ? 'manual' : null]);
   if (!row) return false;
-  if (ok) await pool.query(`update event_entry set paid = true, updated_at = now()
-    where id in (select event_entry_id from payment_line where payment_id = $1)`, [paymentId]);
+  let renewed = [];
+  if (ok) {
+    await pool.query(`update event_entry set paid = true, updated_at = now()
+      where id in (select event_entry_id from payment_line where payment_id = $1)`, [paymentId]);
+    const lines = await q(`select renews_affiliation_id as id, renews_months as months
+      from payment_line where payment_id = $1 and renews_affiliation_id is not null`, [paymentId]);
+    for (const l of lines) renewed.push(await renewMembership(l.id, l.months));
+  }
   await pool.query(`
     insert into audit_log (account_id, organisation_id, action, entity, entity_id, before, after)
     values ($1,$2,$3,'payment',$4,null,$5)`,
-    [actor, row.organisation_id, ok ? 'payment_made' : 'payment_failed', paymentId,
-     JSON.stringify({ amountCents: row.amount_cents, personId: row.person_id })]);
+    [actor, row.organisation_id,
+     manual ? 'payment_recorded' : ok ? 'payment_made' : 'payment_failed', paymentId,
+     JSON.stringify({ amountCents: row.amount_cents, personId: row.person_id,
+       ...(manual ? { method: manual.method, receipt: row.receipt_no } : {}),
+       ...(renewed.length ? { paidUntil: renewed[0] } : {}) })]);
   return true;
 }
 
@@ -3358,7 +3399,10 @@ export const payments = {
       from payment py join payment_line l on l.payment_id = py.id
       where py.organisation_id = $1 and py.status in ('succeeded','pending','awaiting')
       group by l.kind, py.status`, [orgId]);
-    return { rows, totals };
+    const methods = await q(`select py.method, sum(py.amount_cents)::int as cents
+      from payment py where py.organisation_id = $1 and py.status = 'succeeded' and py.method is not null
+      group by py.method order by cents desc`, [orgId]);
+    return { rows, totals, methods };
   },
 
   /**
@@ -3385,6 +3429,11 @@ export const payments = {
     try { payeeId = payeeFor(input.kind, { clubId: home.id, federationId: root?.id }); }
     catch (e) { throw new Invalid(e.message); }
 
+    if (input.received) {
+      if (!MANUAL_METHODS[input.received]) throw new Invalid('Choose how it was paid.');
+      const may = await one('select has_role_at($1,$2,$3) as ok', [actor, payeeId, REGISTER]);
+      if (!may?.ok) throw new Invalid('This money belongs to the federation, so a dojo cannot record it as received. Ask for it instead.');
+    }
     const description = input.description || PAY_KINDS[input.kind].label;
     const client = await pool.connect();
     try {
@@ -3401,8 +3450,28 @@ export const payments = {
         [actor, payeeId, pay.id, JSON.stringify({ kind: input.kind, amountCents: input.amountCents,
           person: `${person.first_name} ${person.last_name}`, description })]);
       await client.query('commit');
+      if (input.received) await payments.recordManual(actor, pay.id, input.received);
       return pay;
     } catch (e) { await client.query('rollback'); throw e; } finally { client.release(); }
+  },
+
+  /**
+   * The dojo has been handed the money — cash, or a transfer into its account.
+   * Only somebody who looks after the organisation being paid can say so, and
+   * it is numbered, attributed and in the history: a cash tin with no record is
+   * the thing treasurers lose sleep over.
+   */
+  async recordManual(actor, paymentId, method) {
+    if (!MANUAL_METHODS[method]) throw new Invalid('Choose how it was paid.');
+    const pay = await one('select organisation_id, status from payment where id=$1', [paymentId]);
+    if (!pay) throw new NotFound('Payment');
+    await assertRole(actor, pay.organisation_id, REGISTER);
+    if (!['pending', 'failed'].includes(pay.status)) throw new Invalid('This has already been dealt with.');
+    const receiptNo = await nextReceipt(pay.organisation_id);
+    const done = await settle(paymentId, true, `${MANUAL_METHODS[method]} received.`,
+      { actor, manual: { method, receiptNo } });
+    if (!done) throw new Invalid('This has already been dealt with.');
+    return one('select * from payment where id=$1', [paymentId]);
   },
 
   /** Take back a request nobody has paid. */
@@ -3412,5 +3481,169 @@ export const payments = {
       where id=$1 and organisation_id=$2 and status in ('pending','failed') returning id`,
       [paymentId, orgId]);
     if (!row) throw new NotFound('Payment');
+  },
+};
+
+// ---------------------------------------------------------------------------
+// fees and renewals
+//
+// Each dojo sets its own prices. Asking for a renewal creates an ordinary
+// payment — to the dojo — whose line says which membership it renews and for
+// how long. However it is paid (online, cash, transfer), paying moves the
+// membership on. Somebody marked exempt is never asked.
+// ---------------------------------------------------------------------------
+
+const clubOnly = async (orgId) => {
+  const org = await one('select * from organisation where id=$1', [orgId]);
+  if (!org) throw new NotFound('Organisation');
+  if (org.type !== 'club') throw new Invalid('Fees are set by each club.');
+  return org;
+};
+
+const feeRows = (orgId) => q(`select id, label, amount_cents, currency, period, applies_to,
+        to_char(effective_from,'YYYY-MM-DD') as effective_from,
+        to_char(effective_to,'YYYY-MM-DD') as effective_to
+      from fee_schedule where organisation_id = $1
+      order by period, applies_to, effective_from desc`, [orgId]);
+
+export const fees = {
+  /** Anybody who runs renewals may see the prices; setting them is for administrators. */
+  async list(actor, orgId) {
+    await assertRole(actor, orgId, REGISTER);
+    await clubOnly(orgId);
+    return feeRows(orgId);
+  },
+
+  async save(actor, orgId, input) {
+    await assertRole(actor, orgId, MANAGE);
+    const org = await clubOnly(orgId);
+    const problems = problemsWithFee(input, centsFrom);
+    if (problems.length) throw new Invalid(problems.join(' '));
+    const today = (await one(`select to_char((now() at time zone $1)::date,'YYYY-MM-DD') as d`, [org.timezone])).d;
+    const from = input.effectiveFrom || today;
+    // A new price for the same people and period replaces the old one from its
+    // start date; the old one stops the day before, so there is never an
+    // ambiguity about which applies.
+    await pool.query(`update fee_schedule set effective_to = ($4::date - 1)
+      where organisation_id=$1 and applies_to=$2 and period=$3
+        and effective_from < $4::date and (effective_to is null or effective_to >= $4::date)`,
+      [orgId, input.appliesTo, input.period, from]);
+    const row = await one(`insert into fee_schedule (organisation_id, label, amount_cents, period,
+        applies_to, effective_from) values ($1,$2,$3,$4,$5,$6::date) returning id`,
+      [orgId, input.label, centsFrom(input.amountText), input.period, input.appliesTo, from]);
+    await pool.query(`insert into audit_log (account_id, organisation_id, action, entity, entity_id, after)
+      values ($1,$2,'fee_set','fee_schedule',$3,$4)`, [actor, orgId, row.id,
+      JSON.stringify({ label: input.label, amountCents: centsFrom(input.amountText), period: input.period,
+        appliesTo: input.appliesTo })]);
+    return row;
+  },
+
+  async remove(actor, orgId, feeId) {
+    await assertRole(actor, orgId, MANAGE);
+    const row = await one(`delete from fee_schedule where id=$1 and organisation_id=$2
+      returning label, amount_cents`, [feeId, orgId]);
+    if (!row) throw new NotFound('Price');
+    await pool.query(`insert into audit_log (account_id, organisation_id, action, entity, after)
+      values ($1,$2,'fee_removed','fee_schedule',$3)`, [actor, orgId,
+      JSON.stringify({ label: row.label, amountCents: row.amount_cents })]);
+  },
+};
+
+export const renewals = {
+  /** Everybody at the club, and where their fees stand. */
+  async roster(actor, orgId) {
+    await assertRole(actor, orgId, REGISTER);
+    const org = await clubOnly(orgId);
+    const rows = await q(`
+      select a.id as affiliation_id, a.role, a.status, a.fee_exempt, a.fee_exempt_reason,
+             a.paid_until::text as paid_until, p.id as person_id, p.display_number,
+             nullif(trim(concat_ws(' ', p.first_name, p.last_name)), '') as name,
+             case when p.date_of_birth is null then null
+                  else date_part('year', age((now() at time zone $2)::date, p.date_of_birth))::int end as age,
+             exists (select 1 from payment_line l join payment py on py.id = l.payment_id
+                      where l.renews_affiliation_id = a.id and py.status in ('pending','awaiting','failed')) as asked
+      from affiliation a join person p on p.id = a.person_id
+      where a.organisation_id = $1 and a.ends is null
+        and a.role in ('member','instructor','assistant') and a.status in ('active','lapsed','pending')
+      order by p.last_name, p.first_name`, [orgId, org.timezone]);
+    const today = (await one(`select to_char((now() at time zone $1)::date,'YYYY-MM-DD') as d`, [org.timezone])).d;
+    return { today, rows: rows.map((r) => ({ ...r, standing: standing({ paidUntil: r.paid_until, exempt: r.fee_exempt }, today) })) };
+  },
+
+  /**
+   * Ask a set of members to renew, at the dojo's own price for each. Nothing is
+   * charged by asking. Returns who was asked and who was not, and why.
+   */
+  async ask(actor, orgId, { affiliationIds, period, received = null }) {
+    await assertRole(actor, orgId, REGISTER);
+    await clubOnly(orgId);
+    if (!PERIODS[period] || !PERIODS[period].months) throw new Invalid('Choose how long to renew for.');
+    if (!affiliationIds?.length) throw new Invalid('Tick the people to ask.');
+    if (received && !MANUAL_METHODS[received]) throw new Invalid('Choose how it was paid.');
+
+    const { today, rows } = await renewals.roster(actor, orgId);
+    const schedule = await feeRows(orgId);
+    const chosen = rows.filter((r) => affiliationIds.includes(r.affiliation_id));
+    let asked = 0; const skipped = [];
+    for (const r of chosen) {
+      if (r.fee_exempt) { skipped.push({ name: r.name, reason: 'not charged' }); continue; }
+      if (r.asked) { skipped.push({ name: r.name, reason: 'already asked' }); continue; }
+      const fee = feeFor(schedule, { ageYears: r.age, period, today });
+      if (!fee) { skipped.push({ name: r.name, reason: `no ${r.age != null && r.age < 18 ? 'junior' : 'adult'} price for “${PERIODS[period].label.toLowerCase()}”` }); continue; }
+      const client = await pool.connect();
+      try {
+        await client.query('begin');
+        const { rows: [pay] } = await client.query(`insert into payment (organisation_id, person_id,
+            amount_cents, currency, status, requested_by) values ($1,$2,$3,$4,'pending',$5) returning id`,
+          [orgId, r.person_id, fee.amount_cents, fee.currency ?? 'NZD', actor]);
+        await client.query(`insert into payment_line (payment_id, kind, description, amount_cents,
+            renews_affiliation_id, renews_months) values ($1,'dojo_fee',$2,$3,$4,$5)`,
+          [pay.id, `${fee.label} — membership ${PERIODS[period].label.toLowerCase()}`, fee.amount_cents,
+           r.affiliation_id, PERIODS[period].months]);
+        await client.query(`insert into audit_log (account_id, organisation_id, action, entity, entity_id, after)
+          values ($1,$2,'payment_requested','payment',$3,$4)`, [actor, orgId, pay.id,
+          JSON.stringify({ kind: 'dojo_fee', amountCents: fee.amount_cents, person: r.name,
+            description: `${fee.label} renewal` })]);
+        await client.query('commit'); asked++;
+        if (received) await payments.recordManual(actor, pay.id, received);
+      } catch (e) { await client.query('rollback'); throw e; } finally { client.release(); }
+    }
+    return { asked, skipped };
+  },
+
+  /** The dojo decides somebody does not pay — and says why. */
+  async setExemption(actor, orgId, affiliationId, input) {
+    await assertRole(actor, orgId, MANAGE);
+    await clubOnly(orgId);
+    const problems = problemsWithExemption(input);
+    if (problems.length) throw new Invalid(problems.join(' '));
+    const row = await one(`update affiliation set fee_exempt=$3, fee_exempt_reason=$4
+      where id=$1 and organisation_id=$2 and ends is null returning person_id`,
+      [affiliationId, orgId, input.exempt, input.exempt ? input.reason : null]);
+    if (!row) throw new NotFound('Member');
+    // Anything already asked of them is withdrawn: they were never to be asked.
+    if (input.exempt) await pool.query(`update payment set status='void', updated_at=now()
+      where status in ('pending','failed') and id in
+        (select payment_id from payment_line where renews_affiliation_id = $1)`, [affiliationId]);
+    const who = await one(`select nullif(trim(concat_ws(' ', first_name, last_name)), '') as name
+      from person where id=$1`, [row.person_id]);
+    await pool.query(`insert into audit_log (account_id, organisation_id, action, entity, entity_id, after)
+      values ($1,$2,'fee_exemption','person',$3,$4)`, [actor, orgId, row.person_id,
+      JSON.stringify({ exempt: input.exempt, reason: input.reason || null, person: who?.name })]);
+  },
+
+  /** An exempt member's membership carried on a year, with no payment. */
+  async carryOn(actor, orgId, affiliationId) {
+    await assertRole(actor, orgId, REGISTER);
+    await clubOnly(orgId);
+    const a = await one(`select a.id, a.person_id, a.fee_exempt from affiliation a
+      where a.id=$1 and a.organisation_id=$2 and a.ends is null`, [affiliationId, orgId]);
+    if (!a) throw new NotFound('Member');
+    if (!a.fee_exempt) throw new Invalid('Only somebody who is not charged can be renewed without paying.');
+    const until = await renewMembership(affiliationId, 12);
+    await pool.query(`insert into audit_log (account_id, organisation_id, action, entity, entity_id, after)
+      values ($1,$2,'membership_carried_on','person',$3,$4)`, [actor, orgId, a.person_id,
+      JSON.stringify({ paidUntil: until })]);
+    return until;
   },
 };

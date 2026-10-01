@@ -154,6 +154,19 @@ export function describe(entry) {
       return `took a payment of ${((a.amountCents ?? 0) / 100).toLocaleString('en-NZ', { style: 'currency', currency: 'NZD' })}`;
     case 'payment_failed':
       return 'a payment did not go through';
+    case 'payment_recorded':
+      return `recorded ${((a.amountCents ?? 0) / 100).toLocaleString('en-NZ', { style: 'currency', currency: 'NZD' })} received by ${
+        a.method === 'cash' ? 'cash' : 'bank transfer'}${a.receipt ? ` (receipt ${a.receipt})` : ''}`
+        + (a.paidUntil ? `, fees now paid to ${a.paidUntil}` : '');
+    case 'fee_set':
+      return `set the price ${a.label ? quote(a.label) : ''} at ${((a.amountCents ?? 0) / 100).toLocaleString('en-NZ', { style: 'currency', currency: 'NZD' })}`.trim();
+    case 'fee_removed':
+      return `removed the price ${a.label ? quote(a.label) : ''}`.trim();
+    case 'fee_exemption':
+      return a.exempt ? `stopped charging ${a.person ?? 'a member'} fees (${a.reason ?? 'no reason given'})`
+                      : `started charging ${a.person ?? 'a member'} fees again`;
+    case 'membership_carried_on':
+      return `carried a membership on to ${a.paidUntil ?? 'a later date'} with no payment`;
     case 'email_preference':
       return a.optedOut ? 'a member stopped getting announcement emails'
                         : 'a member started getting announcement emails again';
@@ -240,6 +253,11 @@ export const ACTIONS = Object.freeze([
   ['payment_requested', 'Payment asked for'],
   ['payment_made', 'Payment made'],
   ['payment_failed', 'Payment failed'],
+  ['payment_recorded', 'Cash or transfer recorded'],
+  ['fee_set', 'Price set'],
+  ['fee_removed', 'Price removed'],
+  ['fee_exemption', 'Fees waived or restored'],
+  ['membership_carried_on', 'Membership carried on'],
   ['email_preference', 'Email preference changed'],
   ['event_publish_up_asked', 'Event listing requested'],
   ['event_publish_up', 'Event listing decided'],

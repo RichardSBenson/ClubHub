@@ -283,6 +283,7 @@ export function rail({ org, vocabulary = {}, can = {}, path = '' }) {
     can.register && link(`${base}/members/new`, 'Add a member'),
     can.register && link(`${base}/members/import`, 'Import a roll'),
     can.register && link(`${base}/grading`, vocabulary.grading ?? 'Grading'),
+    isClub && can.register && link(`${base}/renewals`, 'Renewals'),
     can.manage && link(`${base}/messages`, 'Messages'),
     can.manage && link(`${base}/payments`, 'Payments'),
   ])}
@@ -3061,6 +3062,8 @@ export const memberEntryPreview = ({ me, csrf, how, open, event, mine, placement
 // messages
 // ---------------------------------------------------------------------------
 
+import { PERIODS as FEE_PERIODS, CATEGORIES as FEE_CATEGORIES, EXEMPT_REASONS, MANUAL_METHODS,
+         STANDING_WORDS } from '../core/domain/membership.mjs';
 import { KINDS as PAY_KINDS, ASKABLE as PAY_ASKABLE, METHODS as PAY_METHODS, STATUSES as PAY_STATUSES }
   from '../core/domain/payments.mjs';
 
@@ -3181,6 +3184,7 @@ export const unsubscribePage = ({ csrf, token, first, optedOut, changed }) => pa
 // payments
 // ---------------------------------------------------------------------------
 
+const FEE_METHOD_LABEL = { card: 'Card', bank: 'Internet banking', direct_debit: 'Direct debit' };
 const payStatus = (st) => esc(PAY_STATUSES[st] ?? st);
 const testBanner = (test) => test ? `<div class="note"><strong>Test payments.</strong>
   No money moves. Card 4000 0000 0000 0002 is declined; any other number is accepted.</div>` : '';
@@ -3232,7 +3236,7 @@ export const payScreen = ({ me, csrf, payment, test = false, error, done }) => {
   : `<div class="good"><strong>${payStatus(payment.status)}.</strong> ${esc(payment.detail ?? '')}</div>`}` });
 };
 
-export const paymentsScreen = ({ me, csrf, org, rows = [], totals = [], test = false,
+export const paymentsScreen = ({ me, csrf, org, rows = [], totals = [], methods = [], test = false,
                                  values = null, error, done }) => {
   const v = (k) => esc(values?.[k] ?? '');
   const sum = (status) => totals.filter((t) => t.status === status).reduce((n, t) => n + t.cents, 0);
@@ -3249,6 +3253,7 @@ export const paymentsScreen = ({ me, csrf, org, rows = [], totals = [], test = f
     <div><strong>${esc(cents(sum('awaiting')))}</strong> waiting for the bank</div>
     <div><strong>${esc(cents(sum('pending')))}</strong> asked for, not yet paid</div>
   </div>
+  ${methods.length ? `<p class="muted">Paid so far: ${methods.map((m) => `${esc((MANUAL_METHODS[m.method] ?? FEE_METHOD_LABEL[m.method] ?? m.method).toLowerCase())} ${esc(cents(m.cents))}`).join(' · ')}</p>` : ''}
   ${totals.some((t) => t.status === 'succeeded') ? `<table><thead><tr><th>Paid, by kind</th><th>Payments</th><th>Total</th></tr></thead><tbody>${
     totals.filter((t) => t.status === 'succeeded').map((t) => `<tr><td>${esc(PAY_KINDS[t.kind]?.label ?? t.kind)}</td>
     <td>${t.n}</td><td>${esc(cents(t.cents))}</td></tr>`).join('')}</tbody></table>` : ''}
@@ -3267,7 +3272,12 @@ export const paymentsScreen = ({ me, csrf, org, rows = [], totals = [], test = f
     </div>
     <label for="description">What it is <span class="muted">(optional, e.g. “Gi, size 150”)</span></label>
     <input id="description" name="description" maxlength="140" value="${v('description')}">
-    <div class="actions"><button class="btn" type="submit">Ask for payment</button></div>
+    <label for="received">Already handed over?</label>
+    <select id="received" name="received">
+      <option value="">No — ask them to pay</option>
+      ${Object.entries(MANUAL_METHODS).map(([k, l]) => `<option value="${k}"${values?.received === k ? ' selected' : ''}>Yes — ${esc(l.toLowerCase())}</option>`).join('')}
+    </select>
+    <div class="actions"><button class="btn" type="submit">Save</button></div>
   </form>
 
   <h2>Payments</h2>
@@ -3277,8 +3287,99 @@ export const paymentsScreen = ({ me, csrf, org, rows = [], totals = [], test = f
       <td>${esc(r.person_name ?? '—')}</td>
       <td>${r.lines.map((l) => esc(l.description)).join('<br>')}</td>
       <td>${esc(cents(r.amount_cents, r.currency))}</td>
-      <td>${payStatus(r.status)}</td>
-      <td>${['pending', 'failed'].includes(r.status) ? `<form method="post" action="/o/${esc(org.slug)}/payments/${esc(r.id)}/cancel">
+      <td>${payStatus(r.status)}${r.method && r.status === 'succeeded'
+          ? ` <span class="muted">· ${esc((MANUAL_METHODS[r.method] ?? FEE_METHOD_LABEL[r.method] ?? r.method).toLowerCase())}${
+              r.receipt_no ? ` · ${esc(r.receipt_no)}` : ''}</span>` : ''}</td>
+      <td>${['pending', 'failed'].includes(r.status) ? `<form method="post" action="/o/${esc(org.slug)}/payments/${esc(r.id)}/received" style="display:inline">
+        <input type="hidden" name="_csrf" value="${esc(csrf ?? '')}">
+        <button class="btn quiet" name="method" value="cash">Paid cash</button>
+        <button class="btn quiet" name="method" value="transfer">Paid by transfer</button></form>
+        <form method="post" action="/o/${esc(org.slug)}/payments/${esc(r.id)}/cancel" style="display:inline">
         <input type="hidden" name="_csrf" value="${esc(csrf ?? '')}"><button class="btn quiet">Cancel</button></form>` : ''}</td>
     </tr>`).join('')}</tbody></table>` : '<p class="muted">Nothing yet.</p>'}` });
+};
+
+
+// ---------------------------------------------------------------------------
+// renewals
+// ---------------------------------------------------------------------------
+
+const STANDING_TAG = { exempt: 'ok', current: 'ok', due: 'warn', overdue: 'no', unpaid: 'no' };
+
+export const renewalsScreen = ({ me, csrf, org, today, rows = [], prices = [], canSetPrices = false,
+                                 canExempt = false, values = null, error, done, notes = [] }) => {
+  const v = (k) => esc(values?.[k] ?? '');
+  const periods = [...new Set(prices.map((f) => f.period))].filter((p) => FEE_PERIODS[p].months);
+  const due = rows.filter((r) => ['overdue', 'due', 'unpaid'].includes(r.standing) && !r.asked);
+  return page({ title: `${org.name} — renewals`, me, csrf, body: `
+  <h1>Renewals</h1>
+  <p class="sub">${esc(org.name)} sets its own prices. Asking for a renewal charges nobody —
+    it puts a payment in front of them. However it is paid, online or in cash,
+    paying moves their membership on.</p>
+  ${done ? `<div class="good">${esc(done)}</div>` : ''}
+  ${error ? `<div class="bad">${esc(error)}</div>` : ''}
+  ${notes.length ? `<div class="note">${notes.map(esc).join('<br>')}</div>` : ''}
+
+  <h2>Prices</h2>
+  ${prices.length ? `<table><thead><tr><th>Price</th><th>For</th><th>How often</th><th>Amount</th><th>From</th><th></th></tr></thead><tbody>${
+    prices.map((f) => `<tr><td>${esc(f.label)}</td><td>${esc(FEE_CATEGORIES[f.applies_to] ?? f.applies_to)}</td>
+      <td>${esc(FEE_PERIODS[f.period]?.label ?? f.period)}</td><td>${esc(cents(f.amount_cents, f.currency))}</td>
+      <td>${esc(f.effective_from)}${f.effective_to ? ` to ${esc(f.effective_to)}` : ''}</td>
+      <td>${canSetPrices ? `<form method="post" action="/o/${esc(org.slug)}/renewals/fees/${esc(f.id)}/remove">
+        <input type="hidden" name="_csrf" value="${esc(csrf ?? '')}"><button class="btn quiet">Remove</button></form>` : ''}</td></tr>`).join('')}</tbody></table>`
+    : '<div class="note">No prices set yet. Add the first one below, then ask people to renew.</div>'}
+  ${canSetPrices ? `<form method="post" action="/o/${esc(org.slug)}/renewals/fees">
+    <input type="hidden" name="_csrf" value="${esc(csrf ?? '')}">
+    <div class="row">
+      <div><label for="label">Name</label><input id="label" name="label" required maxlength="80" placeholder="Adult annual" value="${v('label')}"></div>
+      <div><label for="appliesTo">For</label><select id="appliesTo" name="appliesTo">${Object.entries(FEE_CATEGORIES).map(([k, l]) =>
+        `<option value="${k}"${values?.appliesTo === k ? ' selected' : ''}>${esc(l)}</option>`).join('')}</select></div>
+      <div><label for="period">How often</label><select id="period" name="period">${Object.entries(FEE_PERIODS).map(([k, l]) =>
+        `<option value="${k}"${values?.period === k ? ' selected' : ''}>${esc(l.label)}</option>`).join('')}</select></div>
+      <div><label for="amount">Amount (NZD)</label><input id="amount" name="amount" required inputmode="decimal" maxlength="12" value="${v('amountText')}"></div>
+      <div><label for="effectiveFrom">From <span class="muted">(optional)</span></label><input id="effectiveFrom" name="effectiveFrom" maxlength="10" placeholder="${esc(today)}" value="${v('effectiveFrom')}"></div>
+    </div>
+    <p class="muted">A new price for the same people and period takes over from its start date; the old one ends the day before.</p>
+    <div class="actions"><button class="btn" type="submit">Save price</button></div>
+  </form>` : ''}
+
+  <h2>Who is due</h2>
+  <form method="post" action="/o/${esc(org.slug)}/renewals">
+    <input type="hidden" name="_csrf" value="${esc(csrf ?? '')}">
+    <table><thead><tr><th></th><th>Member</th><th>Fees run to</th><th></th><th></th></tr></thead><tbody>${
+    rows.map((r) => `<tr>
+      <td>${r.standing === 'exempt' || r.asked ? '' : `<input type="checkbox" name="pick_${esc(r.affiliation_id)}" value="1"${
+        ['overdue', 'due', 'unpaid'].includes(r.standing) ? ' checked' : ''} aria-label="Ask ${esc(r.name)}">`}</td>
+      <td><a href="/p/${esc(r.person_id)}">${esc(r.name)}</a>
+        <span class="muted">${esc(r.display_number ?? '')}${r.role !== 'member' ? ` · ${esc(r.role)}` : ''}</span></td>
+      <td>${esc(r.paid_until ?? '—')}</td>
+      <td><span class="tag ${STANDING_TAG[r.standing]}">${esc(STANDING_WORDS[r.standing])}</span>${
+        r.asked ? ' <span class="muted">asked</span>' : ''}${
+        r.fee_exempt ? ` <span class="muted">${esc(EXEMPT_REASONS[r.fee_exempt_reason] ?? '')}</span>` : ''}</td>
+      <td></td></tr>`).join('')}</tbody></table>
+    ${periods.length ? `<div class="row">
+      <div><label for="renewPeriod">Ask them to renew</label><select id="renewPeriod" name="period">${periods.map((p) =>
+        `<option value="${p}">${esc(FEE_PERIODS[p].label.toLowerCase())}</option>`).join('')}</select></div>
+      <div><label for="received">Already handed over?</label><select id="received" name="received">
+        <option value="">No — ask them to pay</option>${Object.entries(MANUAL_METHODS).map(([k, l]) =>
+          `<option value="${k}">Yes — ${esc(l.toLowerCase())}</option>`).join('')}</select></div></div>
+    <p class="muted">${due.length} need renewing. Tick who to include. “Already handed over” records the payment
+      and a receipt number straight away, for people paying at the door.</p>
+    <div class="actions"><button class="btn" type="submit">Renew the ticked</button></div>` : ''}
+  </form>
+
+  ${canExempt ? `<h2>People who are not charged</h2>
+  <p class="muted">Some people do not pay — an instructor who gives their time, a life member. They stay members and
+    are never asked for money. Say why; it is kept in the history.</p>
+  <table><tbody>${rows.map((r) => `<tr><td>${esc(r.name)}</td><td>
+    <form method="post" action="/o/${esc(org.slug)}/renewals/${esc(r.affiliation_id)}/exempt" style="display:inline">
+      <input type="hidden" name="_csrf" value="${esc(csrf ?? '')}">
+      ${r.fee_exempt ? `<input type="hidden" name="exempt" value="0"><button class="btn quiet">Charge ${esc(r.name.split(' ')[0])} fees again</button>`
+        : `<input type="hidden" name="exempt" value="1">
+           <select name="reason" aria-label="Why ${esc(r.name)} is not charged">${Object.entries(EXEMPT_REASONS).map(([k, l]) =>
+             `<option value="${k}"${r.role === 'instructor' && k === 'instructor' ? ' selected' : ''}>${esc(l)}</option>`).join('')}</select>
+           <button class="btn quiet">Do not charge</button>`}
+    </form>
+    ${r.fee_exempt ? `<form method="post" action="/o/${esc(org.slug)}/renewals/${esc(r.affiliation_id)}/carry-on" style="display:inline">
+      <input type="hidden" name="_csrf" value="${esc(csrf ?? '')}"><button class="btn quiet">Carry membership on a year</button></form>` : ''}</td></tr>`).join('')}</tbody></table>` : ''}` });
 };

@@ -50,3 +50,34 @@ A card number reaches only the provider and is never stored.
 
 Each payee's own provider account and settings, webhooks, refunds, receipts by
 email, and membership renewals.
+
+## Renewals, cash, and people who do not pay
+
+**Prices are each dojo's own.** A dojo's administrator sets its prices under
+**Renewals**: a name, who it is for (juniors under 18, adults, or everyone), how
+often (year, term, month, or a one-off joining fee) and the amount. A new price
+for the same people and period takes over from its start date; the old one ends
+the day before. Nothing is shared between dojos.
+
+**Renewing.** A registrar ticks who to renew and the period. Each person is asked
+for the dojo's price for their age; asking charges nobody, it puts a payment in
+front of them (a parent sees their child's). When it is paid — card, bank, cash or
+transfer — "fees run to" moves on from the **later of today and where it already
+runs to**: paying early keeps the days already paid for, paying late is not
+backdated, and a lapsed member becomes active again. A declined card or a bank
+that has not confirmed moves nothing.
+
+**Cash and bank transfers.** The dojo records them — a member cannot record their
+own. Each is numbered per dojo per year (`R-2026-0001`), says who took it, and is
+in the history. People paying at the door can be asked and recorded in one step
+("Already handed over?"). The Payments screen totals what came in by method, so
+the cash in the tin can be matched against the record. A dojo cannot record the
+federation's money (a black belt grading) as received; that is the federation's
+to record.
+
+**People who do not pay.** An administrator marks a member *not charged* with a
+reason — instructor, life member, hardship, other — and it is kept in the history.
+They stay members, are never asked for money, anything already asked is withdrawn,
+and **Carry membership on a year** moves their date on with no payment. It is a
+decision about a person, not a rule about a role, because dojos differ: some
+instructors pay, some do not.

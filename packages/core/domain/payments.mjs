@@ -96,6 +96,7 @@ export function centsFrom(text) {
 export function readPaymentRequest(form = {}) {
   const t = (k, n) => String(form[k] ?? '').replace(/\s+/g, ' ').trim().slice(0, n);
   return {
+    received: ['cash', 'transfer'].includes(form.received) ? form.received : null,
     personNumber: t('personNumber', 30),
     kind: t('kind', 30),
     description: t('description', 140),

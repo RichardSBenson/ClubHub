@@ -163,6 +163,9 @@ ok('and an event on their calendar', !!theirEvent, 'no event at whanganui');
     'another club is on their dashboard');
 }
 
+const theirAffiliation = await one(`select * from affiliation where organisation_id=$1 and ends is null limit 1`, [theirs.id]);
+const theirFee = await one(`insert into fee_schedule (organisation_id, label, amount_cents, period, applies_to, effective_from)
+  values ($1,'Private committee price',9900,'annual','adult','2026-01-01') returning *`, [theirs.id]);
 const theirPayment = await one(`
   insert into payment (organisation_id, person_id, amount_cents, status)
   values ($1,$2,5000,'pending') returning *`, [theirs.id, theirPerson.id]);
@@ -195,6 +198,8 @@ function pathFor(pattern) {
     articleId: theirArticle.id,
     messageId: theirMessage.id,
     paymentId: theirPayment.id,
+    affiliationId: theirAffiliation.id,
+    feeId: theirFee.id,
     clubId: theirs.id,
     token: 'not-a-real-token',
     secret: 'not-a-real-secret',
@@ -226,6 +231,7 @@ const THEIR_WORDS = [
   theirEvent && theirEvent.title,
   theirMessage.subject,
   'Private uniform order',
+  'Private committee price',
 ].filter(Boolean);
 
 /**

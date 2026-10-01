@@ -33,7 +33,7 @@
 import crypto from 'node:crypto';
 import { URL } from 'node:url';
 import { pool, orgs, people, rank, events, competition, pages, assets, news,
-         instructors, navigation, audit, search, clubPages, appearance, clubs, clubProfile, family, myself, memberEvents, messages, emailPreferences, payments,
+         instructors, navigation, audit, search, clubPages, appearance, clubs, clubProfile, family, myself, memberEvents, messages, emailPreferences, payments, fees, renewals,
          Forbidden, NotFound, Invalid } from './data.mjs';
 import * as auth from './auth.mjs';
 import * as V from './views.mjs';
@@ -42,6 +42,7 @@ import { readClubProfile } from '../core/domain/club-profile.mjs';
 import { readNewClub } from '../core/domain/new-club.mjs';
 import { readMessage } from '../core/domain/messaging.mjs';
 import { readPayment, readPaymentRequest } from '../core/domain/payments.mjs';
+import { readFee, readExemption } from '../core/domain/membership.mjs';
 import { paymentProviderFrom, isTestProvider } from '../infrastructure/payments/providers.mjs';
 import { BUILT_IN } from '../site/builtin-themes.mjs';
 import { readTheme, serialise } from '../site/theme.mjs';
@@ -1180,6 +1181,101 @@ post('/o/:slug/payments', async (ctx) => {
   } catch (e) {
     if (e instanceof Invalid)
       return paymentsScreen(ctx, org, { status: 422, error: e.message, values: { ...form, amountText: input.amountText } });
+    throw e;
+  }
+});
+
+post('/o/:slug/payments/:paymentId/received', async (ctx) => {
+  const org = await organisationFor(ctx);
+  const form = await ctx.form();
+  if (!UUID_RE.test(ctx.params.paymentId)) throw new NotFound('Payment');
+  try {
+    const pay = await payments.recordManual(ctx.me.accountId, ctx.params.paymentId, form.method);
+    return ctx.redirect(`/o/${org.slug}/payments?done=${encodeURIComponent(`Recorded. Receipt ${pay.receipt_no}.`)}`);
+  } catch (e) {
+    if (e instanceof Invalid) return paymentsScreen(ctx, org, { status: 422, error: e.message });
+    throw e;
+  }
+});
+
+// ---- renewals: the dojo's own prices, who is due, who is not charged -----------
+
+async function renewalsScreen(ctx, org, extra = {}) {
+  const actor = ctx.me.accountId;
+  const { today, rows } = await renewals.roster(actor, org.id);
+  const canSetPrices = await mayManageAt(ctx, org.id);
+  return ctx.send(extra.status ?? 200, V.renewalsScreen({
+    me: ctx.me, org, csrf: ctx.csrf, today, rows, prices: await fees.list(actor, org.id),
+    canSetPrices, canExempt: canSetPrices,
+    done: ctx.url.searchParams.get('done'), ...extra }));
+}
+
+get('/o/:slug/renewals', async (ctx) => {
+  const org = await organisationFor(ctx);
+  if (org.type !== 'club') return ctx.redirect(`/o/${org.slug}/clubs`);
+  return renewalsScreen(ctx, org);
+});
+
+post('/o/:slug/renewals', async (ctx) => {
+  const org = await organisationFor(ctx);
+  const form = await ctx.form();
+  const ids = Object.keys(form).filter((k) => k.startsWith('pick_') && form[k] === '1')
+    .map((k) => k.slice(5)).filter((id) => UUID_RE.test(id));
+  try {
+    const out = await renewals.ask(ctx.me.accountId, org.id,
+      { affiliationIds: ids, period: form.period, received: form.received });
+    const notes = out.skipped.map((s) => `${s.name}: ${s.reason}`);
+    return renewalsScreen(ctx, org, { done: `${out.asked} renewal${out.asked === 1 ? '' : 's'} ${
+      form.received ? 'recorded' : 'asked for'}.`, notes });
+  } catch (e) {
+    if (e instanceof Invalid) return renewalsScreen(ctx, org, { status: 422, error: e.message });
+    throw e;
+  }
+});
+
+post('/o/:slug/renewals/fees', async (ctx) => {
+  const org = await organisationFor(ctx);
+  const form = await ctx.form();
+  const input = readFee(form);
+  try {
+    await fees.save(ctx.me.accountId, org.id, input);
+    return ctx.redirect(`/o/${org.slug}/renewals?done=${encodeURIComponent('Price saved.')}`);
+  } catch (e) {
+    if (e instanceof Invalid) return renewalsScreen(ctx, org, { status: 422, error: e.message, values: input });
+    throw e;
+  }
+});
+
+post('/o/:slug/renewals/fees/:feeId/remove', async (ctx) => {
+  const org = await organisationFor(ctx);
+  await ctx.form();
+  if (!UUID_RE.test(ctx.params.feeId)) throw new NotFound('Price');
+  await fees.remove(ctx.me.accountId, org.id, ctx.params.feeId);
+  return ctx.redirect(`/o/${org.slug}/renewals?done=${encodeURIComponent('Price removed.')}`);
+});
+
+post('/o/:slug/renewals/:affiliationId/exempt', async (ctx) => {
+  const org = await organisationFor(ctx);
+  const form = await ctx.form();
+  if (!UUID_RE.test(ctx.params.affiliationId)) throw new NotFound('Member');
+  try {
+    await renewals.setExemption(ctx.me.accountId, org.id, ctx.params.affiliationId, readExemption(form));
+    return ctx.redirect(`/o/${org.slug}/renewals?done=${encodeURIComponent('Saved.')}`);
+  } catch (e) {
+    if (e instanceof Invalid) return renewalsScreen(ctx, org, { status: 422, error: e.message });
+    throw e;
+  }
+});
+
+post('/o/:slug/renewals/:affiliationId/carry-on', async (ctx) => {
+  const org = await organisationFor(ctx);
+  await ctx.form();
+  if (!UUID_RE.test(ctx.params.affiliationId)) throw new NotFound('Member');
+  try {
+    const until = await renewals.carryOn(ctx.me.accountId, org.id, ctx.params.affiliationId);
+    return ctx.redirect(`/o/${org.slug}/renewals?done=${encodeURIComponent(`Carried on to ${until}.`)}`);
+  } catch (e) {
+    if (e instanceof Invalid) return renewalsScreen(ctx, org, { status: 422, error: e.message });
     throw e;
   }
 });
