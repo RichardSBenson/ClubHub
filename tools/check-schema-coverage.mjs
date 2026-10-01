@@ -76,7 +76,6 @@ const ACCOUNTED_FOR = {
 
   // --- recorded for the audit trail, never read back ------------------------
   'attendance.recorded_by': 'written for the record; no screen reads it yet',
-  'grant_role.granted_at': 'written for the record; no screen reads it yet',
   'rebuild_queue.built_at': 'written by the queue; nothing reports on it yet',
 
   // --- real gaps, named rather than hidden ----------------------------------
@@ -85,8 +84,6 @@ const ACCOUNTED_FOR = {
   'grading_record.ratified_by_org': 'national ratification of a dan grade is '
     + 'recorded in the authority rules but not against the record itself.',
   'grading_record.certificate_asset_id': 'no certificate is generated yet.',
-  'person_private.medical_notes': 'deliberately has no screen. Writing one '
-    + 'means deciding who may read it, and that decision has not been made.',
   'entry_consent.accepted_at': 'the consent row implies the moment; the '
     + 'column duplicates it and nothing writes it.',
   'event_entry.waiver_ok': 'superseded by entry_consent, which records what '

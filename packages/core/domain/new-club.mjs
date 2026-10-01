@@ -17,7 +17,7 @@ import { slugFrom } from './founding.mjs';
 export const RESERVED_SLUGS = Object.freeze([
   'events', 'news', 'instructors', 'find-a-dojo', 'about', 'contact', 'vendor',
   'theme', 'admin', 'api', 'o', 'p', 'a', 'signin', 'signout', 'search',
-  'dashboard', 'bootstrap', 'try', 'sitemap', 'robots', 'assets', 'static',
+  'dashboard', 'me', 'bootstrap', 'try', 'sitemap', 'robots', 'assets', 'static',
 ]);
 
 const EMAIL = /^[^\s@]+@[^\s@.]+\.[^\s@]+$/;

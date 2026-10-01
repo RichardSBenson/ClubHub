@@ -29,6 +29,14 @@
       "destination": "/api/index"
     },
     {
+      "source": "/me",
+      "destination": "/api/index"
+    },
+    {
+      "source": "/me/:path*",
+      "destination": "/api/index"
+    },
+    {
       "source": "/search",
       "destination": "/api/index"
     },

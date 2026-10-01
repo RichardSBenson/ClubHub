@@ -2944,8 +2944,10 @@ export const myPerson = ({ me, csrf, how, person, private: priv = {}, grade, mem
         <div><label for="emergency_phone">Phone</label><input id="emergency_phone" name="emergency_phone" maxlength="40" value="${v('emergency_phone', priv.emergency_phone)}"></div>
       </div>
     </fieldset>
-    <label for="medical_notes">Medical notes <span class="muted">(injuries, conditions, allergies — instructors may need to know)</span></label>
+    <label for="medical_notes">Medical notes <span class="muted">(injuries, conditions, allergies)</span></label>
     <textarea id="medical_notes" name="medical_notes" rows="4" maxlength="2000">${v('medical_notes', priv.medical_notes)}</textarea>
+    <p class="hint">Only ${how === 'self' ? 'you' : 'you and the child\'s other guardians'} can see this here.
+      Club staff cannot read it from the register yet.</p>
     <div class="actions"><button class="btn" type="submit">Save</button></div>
   </form>` });
 };
