@@ -163,6 +163,12 @@ ok('and an event on their calendar', !!theirEvent, 'no event at whanganui');
     'another club is on their dashboard');
 }
 
+const theirPayment = await one(`
+  insert into payment (organisation_id, person_id, amount_cents, status)
+  values ($1,$2,5000,'pending') returning *`, [theirs.id, theirPerson.id]);
+await pool.query(`insert into payment_line (payment_id, kind, description, amount_cents)
+  values ($1,'uniform','Private uniform order',5000)`, [theirPayment.id]);
+
 // ---------------------------------------------------------------------------
 // every route, walked
 // ---------------------------------------------------------------------------
@@ -188,6 +194,7 @@ function pathFor(pattern) {
     assetId: theirAsset.id,
     articleId: theirArticle.id,
     messageId: theirMessage.id,
+    paymentId: theirPayment.id,
     clubId: theirs.id,
     token: 'not-a-real-token',
     secret: 'not-a-real-secret',
@@ -218,6 +225,7 @@ const THEIR_WORDS = [
   theirPerson && `${theirPerson.first_name} ${theirPerson.last_name}`,
   theirEvent && theirEvent.title,
   theirMessage.subject,
+  'Private uniform order',
 ].filter(Boolean);
 
 /**
@@ -233,6 +241,7 @@ const THEIR_WORDS = [
 const SCOPED = new Map([
   ['GET /search', 'everybody may search; the scoping is in the query'],
   ['GET /me', 'a person sees themselves and their own children; scoped by family.mayActFor'],
+  ['GET /me/payments', 'what the signed-in person and their children owe; scoped by payments.forPerson'],
   ['GET /me/events', 'what is open to the signed-in person and their children; scoped by memberEvents'],
 ]);
 
@@ -244,7 +253,7 @@ console.log('\nEVERY ROUTE IS EITHER PUBLIC ON PURPOSE OR PROTECTED');
     // Scoped by path, and every one of them is probed below. /a/ is not
     // scoped by path — an asset id carries its own federation — but it is
     // probed too, and the probe below is what proves it refuses.
-    .filter((key) => !key.includes('/o/:slug') && !key.includes('/p/:id')
+    .filter((key) => !key.includes('/o/:slug') && !key.includes('/p/:id') && !key.includes('/me/payments/:')
                   && !key.includes('/a/:') && !key.includes('/me/:') && !key.includes('/me/events/:'));
 
   ok(`all ${routes.length} routes are accounted for`,
@@ -313,7 +322,7 @@ console.log('\nSEARCHING FOR THEIRS FINDS NOTHING');
 
 console.log('\nTHEIR OWN HOME SHOWS NOTHING OF THEIRS');
 {
-  for (const path of ['/me', '/me/events']) {
+  for (const path of ['/me', '/me/events', '/me/payments']) {
     const r = await req(path);
     const leaked = THEIR_WORDS.filter((w) => r.html.includes(w));
     ok(`${path} answers them, and contains nothing of theirs`,

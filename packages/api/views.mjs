@@ -284,6 +284,7 @@ export function rail({ org, vocabulary = {}, can = {}, path = '' }) {
     can.register && link(`${base}/members/import`, 'Import a roll'),
     can.register && link(`${base}/grading`, vocabulary.grading ?? 'Grading'),
     can.manage && link(`${base}/messages`, 'Messages'),
+    can.manage && link(`${base}/payments`, 'Payments'),
   ])}
   ${group('Events', [link(`${base}/events`, 'Events')])}
   ${can.write ? group('Website', [
@@ -2907,7 +2908,8 @@ export const myHome = ({ me, csrf, self, dependants = [] }) => page({
   <div class="row">
     <div><h2>${esc(self.first_name)} ${esc(self.last_name)}</h2>
       <p><a class="btn" href="/me/${esc(self.id)}">See and update my details</a>
-        <a class="btn" href="/me/events">Events I can enter</a></p></div>
+        <a class="btn" href="/me/events">Events I can enter</a>
+        <a class="btn" href="/me/payments">Payments</a></p></div>
   </div>
   ${dependants.length ? `<h2>Children I look after</h2>
   <table><tbody>${dependants.map((d) => `<tr>
@@ -3046,7 +3048,7 @@ export const memberEntryPreview = ({ me, csrf, how, open, event, mine, placement
   ${placements.length ? `<ul class="plain">${placements.map((p) => `<li>${esc(p.discipline.name)}${
     p.division ? ` — <span class="tag ok">${esc(p.division.label)}</span>` : ''}</li>`).join('')}</ul>` : ''}
   ${amountCents != null ? `<p>Entry fee: <strong>${esc(cents(amountCents, currency))}</strong>.
-    <span class="muted">Online payment is not switched on yet; the club will tell you how to pay.</span></p>` : ''}
+    <span class="muted">You can pay straight after you confirm.</span></p>` : ''}
   <form method="post" action="/me/events/${esc(event.id)}/${esc(mine.person.id)}">
     <input type="hidden" name="_csrf" value="${esc(csrf ?? '')}">
     ${Object.entries(text).map(([k, v]) => `<input type="hidden" name="${esc(k)}" value="${esc(v)}">`).join('')}
@@ -3058,6 +3060,9 @@ export const memberEntryPreview = ({ me, csrf, how, open, event, mine, placement
 // ---------------------------------------------------------------------------
 // messages
 // ---------------------------------------------------------------------------
+
+import { KINDS as PAY_KINDS, ASKABLE as PAY_ASKABLE, METHODS as PAY_METHODS, STATUSES as PAY_STATUSES }
+  from '../core/domain/payments.mjs';
 
 const STATUS_WORDS = { queued: 'Waiting', sending: 'Sending', sent: 'Sent', failed: 'Failed',
   opted_out: 'Opted out', no_email: 'No email address' };
@@ -3170,3 +3175,110 @@ export const unsubscribePage = ({ csrf, token, first, optedOut, changed }) => pa
     <div class="actions"><button class="btn" type="submit">${optedOut
       ? 'Turn announcements back on' : 'Stop announcements'}</button></div>
   </form>` });
+
+
+// ---------------------------------------------------------------------------
+// payments
+// ---------------------------------------------------------------------------
+
+const payStatus = (st) => esc(PAY_STATUSES[st] ?? st);
+const testBanner = (test) => test ? `<div class="note"><strong>Test payments.</strong>
+  No money moves. Card 4000 0000 0000 0002 is declined; any other number is accepted.</div>` : '';
+
+export const myPayments = ({ me, csrf, groups = [], test = false, done }) => page({
+  title: 'Payments', me, csrf, body: `
+  <h1>Payments</h1>
+  <p class="sub"><a href="/me">Back</a></p>
+  ${done ? `<div class="good">${esc(done)}</div>` : ''}
+  ${testBanner(test)}
+  ${groups.map(({ person, rows }) => `
+    <h2>${esc(person.first_name)} ${esc(person.last_name)}</h2>
+    ${rows.length ? `<table><thead><tr><th>For</th><th>Pay to</th><th>Amount</th><th></th></tr></thead><tbody>${
+      rows.map((r) => `<tr>
+        <td>${r.lines.map((l) => esc(l.description)).join('<br>')}</td>
+        <td>${esc(r.payee_name)}</td>
+        <td>${esc(cents(r.amount_cents, r.currency))}</td>
+        <td>${['pending', 'failed'].includes(r.status)
+          ? `<a class="btn" href="/me/payments/${esc(r.id)}">Pay</a>`
+          : `<span class="tag ${r.status === 'succeeded' ? 'ok' : 'no'}">${payStatus(r.status)}</span>`}</td>
+      </tr>`).join('')}</tbody></table>` : '<p class="muted">Nothing to pay and nothing paid.</p>'}`).join('')}` });
+
+export const payScreen = ({ me, csrf, payment, test = false, error, done }) => {
+  const open = ['pending', 'failed'].includes(payment.status);
+  return page({ title: 'Pay', me, csrf, body: `
+  <h1>${esc(cents(payment.amount_cents, payment.currency))}</h1>
+  <p class="sub">To ${esc(payment.payee_name)} · for ${esc(payment.person_name ?? '')} · <a href="/me/payments">Back</a></p>
+  ${testBanner(test)}
+  ${done ? `<div class="good">${esc(done)}</div>` : ''}
+  ${error ? `<div class="bad">${esc(error)}</div>` : ''}
+  <ul class="plain">${payment.lines.map((l) => `<li>${esc(l.description)} — ${esc(cents(l.amount_cents, payment.currency))}</li>`).join('')}</ul>
+  ${payment.status === 'failed' && payment.detail ? `<div class="bad">${esc(payment.detail)} You can try again.</div>` : ''}
+  ${open ? `<form method="post" action="/me/payments/${esc(payment.id)}">
+    <input type="hidden" name="_csrf" value="${esc(csrf ?? '')}">
+    <fieldset><legend>How would you like to pay?</legend>
+      ${Object.entries(PAY_METHODS).map(([k, m], i) => `<label><input type="radio" name="method" value="${k}"${i === 0 ? ' checked' : ''}> ${esc(m.label)}</label>`).join('')}
+    </fieldset>
+    <label for="card">Card number <span class="muted">(card payments only)</span></label>
+    <input id="card" name="card" inputmode="numeric" autocomplete="off" maxlength="23">
+    <p class="muted">The card number is checked by the payment provider and is never stored here.</p>
+    <div class="actions"><button class="btn" type="submit">Pay ${esc(cents(payment.amount_cents, payment.currency))}</button></div>
+  </form>` : payment.status === 'awaiting' ? `
+    <div class="note"><strong>${payStatus('awaiting')}.</strong> ${esc(payment.detail ?? '')}
+      You do not need to do anything. It will show as paid when it is confirmed.</div>
+    ${test ? `<form method="post" action="/me/payments/${esc(payment.id)}/complete" style="display:inline">
+      <input type="hidden" name="_csrf" value="${esc(csrf ?? '')}">
+      <button class="btn quiet" name="ok" value="1">Test: the bank confirmed</button>
+      <button class="btn quiet" name="ok" value="0">Test: the bank refused</button></form>` : ''}`
+  : `<div class="good"><strong>${payStatus(payment.status)}.</strong> ${esc(payment.detail ?? '')}</div>`}` });
+};
+
+export const paymentsScreen = ({ me, csrf, org, rows = [], totals = [], test = false,
+                                 values = null, error, done }) => {
+  const v = (k) => esc(values?.[k] ?? '');
+  const sum = (status) => totals.filter((t) => t.status === status).reduce((n, t) => n + t.cents, 0);
+  return page({ title: `${org.name} — payments`, me, csrf, body: `
+  <h1>Payments</h1>
+  <p class="sub">What ${esc(org.name)} has been paid. Money goes to the organisation it is for:
+    dojo fees, kyu gradings, uniforms and equipment to the dojo; tournament entries to whoever runs
+    the tournament; black belt gradings to the federation.</p>
+  ${done ? `<div class="good">${esc(done)}</div>` : ''}
+  ${error ? `<div class="bad">${esc(error)}</div>` : ''}
+  ${testBanner(test)}
+  <div class="row">
+    <div><strong>${esc(cents(sum('succeeded')))}</strong> paid</div>
+    <div><strong>${esc(cents(sum('awaiting')))}</strong> waiting for the bank</div>
+    <div><strong>${esc(cents(sum('pending')))}</strong> asked for, not yet paid</div>
+  </div>
+  ${totals.some((t) => t.status === 'succeeded') ? `<table><thead><tr><th>Paid, by kind</th><th>Payments</th><th>Total</th></tr></thead><tbody>${
+    totals.filter((t) => t.status === 'succeeded').map((t) => `<tr><td>${esc(PAY_KINDS[t.kind]?.label ?? t.kind)}</td>
+    <td>${t.n}</td><td>${esc(cents(t.cents))}</td></tr>`).join('')}</tbody></table>` : ''}
+
+  <h2>Ask a member for a payment</h2>
+  <form method="post" action="/o/${esc(org.slug)}/payments">
+    <input type="hidden" name="_csrf" value="${esc(csrf ?? '')}">
+    <div class="row">
+      <div><label for="personNumber">Member number</label>
+        <input id="personNumber" name="personNumber" required maxlength="30" value="${v('personNumber')}"></div>
+      <div><label for="kind">For</label>
+        <select id="kind" name="kind">${PAY_ASKABLE.map((k) => `<option value="${k}"${values?.kind === k ? ' selected' : ''}>${
+          esc(PAY_KINDS[k].label)}${PAY_KINDS[k].payee === 'federation' ? ' (paid to the federation)' : ''}</option>`).join('')}</select></div>
+      <div><label for="amount">Amount (NZD)</label>
+        <input id="amount" name="amount" required inputmode="decimal" maxlength="12" value="${v('amountText')}"></div>
+    </div>
+    <label for="description">What it is <span class="muted">(optional, e.g. “Gi, size 150”)</span></label>
+    <input id="description" name="description" maxlength="140" value="${v('description')}">
+    <div class="actions"><button class="btn" type="submit">Ask for payment</button></div>
+  </form>
+
+  <h2>Payments</h2>
+  ${rows.length ? `<table><thead><tr><th>When</th><th>Who</th><th>For</th><th>Amount</th><th>Status</th><th></th></tr></thead><tbody>${
+    rows.map((r) => `<tr>
+      <td>${esc(new Date(r.created_at).toISOString().slice(0, 10))}</td>
+      <td>${esc(r.person_name ?? '—')}</td>
+      <td>${r.lines.map((l) => esc(l.description)).join('<br>')}</td>
+      <td>${esc(cents(r.amount_cents, r.currency))}</td>
+      <td>${payStatus(r.status)}</td>
+      <td>${['pending', 'failed'].includes(r.status) ? `<form method="post" action="/o/${esc(org.slug)}/payments/${esc(r.id)}/cancel">
+        <input type="hidden" name="_csrf" value="${esc(csrf ?? '')}"><button class="btn quiet">Cancel</button></form>` : ''}</td>
+    </tr>`).join('')}</tbody></table>` : '<p class="muted">Nothing yet.</p>'}` });
+};

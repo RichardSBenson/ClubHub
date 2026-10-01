@@ -12,6 +12,9 @@ export { pool } from '../infrastructure/postgres/pool.mjs';
 import { pool } from '../infrastructure/postgres/pool.mjs';
 import { problemsWithPerson, problemsWithMembership }
   from '../core/domain/people.mjs';
+import { payeeFor, groupByPayee, problemsWithPaymentRequest, problemsWithPayment, KINDS as PAY_KINDS }
+  from '../core/domain/payments.mjs';
+import { isTestProvider } from '../infrastructure/payments/providers.mjs';
 import { problemsWithMessage, senderFor, chooseRecipients, renderBody }
   from '../core/domain/messaging.mjs';
 import crypto from 'node:crypto';
@@ -1205,6 +1208,21 @@ export const competition = {
            consent.guardian ? JSON.stringify(consent.guardian) : null]);
       }
 
+      // An entry with a fee is a payment waiting to be made, to whoever runs
+      // the event. The entry exists whether or not it is ever paid.
+      if (personId && amountCents > 0) {
+        const title = (await client.query('select title from event where id=$1', [eventId])).rows[0]?.title;
+        const { rows: [pay] } = await client.query(`
+          insert into payment (organisation_id, person_id, event_entry_id, amount_cents,
+                               currency, status, requested_by)
+          values ($1,$2,$3,$4,$5,'pending',$6) returning id`,
+          [ev.organisation_id, personId, entry.id, amountCents, currency, actor]);
+        await client.query(`
+          insert into payment_line (payment_id, kind, description, amount_cents, event_entry_id)
+          values ($1,'tournament_entry',$2,$3,$4)`,
+          [pay.id, `Entry — ${title ?? 'event'}`, amountCents, entry.id]);
+      }
+
       await client.query(`
         insert into audit_log (account_id, organisation_id, action, entity,
                                entity_id, after)
@@ -1253,7 +1271,11 @@ export const competition = {
     if (!e) throw new NotFound('Entry');
     await assertRole(actor, e.entered_for_org ?? e.organisation_id, REGISTER);
     // Withdrawn, not deleted: they paid, and a federation has to be able to
-    // say somebody pulled out rather than that they never entered.
+    // say somebody pulled out rather than that they never entered. A payment
+    // not yet made is cancelled; one already made is left for the organiser to
+    // refund, because that is their money and their decision.
+    await pool.query(`update payment set status='void', updated_at=now()
+      where event_entry_id = $1 and status in ('pending','failed')`, [entryId]);
     return one(`
       update event_entry set status = 'withdrawn', notes = coalesce($2, notes),
              updated_at = now()
@@ -3219,5 +3241,176 @@ export const emailPreferences = {
       from affiliation a where a.person_id = $1 and a.ends is null limit 1`,
       [row.person_id, JSON.stringify({ optedOut: !!optedOut })]);
     return !!row;
+  },
+};
+
+
+// ---------------------------------------------------------------------------
+// payments
+//
+// A payment has one payee, decided by what it is for (core/domain/payments).
+// It is made by the person it is for, or by a parent or guardian of a minor.
+// A club sees what it has been paid; it does not see another club's.
+// ---------------------------------------------------------------------------
+
+const PAYMENT_SELECT = `
+  select py.id, py.organisation_id, py.person_id, py.amount_cents, py.currency, py.status,
+         py.method, py.detail, py.provider, py.provider_ref, py.created_at, py.settled_at,
+         po.name as payee_name,
+         nullif(trim(concat_ws(' ', p.first_name, p.last_name)), '') as person_name,
+         p.display_number,
+         (select coalesce(json_agg(json_build_object('kind', l.kind, 'description', l.description,
+                          'amount_cents', l.amount_cents) order by l.id), '[]'::json)
+            from payment_line l where l.payment_id = py.id) as lines
+  from payment py
+  join organisation po on po.id = py.organisation_id
+  left join person p on p.id = py.person_id`;
+
+async function settle(paymentId, ok, detail, { actor = null, ref = undefined } = {}) {
+  const row = await one(`
+    update payment set status = $2, detail = $3, updated_at = now(),
+           settled_at = case when $2 = 'succeeded' then now() else settled_at end,
+           provider_ref = coalesce($4, provider_ref)
+     where id = $1 and status in ('awaiting','pending')
+     returning organisation_id, person_id, amount_cents`,
+    [paymentId, ok ? 'succeeded' : 'failed', detail, ref ?? null]);
+  if (!row) return false;
+  if (ok) await pool.query(`update event_entry set paid = true, updated_at = now()
+    where id in (select event_entry_id from payment_line where payment_id = $1)`, [paymentId]);
+  await pool.query(`
+    insert into audit_log (account_id, organisation_id, action, entity, entity_id, before, after)
+    values ($1,$2,$3,'payment',$4,null,$5)`,
+    [actor, row.organisation_id, ok ? 'payment_made' : 'payment_failed', paymentId,
+     JSON.stringify({ amountCents: row.amount_cents, personId: row.person_id })]);
+  return true;
+}
+
+export const payments = {
+  /** What one person owes and has paid. Authority is theirs or their guardian's. */
+  async forPerson(actor, personId) {
+    await family.assertMayActFor(actor, personId);
+    return q(`${PAYMENT_SELECT} where py.person_id = $1 and py.status <> 'void'
+      order by (py.status in ('pending','failed','awaiting')) desc, py.created_at desc`, [personId]);
+  },
+
+  /** Everything the signed-in person and their children owe, for the home screen. */
+  async owedBy(actor) {
+    const { self, dependants } = await family.mine(actor);
+    const ids = [self, ...dependants].filter(Boolean).map((x) => x.id);
+    if (!ids.length) return [];
+    return q(`${PAYMENT_SELECT} where py.person_id = any($1::uuid[])
+      and py.status in ('pending','failed','awaiting') order by py.created_at`, [ids]);
+  },
+
+  async get(actor, paymentId) {
+    const row = await one(`${PAYMENT_SELECT} where py.id = $1`, [paymentId]);
+    if (!row || !row.person_id) throw new NotFound('Payment');
+    await family.assertMayActFor(actor, row.person_id);
+    return row;
+  },
+
+  /**
+   * Pay. The row is claimed first (pending/failed → awaiting), so pressing the
+   * button twice reaches the provider once.
+   */
+  async pay(actor, paymentId, input, { provider }) {
+    const row = await payments.get(actor, paymentId);
+    const problems = problemsWithPayment(input);
+    if (problems.length) throw new Invalid(problems.join(' '));
+
+    const claimed = await one(`update payment set status='awaiting', method=$2, paid_by=$3,
+        provider=$4, updated_at=now()
+      where id=$1 and status in ('pending','failed') returning id`,
+      [paymentId, input.method, actor, provider.name]);
+    if (!claimed) throw new Invalid('This has already been paid, or is being paid.');
+
+    let result;
+    try {
+      result = await provider.start({ amountCents: row.amount_cents, currency: row.currency,
+        method: input.method, card: input.card, reference: paymentId });
+    } catch (e) {
+      await settle(paymentId, false, `The payment provider could not be reached: ${e.message}`.slice(0, 250), { actor });
+      throw new Invalid('The payment could not be started. Nothing was charged — try again.');
+    }
+    if (result.status === 'succeeded') await settle(paymentId, true, result.detail, { actor, ref: result.ref });
+    else if (result.status === 'failed') await settle(paymentId, false, result.detail, { actor, ref: result.ref });
+    else await pool.query(`update payment set provider_ref=$2, detail=$3, updated_at=now() where id=$1`,
+      [paymentId, result.ref, result.detail]);
+    return payments.get(actor, paymentId);
+  },
+
+  /** Test provider only: stands in for the bank telling us the money arrived. */
+  async completeTest(actor, paymentId, ok, { provider }) {
+    if (!isTestProvider(provider)) throw new Forbidden('This is only available with test payments.');
+    const row = await payments.get(actor, paymentId);
+    if (row.status !== 'awaiting') throw new Invalid('Nothing is waiting on this payment.');
+    await settle(paymentId, ok, ok ? 'Confirmed by the test bank.' : 'Refused by the test bank.', { actor });
+    return payments.get(actor, paymentId);
+  },
+
+  /** What this organisation has been paid, and what is owed to it. */
+  async receivedBy(actor, orgId, { limit = 100 } = {}) {
+    await assertRole(actor, orgId, MANAGE);
+    const rows = await q(`${PAYMENT_SELECT} where py.organisation_id = $1 and py.status <> 'void'
+      order by py.created_at desc limit $2`, [orgId, limit]);
+    const totals = await q(`
+      select l.kind, py.status, count(*)::int as n, sum(l.amount_cents)::int as cents
+      from payment py join payment_line l on l.payment_id = py.id
+      where py.organisation_id = $1 and py.status in ('succeeded','pending','awaiting')
+      group by l.kind, py.status`, [orgId]);
+    return { rows, totals };
+  },
+
+  /**
+   * A club asks one of its members for money. The payee is worked out from
+   * what it is for: a kyu grading or a uniform is the club's, a black belt
+   * grading is the federation's.
+   */
+  async request(actor, orgId, input) {
+    await assertRole(actor, orgId, REGISTER);
+    const problems = problemsWithPaymentRequest(input);
+    if (problems.length) throw new Invalid(problems.join(' '));
+
+    const org = await one('select * from organisation where id=$1', [orgId]);
+    const person = await one(`select id, first_name, last_name from person
+      where upper(display_number) = upper($1)`, [input.personNumber]);
+    const home = person && await one(`
+      select o.id from affiliation a join organisation o on o.id = a.organisation_id
+      where a.person_id = $1 and a.ends is null and a.status = 'active' and o.type = 'club'
+        and o.path <@ $2::ltree order by a.starts limit 1`, [person.id, org.path]);
+    if (!person || !home) throw new Invalid(`There is no member numbered ${input.personNumber} here.`);
+
+    const root = await one(`select id from organisation where parent_id is null and $1::ltree <@ path`, [org.path]);
+    let payeeId;
+    try { payeeId = payeeFor(input.kind, { clubId: home.id, federationId: root?.id }); }
+    catch (e) { throw new Invalid(e.message); }
+
+    const description = input.description || PAY_KINDS[input.kind].label;
+    const client = await pool.connect();
+    try {
+      await client.query('begin');
+      const { rows: [pay] } = await client.query(`
+        insert into payment (organisation_id, person_id, amount_cents, currency, status, requested_by)
+        values ($1,$2,$3,'NZD','pending',$4) returning *`,
+        [payeeId, person.id, input.amountCents, actor]);
+      await client.query(`insert into payment_line (payment_id, kind, description, amount_cents)
+        values ($1,$2,$3,$4)`, [pay.id, input.kind, description, input.amountCents]);
+      await client.query(`
+        insert into audit_log (account_id, organisation_id, action, entity, entity_id, after)
+        values ($1,$2,'payment_requested','payment',$3,$4)`,
+        [actor, payeeId, pay.id, JSON.stringify({ kind: input.kind, amountCents: input.amountCents,
+          person: `${person.first_name} ${person.last_name}`, description })]);
+      await client.query('commit');
+      return pay;
+    } catch (e) { await client.query('rollback'); throw e; } finally { client.release(); }
+  },
+
+  /** Take back a request nobody has paid. */
+  async cancel(actor, orgId, paymentId) {
+    await assertRole(actor, orgId, REGISTER);
+    const row = await one(`update payment set status='void', updated_at=now()
+      where id=$1 and organisation_id=$2 and status in ('pending','failed') returning id`,
+      [paymentId, orgId]);
+    if (!row) throw new NotFound('Payment');
   },
 };

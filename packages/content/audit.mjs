@@ -147,6 +147,13 @@ export function describe(entry) {
       return `wrote ${a.subject ? quote(a.subject) : 'a message'} to ${who} (${a.recipients ?? 0} `
         + `address${a.recipients === 1 ? '' : 'es'}${a.skipped ? `, ${a.skipped} skipped` : ''})`;
     }
+    case 'payment_requested':
+      return `asked ${a.person ?? 'a member'} for ${(a.amountCents / 100).toLocaleString('en-NZ', { style: 'currency', currency: 'NZD' })}`
+        + ` — ${a.description ?? 'a payment'}`;
+    case 'payment_made':
+      return `took a payment of ${((a.amountCents ?? 0) / 100).toLocaleString('en-NZ', { style: 'currency', currency: 'NZD' })}`;
+    case 'payment_failed':
+      return 'a payment did not go through';
     case 'email_preference':
       return a.optedOut ? 'a member stopped getting announcement emails'
                         : 'a member started getting announcement emails again';
@@ -230,6 +237,9 @@ export const ACTIONS = Object.freeze([
   ['self_update', 'Member updated their own details'],
   ['club_profile_saved', 'Club details changed'],
   ['message_sent', 'Message sent'],
+  ['payment_requested', 'Payment asked for'],
+  ['payment_made', 'Payment made'],
+  ['payment_failed', 'Payment failed'],
   ['email_preference', 'Email preference changed'],
   ['event_publish_up_asked', 'Event listing requested'],
   ['event_publish_up', 'Event listing decided'],

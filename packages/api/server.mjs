@@ -33,7 +33,7 @@
 import crypto from 'node:crypto';
 import { URL } from 'node:url';
 import { pool, orgs, people, rank, events, competition, pages, assets, news,
-         instructors, navigation, audit, search, clubPages, appearance, clubs, clubProfile, family, myself, memberEvents, messages, emailPreferences,
+         instructors, navigation, audit, search, clubPages, appearance, clubs, clubProfile, family, myself, memberEvents, messages, emailPreferences, payments,
          Forbidden, NotFound, Invalid } from './data.mjs';
 import * as auth from './auth.mjs';
 import * as V from './views.mjs';
@@ -41,6 +41,8 @@ import { readSelfEdit } from '../core/domain/family.mjs';
 import { readClubProfile } from '../core/domain/club-profile.mjs';
 import { readNewClub } from '../core/domain/new-club.mjs';
 import { readMessage } from '../core/domain/messaging.mjs';
+import { readPayment, readPaymentRequest } from '../core/domain/payments.mjs';
+import { paymentProviderFrom, isTestProvider } from '../infrastructure/payments/providers.mjs';
 import { BUILT_IN } from '../site/builtin-themes.mjs';
 import { readTheme, serialise } from '../site/theme.mjs';
 import { currentStore } from '../infrastructure/factory.mjs';
@@ -529,8 +531,64 @@ post('/me/events/:eventId/:personId', async (ctx) => {
       return ctx.send(422, memberEntryView(ctx, { ...plan, problems: [e.message] }, { values: form }));
     throw e;
   }
+  // An entry with a fee goes straight to paying for it.
+  if (plan.amountCents > 0) {
+    const owed = (await payments.owedBy(ctx.me.accountId)).find((p) =>
+      p.person_id === ctx.params.personId && p.lines.some((l) => l.kind === 'tournament_entry'
+        && l.description.endsWith(plan.event.title)));
+    if (owed) return ctx.redirect(`/me/payments/${owed.id}`);
+  }
   return ctx.redirect(`/me/events?done=${encodeURIComponent(
     `${plan.mine.person.first_name} is entered in ${plan.event.title}.`)}`);
+});
+
+// ---- paying ------------------------------------------------------------------
+//
+// Registered before /me/:personId. Who may pay is decided in payments.get, by
+// family.mayActFor: the person, or a guardian of a minor.
+
+const providerNow = () => paymentProviderFrom();
+
+get('/me/payments', async (ctx) => {
+  ctx.requireActor();
+  const { self, dependants } = await family.mine(ctx.me.accountId);
+  const groups = [];
+  for (const person of [self, ...dependants].filter(Boolean))
+    groups.push({ person, rows: await payments.forPerson(ctx.me.accountId, person.id) });
+  return ctx.send(200, V.myPayments({ me: ctx.me, csrf: ctx.csrf, groups,
+    test: isTestProvider(providerNow()), done: ctx.url.searchParams.get('done') }));
+});
+
+async function payView(ctx, extra = {}) {
+  if (!UUID_RE.test(ctx.params.paymentId)) throw new NotFound('Payment');
+  return ctx.send(extra.status ?? 200, V.payScreen({ me: ctx.me, csrf: ctx.csrf,
+    payment: await payments.get(ctx.me.accountId, ctx.params.paymentId),
+    test: isTestProvider(providerNow()), done: ctx.url.searchParams.get('done'), ...extra }));
+}
+
+get('/me/payments/:paymentId', async (ctx) => { ctx.requireActor(); return payView(ctx); });
+
+post('/me/payments/:paymentId', async (ctx) => {
+  ctx.requireActor();
+  const form = await ctx.form();
+  if (!UUID_RE.test(ctx.params.paymentId)) throw new NotFound('Payment');
+  try {
+    await payments.pay(ctx.me.accountId, ctx.params.paymentId, readPayment(form),
+      { provider: providerNow() });
+  } catch (e) {
+    if (e instanceof Invalid) return payView(ctx, { status: 422, error: e.message });
+    throw e;
+  }
+  return ctx.redirect(`/me/payments/${ctx.params.paymentId}`);
+});
+
+post('/me/payments/:paymentId/complete', async (ctx) => {
+  ctx.requireActor();
+  const form = await ctx.form();
+  if (!UUID_RE.test(ctx.params.paymentId)) throw new NotFound('Payment');
+  await payments.completeTest(ctx.me.accountId, ctx.params.paymentId, form.ok === '1',
+    { provider: providerNow() });
+  return ctx.redirect(`/me/payments/${ctx.params.paymentId}`);
 });
 
 get('/me/:personId', async (ctx) => {
@@ -1099,6 +1157,39 @@ post('/unsubscribe/:token', async (ctx) => {
   if (!await emailPreferences.setOptOut(ctx.params.token, form.optOut === '1'))
     throw new NotFound('This link');
   return ctx.redirect(`/unsubscribe/${ctx.params.token}?done=1`);
+});
+
+// ---- what a club has been paid, and asking for more ---------------------------
+
+async function paymentsScreen(ctx, org, extra = {}) {
+  return ctx.send(extra.status ?? 200, V.paymentsScreen({
+    me: ctx.me, org, csrf: ctx.csrf, test: isTestProvider(providerNow()),
+    ...(await payments.receivedBy(ctx.me.accountId, org.id)),
+    done: ctx.url.searchParams.get('done'), ...extra }));
+}
+
+get('/o/:slug/payments', async (ctx) => paymentsScreen(ctx, await organisationFor(ctx)));
+
+post('/o/:slug/payments', async (ctx) => {
+  const org = await organisationFor(ctx);
+  const form = await ctx.form();
+  const input = readPaymentRequest(form);
+  try {
+    await payments.request(ctx.me.accountId, org.id, input);
+    return ctx.redirect(`/o/${org.slug}/payments?done=${encodeURIComponent('Asked. They will see it under Payments.')}`);
+  } catch (e) {
+    if (e instanceof Invalid)
+      return paymentsScreen(ctx, org, { status: 422, error: e.message, values: { ...form, amountText: input.amountText } });
+    throw e;
+  }
+});
+
+post('/o/:slug/payments/:paymentId/cancel', async (ctx) => {
+  const org = await organisationFor(ctx);
+  await ctx.form();
+  if (!UUID_RE.test(ctx.params.paymentId)) throw new NotFound('Payment');
+  await payments.cancel(ctx.me.accountId, org.id, ctx.params.paymentId);
+  return ctx.redirect(`/o/${org.slug}/payments?done=${encodeURIComponent('Cancelled.')}`);
 });
 
 // ---- adding a club ---------------------------------------------------------
