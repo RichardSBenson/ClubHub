@@ -45,6 +45,9 @@ const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
  */
 const ACCOUNTED_FOR = {
   // --- whole subsystems that are honestly not built -------------------------
+  'invoice.issued_on': 'affiliation invoices between levels are not built; section 17 of the build list',
+  'invoice.due_on': 'affiliation invoices between levels are not built',
+  'invoice.paid_on': 'affiliation invoices between levels are not built',
   'fee_schedule.period': 'fees are configured but not yet charged',
   'fee_schedule.applies_to': 'fees are configured but not yet charged',
   'fee_schedule.effective_from': 'fees are configured but not yet charged',
