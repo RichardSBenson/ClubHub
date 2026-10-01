@@ -99,6 +99,12 @@ export async function migrate(client, { log = console.log } = {}) {
 
   const applied = [], baselined = [], skipped = [];
 
+  // What a migration says while it runs. Postgres sends these as notices,
+  // and nothing was listening — which is how a removal that left something
+  // behind did so without a word of explanation in the deploy log.
+  const onNotice = (n) => log(`    ${n.message}`);
+  client.on?.('notice', onNotice);
+
   for (const m of migrations()) {
     if (known.has(m.id)) { skipped.push(m.id); continue; }
 
@@ -137,6 +143,7 @@ export async function migrate(client, { log = console.log } = {}) {
     }
   }
 
+  client.removeListener?.('notice', onNotice);
   return { applied, baselined, skipped };
 }
 

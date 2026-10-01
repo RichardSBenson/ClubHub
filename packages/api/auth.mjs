@@ -330,7 +330,7 @@ export async function demoSignIn(slug, { userAgent = null, ip = null } = {}) {
     select id, name, slug
     from organisation
     where slug = $1
-      and parent_id is null
+      and parent_id is null and status = 'active'
       and coalesce((settings->>'demo')::boolean, false)`, [String(slug ?? '')]);
 
   if (!federation)

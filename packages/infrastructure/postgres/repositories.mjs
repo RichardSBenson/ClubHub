@@ -237,7 +237,7 @@ export class PostgresSiteContent {
       select slug, name, founded,
              coalesce((settings->>'demo')::boolean, false) as demo
       from organisation
-      where parent_id is null
+      where parent_id is null and status = 'active'
       order by founded nulls last, name`);
     return rows;
   }

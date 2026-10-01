@@ -117,25 +117,79 @@ console.log('\nRUNNING IT AGAIN CHANGES NOTHING');
   ok('nothing is applied twice', r.applied.length === 0);
 }
 
-console.log('\nIT DOES NOT FAIL A DEPLOY, AND DOES NOT BREAK THE AUDIT LOG');
+console.log('\nTHE ONE THAT WAS LEFT: A DEMONSTRATION WITH HISTORY');
 {
+  // The hosted database's state after 022: one demonstration gone, one left
+  // because the audit log mentions it, and 022 already on the ledger so it
+  // will never run again. Only 023 can finish this.
   await c.end();
   const d = await build();
-  const { rows: [bjj] } = await d.query(`select id from organisation where slug='demo-bjj'`);
-  const { rows: [acct] } = await d.query(`insert into account (email) values ('a@example.nz') returning id`);
-  await d.query(`insert into audit_log (account_id, organisation_id, action, entity)
-    values ($1,$2,'update','person')`, [acct.id, bjj.id]);
+  await d.query(`create table schema_migration (id text primary key,
+    applied_at timestamptz not null default now(), ran boolean not null default true)`);
+  for (const f of fs.readdirSync(path.join(ROOT, 'db')).filter((x) => /^\d{3}-.*\.sql$/.test(x))) {
+    if (f.startsWith('023')) continue;
+    await d.query(`insert into schema_migration (id) values ($1)`, [f.replace(/\.sql$/, '')]);
+  }
+  await d.query(fs.readFileSync(path.join(ROOT, 'db/022-remove-demo-federations.sql'), 'utf8')
+    .replace(/^--.*$/mg, ''));   // as 022 behaved before anybody had history in it
 
+  const { rows: [kaimai] } = await d.query(`select id from organisation where slug='demo-tkd'`);
+  const { rows: [bjj] } = await d.query(`select id from organisation where slug='demo-bjj'`);
+  ok('both are gone already, as before the history existed', !kaimai && !bjj);
+  await d.end();
+}
+
+{
+  const d = await build();
+  const { rows: [real] } = await d.query(
+    `insert into account (email) values ('real@example.nz') returning id`);
+  const { rows: roots } = await d.query(`select id, slug from organisation where parent_id is null`);
+  for (const r of roots)
+    await d.query(`insert into grant_role (account_id, organisation_id, role)
+                   values ($1,$2,'owner')`, [real.id, r.id]);
+  const tkd = roots.find((r) => r.slug === 'demo-tkd');
+  const bjj = roots.find((r) => r.slug === 'demo-bjj');
+
+  // Somebody clicked around in the taekwondo one.
+  await d.query(`insert into audit_log (account_id, organisation_id, action, entity)
+    values ($1,$2,'asset_upload','asset')`, [real.id, tkd.id]);
+
+  await d.query(`create table schema_migration (id text primary key,
+    applied_at timestamptz not null default now(), ran boolean not null default true)`);
+  for (const f of fs.readdirSync(path.join(ROOT, 'db')).filter((x) => /^\d{3}-.*\.sql$/.test(x))) {
+    if (f.startsWith('022') || f.startsWith('023')) continue;
+    await d.query(`insert into schema_migration (id) values ($1)`, [f.replace(/\.sql$/, '')]);
+  }
+
+  const said = [];
   let threw = null;
-  let r;
-  try { r = await migrate(d, { log: () => {} }); } catch (e) { threw = e; }
-  ok('a demonstration with history does not stop the migration', !threw, threw?.message);
-  ok('it is left where it is, because the log is append-only',
-    await n(d, `select count(*) from organisation where slug='demo-bjj'`) === 1);
-  ok('the other one is still removed',
-    await n(d, `select count(*) from organisation where slug='demo-tkd'`) === 0);
-  ok('and the audit entry is intact', await n(d,
-    `select count(*) from audit_log where organisation_id=$1`, [bjj.id]) === 1);
+  try { await migrate(d, { log: (l) => said.push(l) }); } catch (e) { threw = e; }
+  ok('it does not stop the deploy', !threw, threw?.message);
+  ok('and the deploy log says what happened to the one it could not delete',
+    said.some((l) => /history in the audit log/.test(l)) && said.some((l) => /Closed the demonstration/.test(l)),
+    said.join(' | '));
+
+  ok('the one with history is kept, and closed', await n(d,
+    `select count(*) from organisation where path <@ 'demo_tkd' and status = 'closed'`) > 0
+    && await n(d, `select count(*) from organisation where path <@ 'demo_tkd'
+                   and status <> 'closed'`) === 0);
+  ok('with its history intact', await n(d,
+    `select count(*) from audit_log where organisation_id = $1`, [tkd.id]) === 1);
+  ok('the real person can no longer see it', await n(d, `
+    select count(*) from visible_orgs($1) v join organisation o on o.id = v.organisation_id
+    where o.path <@ 'demo_tkd'`, [real.id]) === 0);
+  ok('and their dashboard has one federation on it', await n(d, `
+    select count(*) from visible_orgs($1) v join organisation o on o.id = v.organisation_id
+    where o.parent_id is null`, [real.id]) === 1);
+  ok('the one without history is deleted outright',
+    await n(d, `select count(*) from organisation where id = $1`, [bjj.id]) === 0);
+  ok('the real federation is untouched', await n(d,
+    `select count(*) from organisation where slug='moknz' and status='active'`) === 1);
+  ok('nothing of MOKNZ\'s was closed', await n(d,
+    `select count(*) from organisation where path <@ 'moknz' and status = 'closed'`) === 0);
+
+  const again = await migrate(d, { log: () => {} });
+  ok('running it again does nothing', again.applied.length === 0);
   await d.end();
 }
 
