@@ -33,10 +33,11 @@
 import crypto from 'node:crypto';
 import { URL } from 'node:url';
 import { pool, orgs, people, rank, events, competition, pages, assets, news,
-         instructors, navigation, audit, search, clubPages, appearance,
+         instructors, navigation, audit, search, clubPages, appearance, clubs,
          Forbidden, NotFound, Invalid } from './data.mjs';
 import * as auth from './auth.mjs';
 import * as V from './views.mjs';
+import { readNewClub } from '../core/domain/new-club.mjs';
 import { BUILT_IN } from '../site/builtin-themes.mjs';
 import { readTheme, serialise } from '../site/theme.mjs';
 import { currentStore } from '../infrastructure/factory.mjs';
@@ -758,6 +759,50 @@ post('/o/:slug/menu', async (ctx) => {
   } catch (e) {
     if (e instanceof Invalid)
       return ctx.redirect(`${back}?error=${encodeURIComponent(e.message)}`);
+    throw e;
+  }
+});
+
+// ---- adding a club ---------------------------------------------------------
+
+async function clubsScreen(ctx, org, extra = {}) {
+  return ctx.send(extra.status ?? 200, V.clubsScreen({
+    me: ctx.me, org, csrf: ctx.csrf,
+    clubs: await clubs.beneath(ctx.me.accountId, org.id),
+    done: ctx.url.searchParams.get('done'),
+    ...extra,
+  }));
+}
+
+get('/o/:slug/clubs', async (ctx) => {
+  const org = await organisationFor(ctx);
+  if (org.type === 'club') return ctx.redirect(`/o/${org.slug}/club-page`);
+  return clubsScreen(ctx, org);
+});
+
+post('/o/:slug/clubs/new', async (ctx) => {
+  const org = await organisationFor(ctx);
+  if (org.type === 'club') throw new Forbidden('A club cannot have clubs beneath it.');
+  const form = await ctx.form();
+  const values = readNewClub(form);
+  try {
+    const { club, admin } = await clubs.create(ctx.me.accountId, org.id, values);
+    // Issued the ordinary way, and shown once: the same fifteen minutes and
+    // single use as any sign-in link, for an administrator who may not have
+    // working email yet.
+    let link = null, linkExpires = null;
+    if (admin) {
+      const issued = await auth.requestLink(values.adminEmail, { ip: ctx.ip });
+      const origin = `${ctx.secure ? 'https' : 'http'}://${ctx.req.headers.host}`;
+      link = issued.token ? `${origin}/signin/${issued.token}` : null;
+      linkExpires = issued.expiresInMinutes;
+    }
+    return clubsScreen(ctx, org, { added: club, adminName:
+      admin ? `${values.adminFirst} ${values.adminLast}` : null, link, linkExpires });
+  } catch (e) {
+    if (e instanceof Invalid)
+      return clubsScreen(ctx, org, { status: 422, error: e.message, values: form,
+        added: e.club ?? null });
     throw e;
   }
 });

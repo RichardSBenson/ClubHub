@@ -124,6 +124,9 @@ export function describe(entry) {
       return `changed the site menu to ${(a.items ?? []).length} item`
         + ((a.items ?? []).length === 1 ? '' : 's');
 
+    case 'club_added':
+      return `added the club ${a.name ? quote(a.name) : ''}`.trim();
+
     case 'event_publish_up_asked':
       return `asked for ${a.title ? quote(a.title) : 'an event'} to go on the federation's calendar`;
     case 'event_publish_up':
@@ -194,6 +197,7 @@ export const ACTIONS = Object.freeze([
   ['instructor_save', 'Instructor profile changed'],
   ['instructor_remove', 'Instructor removed from site'],
   ['navigation_save', 'Menu changed'],
+  ['club_added', 'Club added'],
   ['event_publish_up_asked', 'Event listing requested'],
   ['event_publish_up', 'Event listing decided'],
   ['theme_apply', 'Website look changed'],

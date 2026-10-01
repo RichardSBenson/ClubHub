@@ -295,7 +295,10 @@ export function rail({ org, vocabulary = {}, can = {}, path = '' }) {
     isClub ? link(`${base}/club-page`, `${club} page`)
            : link(`${base}/club-pages`, `${club} pages`),
   ]) : ''}
-  ${can.manage ? group('Organisation', [link(`${base}/history`, 'History')]) : ''}
+  ${can.manage ? group('Organisation', [
+    !isClub && link(`${base}/clubs`, vocabulary.clubPlural ?? `${club}s`),
+    link(`${base}/history`, 'History'),
+  ]) : ''}
   <div class="all"><nav aria-label="All organisations">
     ${link('/dashboard', 'Everything I look after')}</nav></div>
 </aside>`;
@@ -2722,4 +2725,67 @@ export const appearanceEditor = ({ me, csrf, org, current, builtIn = [],
       style="font-family:monospace">${esc(pasted)}</textarea>
     <div class="actions"><button class="btn" type="submit">Check and use</button></div>
   </form>`, });
+};
+
+/**
+ * The clubs beneath an organisation, and adding one.
+ *
+ * Adding a club and naming its administrator is one step because a club with
+ * nobody able to open it is the thing this screen exists to stop producing.
+ */
+export const clubsScreen = ({ me, csrf, org, clubs = [], values = {}, error,
+                              done, added = null, adminName = null,
+                              link = null, linkExpires = null }) => {
+  const v = (k) => esc(values[k] ?? '');
+  return page({ title: `Clubs — ${org.name}`, me, csrf, body: `
+  <h1>Clubs</h1>
+  <p class="sub">${esc(org.name)}</p>
+  ${done ? `<div class="good">${esc(done)}</div>` : ''}
+  ${error ? `<div class="bad">${esc(error)}</div>` : ''}
+  ${added ? `<div class="good"><strong>${esc(added.name)}</strong> is added.
+    <a href="/o/${esc(added.slug)}/roster">Open it</a>.
+    It has no page on the website yet — the club asks for that from its own
+    screen and you approve it under Dojo pages.
+    ${adminName ? `<br>${esc(adminName)} can run it. ${link
+      ? `Give them this sign-in link (it works once, for ${esc(String(linkExpires ?? 15))}
+         minutes, and is not shown again):<br><code style="word-break:break-all">${esc(link)}</code>`
+      : ''}` : ''}</div>` : ''}
+
+  <h2>Add a club</h2>
+  <form method="post" action="/o/${esc(org.slug)}/clubs/new">
+    <input type="hidden" name="_csrf" value="${esc(csrf ?? '')}">
+    <div class="row">
+      <div><label for="name">Club name</label>
+        <input id="name" name="name" required maxlength="80" value="${v('name')}"></div>
+      <div><label for="city">Town or city</label>
+        <input id="city" name="city" maxlength="80" value="${v('city')}"></div>
+    </div>
+    <label for="slug">Web address <span class="muted">(optional — made from the name)</span></label>
+    <input id="slug" name="slug" maxlength="40" value="${v('slug')}" placeholder="whanganui">
+    <fieldset><legend>Who runs it</legend>
+      <p class="muted">They are enrolled as a member and given administrator access
+        to this club only. Leave all three blank to add the club now and give
+        somebody access later.</p>
+      <div class="row">
+        <div><label for="adminFirst">First name</label>
+          <input id="adminFirst" name="adminFirst" maxlength="60" value="${v('adminFirst')}"></div>
+        <div><label for="adminLast">Last name</label>
+          <input id="adminLast" name="adminLast" maxlength="60" value="${v('adminLast')}"></div>
+      </div>
+      <label for="adminEmail">Email</label>
+      <input id="adminEmail" name="adminEmail" type="email" maxlength="160" value="${v('adminEmail')}">
+    </fieldset>
+    <div class="actions"><button class="btn" type="submit">Add the club</button></div>
+  </form>
+
+  <h2>${clubs.length} club${clubs.length === 1 ? '' : 's'}</h2>
+  ${clubs.length ? `<table><thead><tr><th>Club</th><th class="hide-sm">Town</th>
+    <th>Members</th><th>Administrator</th><th>Website</th></tr></thead><tbody>${
+    clubs.map((c) => `<tr>
+      <td><a href="/o/${esc(c.slug)}/roster"><strong>${esc(c.name)}</strong></a></td>
+      <td class="hide-sm">${esc(c.city)}</td>
+      <td>${c.members}</td>
+      <td>${c.has_administrator ? 'Yes' : '<span class="tag no">Nobody yet</span>'}</td>
+      <td>${c.page_live ? '<span class="tag ok">Live</span>' : '<span class="muted">Not listed</span>'}</td>
+    </tr>`).join('')}</tbody></table>` : '<div class="note">No clubs yet.</div>'}` });
 };
