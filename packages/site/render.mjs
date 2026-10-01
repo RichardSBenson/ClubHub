@@ -396,6 +396,76 @@ function welcomeLine(dojos = []) {
   return '';
 }
 
+/**
+ * The instructors page.
+ *
+ * Every word on it comes from the register: the grade from the grading
+ * record, the title from the title award, the name from the person. Nobody
+ * retypes any of it into a website, which is the whole claim of this product
+ * and the reason a federation stops having a site that says somebody is a
+ * 3rd dan four years after they were awarded 4th.
+ *
+ * Only people whose organisation has published them appear here. An empty
+ * page is the correct answer when nobody has been asked yet.
+ */
+export function instructorsPage({ instructors = [], federation, origin, fonts,
+                                  nav, base = '', vocabulary = {}, assets = {} }) {
+  const at = (p) => `${base}${p}`;
+
+  const bio = (b) => (b?.blocks ?? [])
+    .map((blk) => typeof blk.text === 'string' ? blk.text : '')
+    .filter(Boolean)
+    .map((t) => `<p>${esc(t)}</p>`).join('');
+
+  const card = (i) => {
+    const photo = i.photoAssetId ? assets[i.photoAssetId] : null;
+    return `<article class="card">
+      ${photo ? `<img src="${esc(photo)}" alt="${esc(`${i.firstName} ${i.lastName}`)}"
+        loading="lazy" style="width:100%;height:auto;display:block;margin-bottom:12px">` : ''}
+      <h2 style="margin:0 0 4px">${esc(i.firstName)} ${esc(i.lastName)}</h2>
+      <p style="margin:0 0 10px;color:var(--muted)">
+        ${/* In MOKNZ the senior dan grades and the titles share a name —
+             Hanshi is 8th dan and the title conferred by holding it. Printing
+             both gives "Hanshi · Hanshi". Same word, two facts, one line. */
+          [...new Set([i.title, i.grade].filter(Boolean))].map(esc).join(' · ')}
+        ${i.organisationName && i.organisationSlug !== federation.slug
+          ? ` · <a href="${at(`/${esc(i.organisationSlug)}`)}">${esc(i.organisationName)}</a>`
+          : ''}</p>
+      ${i.teaches ? `<p><strong>${esc(i.teaches)}</strong></p>` : ''}
+      ${bio(i.bio)}
+    </article>`;
+  };
+
+  const body = `
+<section><div class="wrap">
+  <h1 style="font-family:var(--display);font-size:clamp(30px,5vw,46px);margin:0 0 12px">Instructors</h1>
+  ${instructors.length
+    ? `<div class="grid" style="margin-top:28px">${instructors.map(card).join('')}</div>`
+    : `<p style="font-size:19px;max-width:60ch">No instructor has been listed
+        here yet.</p>`}
+</div></section>`;
+
+  return layout({
+    title: `Instructors — ${federation.name}`,
+    description: instructors.length
+      ? `${instructors.length} instructor${instructors.length === 1 ? '' : 's'} `
+        + `teaching ${artOf(federation)} with ${federation.name}.`
+      : `Instructors teaching ${artOf(federation)} with ${federation.name}.`,
+    canonical: `${origin}${at('/instructors')}`,
+    jsonLd: instructors.length ? [{
+      '@context': 'https://schema.org', '@type': 'ItemList',
+      itemListElement: instructors.map((i, n) => ({
+        '@type': 'ListItem', position: n + 1,
+        item: { '@type': 'Person', name: `${i.firstName} ${i.lastName}`,
+                jobTitle: i.title ?? 'Instructor',
+                memberOf: { '@type': 'SportsOrganization',
+                            name: i.organisationName ?? federation.name } },
+      })),
+    }] : [],
+    federation, fonts, nav, base, vocabulary, body,
+  });
+}
+
 export function findADojoPage({ dojos, federation, origin, fonts, nav,
                                 base = '', vocabulary = {} }) {
   const at = (p) => `${base}${p}`;
@@ -416,7 +486,8 @@ export function findADojoPage({ dojos, federation, origin, fonts, nav,
 
   return layout({
     title: `Find a dojo — ${federation.name}`,
-    description: `${dojos.length} ${clubsWordOf(vocabulary)}. Find your nearest and book a free first class.`,
+    description: `${dojos.length} ${clubsWordOf(vocabulary)}. `
+      + `Find your nearest.${welcomeLine(dojos)}`,
     canonical: `${origin}${at('/find-a-dojo')}`,
     jsonLd: [{
       '@context':'https://schema.org','@type':'SportsOrganization',

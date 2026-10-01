@@ -22,6 +22,7 @@ const FED = process.env.FEDERATION ?? 'moknz';
 const NAV = [
   { href: '/find-a-dojo', label: 'Find a club' },
   { href: '/events', label: 'Events' },
+  { href: '/instructors', label: 'Instructors' },
   { href: '/about', label: 'About us' },
 ];
 
@@ -239,6 +240,13 @@ for (const target of SITES) {
   }
 
   await write('find-a-dojo/index.html', R.findADojoPage({ dojos, ...shared }));
+
+  // Only those the organisation has published. An empty page is the right
+  // answer when nobody has been asked yet, so it is still written — a missing
+  // page and an empty one say different things to somebody following a link.
+  const teachers = site.instructors ? await site.instructors(target.slug) : [];
+  await write('instructors/index.html',
+    R.instructorsPage({ instructors: teachers, assets, ...shared }));
 
   for (const ev of evs) {
     await write(`events/${ev.slug}/index.html`, R.eventPage({ ev, ...shared }));

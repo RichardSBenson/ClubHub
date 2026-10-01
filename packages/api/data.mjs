@@ -1230,6 +1230,7 @@ export const billing = {
 // ---------------------------------------------------------------------------
 
 import { validate, excerpt, toText } from '../content/blocks.mjs';
+import { assertMayPublish } from '../core/domain/instructing.mjs';
 
 /**
  * Writing a page and publishing one are different jobs. A contributor is
@@ -1711,6 +1712,131 @@ export const news = {
        JSON.stringify({ publish_up_state: row.publish_up_state,
                         title: row.title })]);
 
+    return row;
+  },
+};
+
+// ---------------------------------------------------------------------------
+// instructors on the public site
+//
+// Who instructs is affiliation.role, and the website follows the register
+// rather than the other way round. Whether somebody agreed to have their name,
+// photograph and grade on a page anybody can read is a different fact, kept in
+// instructor_profile, defaulting to no. See db/018 and the domain rules in
+// core/domain/instructing.mjs.
+// ---------------------------------------------------------------------------
+
+export const instructors = {
+  /**
+   * Everybody holding the instructor role here, with their profile if they
+   * have one. Instructors without a profile are included deliberately: the
+   * screen's job is partly to show who could be listed and is not.
+   */
+  async listFor(actor, orgId) {
+    await assertRole(actor, orgId, MANAGE);
+    const { rows } = await pool.query(`
+      select p.id as person_id, p.first_name, p.last_name, p.date_of_birth,
+             p.photo_asset_id,
+             cg.label as grade, cg.is_dan,
+             ct.label as title, ct.address_as,
+             ip.id as profile_id, ip.bio, ip.teaches, ip.published,
+             ip.published_at, ip.sort_order
+      from affiliation a
+      join person p on p.id = a.person_id
+      left join person_current_grade cg on cg.person_id = p.id
+      left join person_current_title ct on ct.person_id = p.id
+      left join instructor_profile ip
+             on ip.person_id = p.id and ip.organisation_id = $1
+      where a.organisation_id = $1 and a.ends is null
+        and a.role = 'instructor' and a.status = 'active'
+      order by ip.sort_order nulls last, cg.rank_order desc nulls last,
+               p.last_name`, [orgId]);
+    return rows;
+  },
+
+  /**
+   * Add somebody to the site, or change what it says about them.
+   *
+   * Publishing is checked against the domain rule every time, not only when
+   * the box is first ticked — somebody's birthday does not move, but a
+   * federation raising its minimum age should take effect on the next save.
+   */
+  async save(actor, orgId, personId, { bio, teaches, published, sortOrder = 0 }) {
+    await assertRole(actor, orgId, MANAGE);
+
+    const person = await one(`
+      select p.id, p.date_of_birth,
+             exists (select 1 from affiliation a
+                     where a.person_id = p.id and a.organisation_id = $2
+                       and a.ends is null and a.role = 'instructor'
+                       and a.status = 'active') as is_instructor
+      from person p where p.id = $1`, [personId, orgId]);
+    if (!person) throw new NotFound('Person');
+
+    const org = await one('select settings from organisation where id=$1', [orgId]);
+    const today = new Date().toISOString().slice(0, 10);
+
+    if (published) {
+      // Throws a DomainError naming the reason, which the route shows as-is.
+      assertMayPublish({
+        person: { dateOfBirth: person.date_of_birth },
+        isInstructor: person.is_instructor,
+        on: today,
+        settings: org?.settings ?? {},
+      });
+    }
+
+    const { doc } = validate(bio ?? { blocks: [] });
+
+    const row = await one(`
+      insert into instructor_profile (organisation_id, person_id, bio, teaches,
+                                      published, published_by, published_at,
+                                      sort_order)
+      values ($1,$2,$3,$4,$5,$6,$7,$8)
+      on conflict (organisation_id, person_id) do update set
+        bio = excluded.bio,
+        teaches = excluded.teaches,
+        published = excluded.published,
+        -- Only stamped when it becomes published, so the record keeps who
+        -- first agreed rather than whoever last edited a typo.
+        published_by = case when excluded.published and not instructor_profile.published
+                            then excluded.published_by
+                            else instructor_profile.published_by end,
+        published_at = case when excluded.published and not instructor_profile.published
+                            then excluded.published_at
+                            else instructor_profile.published_at end,
+        sort_order = excluded.sort_order
+      returning *`,
+      [orgId, personId, doc, teaches?.trim() || null, !!published,
+       published ? actor : null, published ? new Date() : null, sortOrder]);
+
+    await pool.query(`
+      insert into audit_log (account_id, organisation_id, action, entity,
+                             entity_id, after)
+      values ($1,$2,$3,'instructor_profile',$4,$5)`,
+      [actor, orgId, published ? 'instructor_publish' : 'instructor_save',
+       row.id, JSON.stringify({ personId, published: !!published })]);
+
+    return row;
+  },
+
+  /**
+   * Take somebody off the site.
+   *
+   * Deletes the profile rather than flipping a flag, because "remove me from
+   * your website" should not leave a row that somebody can tick again without
+   * asking. They remain an instructor on the roll.
+   */
+  async remove(actor, orgId, personId) {
+    await assertRole(actor, orgId, MANAGE);
+    const row = await one(`delete from instructor_profile
+      where organisation_id=$1 and person_id=$2 returning *`, [orgId, personId]);
+    if (!row) throw new NotFound('Instructor profile');
+    await pool.query(`
+      insert into audit_log (account_id, organisation_id, action, entity,
+                             entity_id, before)
+      values ($1,$2,'instructor_remove','instructor_profile',$3,$4)`,
+      [actor, orgId, row.id, JSON.stringify({ personId, was: row.published })]);
     return row;
   },
 };

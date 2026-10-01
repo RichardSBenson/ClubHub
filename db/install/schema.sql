@@ -1499,3 +1499,29 @@ create index asset_organisation_idx on asset (organisation_id, created_at desc);
 alter table article
   add column publish_up_state text not null default 'none'
     check (publish_up_state in ('none','requested','approved','declined'));
+
+-- ---------------------------------------------------------------------------
+--  018 — instructors on the public site
+--
+--  Who instructs is affiliation.role. Whether they agreed to have their name,
+--  photograph and grade on a public website is a different fact about a
+--  different thing, and this table holds that one. Unpublished by default,
+--  per organisation, with who said yes and when.
+-- ---------------------------------------------------------------------------
+
+create table instructor_profile (
+  id               uuid primary key default uuid_generate_v4(),
+  organisation_id  uuid not null references organisation(id) on delete cascade,
+  person_id        uuid not null references person(id) on delete cascade,
+  bio              jsonb not null default '{"blocks":[]}',
+  teaches          text,
+  published        boolean not null default false,
+  published_by     uuid references account(id),
+  published_at     timestamptz,
+  sort_order       smallint not null default 0,
+  created_at       timestamptz not null default now(),
+  unique (organisation_id, person_id)
+);
+
+create index instructor_profile_org_idx
+  on instructor_profile (organisation_id, sort_order, person_id);

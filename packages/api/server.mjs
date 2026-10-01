@@ -33,7 +33,7 @@
 import crypto from 'node:crypto';
 import { URL } from 'node:url';
 import { pool, orgs, people, rank, events, competition, pages, assets, news,
-         Forbidden, NotFound, Invalid } from './data.mjs';
+         instructors, Forbidden, NotFound, Invalid } from './data.mjs';
 import * as auth from './auth.mjs';
 import * as V from './views.mjs';
 import { currentStore } from '../infrastructure/factory.mjs';
@@ -640,6 +640,59 @@ const previewBanner = (org, pg) => `
   <a href="/o/${org.slug}/pages/${pg.id}"
     style="margin-left:auto;color:#F0CE41">Back to editing</a>
 </div>`;
+
+// ---- instructors -----------------------------------------------------------
+
+get('/o/:slug/instructors', async (ctx) => {
+  const org = await organisationFor(ctx, { toWrite: true });
+  return ctx.send(200, V.instructorList({
+    me: ctx.me, org, csrf: ctx.csrf,
+    instructors: await instructors.listFor(ctx.me.accountId, org.id),
+    done: ctx.url.searchParams.get('done'),
+    error: ctx.url.searchParams.get('error'),
+    rebuild: ctx.url.searchParams.get('rebuild'),
+  }));
+});
+
+post('/o/:slug/instructors/:personId', async (ctx) => {
+  const org = await organisationFor(ctx, { toWrite: true });
+  const form = await ctx.form();
+  const back = `/o/${org.slug}/instructors`;
+
+  try {
+    if (form.op === 'remove') {
+      await instructors.remove(ctx.me.accountId, org.id, ctx.params.personId);
+      const rebuild = await requestRebuild({ reason: `instructor off ${org.slug}` });
+      return ctx.redirect(`${back}?done=`
+        + encodeURIComponent('Taken off the website. They are still on the roll.')
+        + '&rebuild=' + encodeURIComponent(rebuild.detail));
+    }
+
+    const published = form.published === 'on';
+    const row = await instructors.save(ctx.me.accountId, org.id,
+      ctx.params.personId, {
+        bio: { blocks: String(form.bio ?? '').split(/\n{2,}/)
+          .map((t) => t.trim()).filter(Boolean)
+          .map((text) => ({ type: 'paragraph', text })) },
+        teaches: form.teaches,
+        published,
+        sortOrder: Number(form.sortOrder) || 0,
+      });
+
+    const rebuild = row.published
+      ? await requestRebuild({ reason: `instructor on ${org.slug}` })
+      : { detail: 'Not on the site, so nothing to rebuild.' };
+    return ctx.redirect(`${back}?done=` + encodeURIComponent(row.published
+      ? 'Saved and on the website.' : 'Saved. Not on the website.')
+      + '&rebuild=' + encodeURIComponent(rebuild.detail));
+  } catch (e) {
+    // A DomainError here is the minimum-age rule or the register rule, and its
+    // message is written to be read by a person, so it is shown as it is.
+    if (e.name === 'DomainError' || e instanceof Invalid)
+      return ctx.redirect(`${back}?error=${encodeURIComponent(e.message)}`);
+    throw e;
+  }
+});
 
 // ---- news ------------------------------------------------------------------
 

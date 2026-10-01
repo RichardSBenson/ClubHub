@@ -229,6 +229,34 @@ export class PostgresSiteContent {
     return r ?? { tokens: {}, fonts: {} };
   }
 
+  /**
+   * Instructors this federation has agreed to show, with what the register
+   * already knows about them: grade, title, photograph.
+   *
+   * Published only. The default is unpublished and the absence of a row means
+   * nobody has been asked, so an empty list here is the correct answer rather
+   * than a missing feature.
+   */
+  async instructors(rootSlug) {
+    const { rows } = await this.pool.query(`
+      select p.id as "personId", p.first_name as "firstName",
+             p.last_name as "lastName", p.photo_asset_id as "photoAssetId",
+             cg.label as grade, cg.is_dan as "isDan",
+             ct.label as title, ct.address_as as "addressAs",
+             ip.bio, ip.teaches, ip.sort_order as "sortOrder",
+             o.name as "organisationName", o.slug as "organisationSlug"
+      from instructor_profile ip
+      join person p on p.id = ip.person_id
+      join organisation o on o.id = ip.organisation_id
+      join organisation root on o.path <@ root.path
+      left join person_current_grade cg on cg.person_id = p.id
+      left join person_current_title ct on ct.person_id = p.id
+      where root.slug = $1 and ip.published
+      order by ip.sort_order, cg.rank_order desc nulls last, p.last_name`,
+      [rootSlug]);
+    return rows;
+  }
+
   async dojos(rootSlug) {
     const { rows } = await this.pool.query(`
       select o.id, o.name, o.slug, o.country_code, d.*,

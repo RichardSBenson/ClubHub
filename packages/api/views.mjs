@@ -242,7 +242,7 @@ export const person = ({ me, csrf, person, history, affiliations, eligibility,
 
   ${titles.length ? `<p class="sub">${titles.map((t) => `<span class="tag dan">${
     esc(t.label)}</span>`).join(' ')}
-    ${titles[0].address_as
+    ${titles[0].address_as && titles[0].address_as !== titles[0].label
       ? `<span class="muted">addressed as ${esc(titles[0].address_as)}</span>`
       : ''}</p>` : ''}
 
@@ -1630,6 +1630,116 @@ export const pageEditor = ({ me, csrf, org, page: pg, values = {},
             <button class="btn quiet" type="submit">Go back to this</button>
           </form>` : '')}</td>
     </tr>`).join('')}</tbody></table>` : ''}` });
+};
+
+/**
+ * Who is on the public site, and who could be.
+ *
+ * Everybody with the instructor role is listed, including those with no
+ * profile, because half this screen's job is showing an administrator who is
+ * not on the website — a federation whose site lists two of its nine
+ * instructors usually has not decided that, it has just not got round to it.
+ *
+ * The wording is deliberate. Publishing somebody is phrased as a thing done to
+ * a person, because it is: their name, their photograph and their grade on a
+ * page anybody can read, indefinitely.
+ */
+export const instructorList = ({ me, csrf, org, instructors = [],
+                                 done, error, rebuild }) => {
+  const age = (dob) => {
+    if (!dob) return null;
+    const d = new Date(dob), now = new Date();
+    let y = now.getFullYear() - d.getFullYear();
+    const m = now.getMonth() - d.getMonth();
+    if (m < 0 || (m === 0 && now.getDate() < d.getDate())) y -= 1;
+    return y;
+  };
+
+  const bioText = (bio) => (bio?.blocks ?? [])
+    .map((b) => typeof b.text === 'string' ? b.text : '')
+    .filter(Boolean).join('\n\n');
+
+  const card = (i) => {
+    const years = age(i.date_of_birth);
+    const tooYoung = years !== null && years < 18;
+    const noDob = !i.date_of_birth;
+
+    return `<div class="card">
+      <h3>${esc(i.first_name)} ${esc(i.last_name)}
+        ${i.title ? `<span class="tag dan">${esc(i.title)}</span>` : ''}</h3>
+      <p class="muted">${i.grade ? esc(i.grade) : 'ungraded'}${
+        // Hanshi is both an MOKNZ dan grade and the title it confers, so
+        // "Hanshi · addressed as Hanshi" says one thing twice.
+        i.address_as && i.address_as !== i.grade && i.address_as !== i.title
+          ? ` · addressed as ${esc(i.address_as)}` : ''}${
+        i.published ? '' : ' · not on the website'}</p>
+
+      ${tooYoung ? `<div class="note"><strong>Under 18.</strong>
+        They can hold the instructor role on the roll, but this platform does
+        not put a name, photograph and grade of anybody under 18 on a page
+        that anybody can read.</div>` : ''}
+      ${noDob ? `<div class="note">Their date of birth is not recorded, so the
+        system cannot tell whether they are old enough to be published.
+        <a href="/p/${esc(i.person_id)}/edit">Add it</a> first.</div>` : ''}
+
+      <form method="post"
+            action="/o/${esc(org.slug)}/instructors/${esc(i.person_id)}">
+        <input type="hidden" name="_csrf" value="${esc(csrf ?? '')}">
+
+        <p><label>What they teach
+          <span class="hint">One line. "Tuesday and Thursday evenings",
+            "Children's classes".</span><br>
+          <input type="text" name="teaches" maxlength="200"
+            value="${esc(i.teaches ?? '')}"></label></p>
+
+        <p><label>About them<br>
+          <textarea name="bio" rows="4">${esc(bioText(i.bio))}</textarea>
+          <span class="hint">Leave a blank line between paragraphs.</span>
+        </label></p>
+
+        <p><label>Order on the page
+          <span class="hint">Lower numbers first.</span><br>
+          <input type="number" name="sortOrder" min="0" max="999"
+            style="max-width:120px" value="${i.sort_order ?? 0}"></label></p>
+
+        ${tooYoung || noDob ? '' : `<p><label>
+          <input type="checkbox" name="published"${i.published ? ' checked' : ''}>
+          Show them on the public website</label>
+          <span class="hint">Ask them first. This puts their name, grade and
+            photograph on a page anybody can read.</span></p>`}
+
+        <p><button class="btn" type="submit">Save</button>
+        ${i.profile_id ? `<button class="btn quiet" type="submit"
+          name="op" value="remove">Take off the website</button>` : ''}</p>
+      </form>
+
+      ${i.published && i.published_at ? `<p class="hint">On the site since
+        ${esc(new Date(i.published_at).toISOString().slice(0, 10))}.</p>` : ''}
+      ${i.photo_asset_id ? '' : `<p class="hint">No photograph on their record.
+        <a href="/o/${esc(org.slug)}/media">Upload one</a> and set it on their
+        page.</p>`}
+    </div>`;
+  };
+
+  const shown = instructors.filter((i) => i.published).length;
+
+  return page({ title: `Instructors — ${org.name}`, me, csrf, body: `
+  <h1>Instructors</h1>
+  <p class="sub">${esc(org.name)} ·
+    <a href="/o/${esc(org.slug)}/pages">Website</a> ·
+    <a href="/o/${esc(org.slug)}/roster">Back to the roll</a></p>
+
+  ${done ? `<div class="good">${esc(done)}</div>` : ''}
+  ${error ? `<div class="bad">${esc(error)}</div>` : ''}
+  ${rebuild ? `<div class="note">${esc(rebuild)}</div>` : ''}
+
+  ${instructors.length ? `<p class="muted">${instructors.length} with the
+    instructor role here; ${shown} on the public website.</p>` : ''}
+
+  ${instructors.length ? instructors.map(card).join('')
+    : `<div class="note">Nobody here holds the instructor role. The website
+        follows the roll, so give somebody that role on the
+        <a href="/o/${esc(org.slug)}/roster">roll</a> first.</div>`}` });
 };
 
 /**

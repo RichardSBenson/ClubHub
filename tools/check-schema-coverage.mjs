@@ -80,8 +80,6 @@ const ACCOUNTED_FOR = {
   'rebuild_queue.built_at': 'written by the queue; nothing reports on it yet',
 
   // --- real gaps, named rather than hidden ----------------------------------
-  'person.photo_asset_id': 'a member photo. The media library now makes this '
-    + 'possible and nothing uses it yet — the QR profile work would.',
   'brand.crest_asset_id': 'the crest the brand palette was generated from. '
     + 'Uploading one through the media library is not wired up.',
   'grading_record.ratified_by_org': 'national ratification of a dan grade is '
