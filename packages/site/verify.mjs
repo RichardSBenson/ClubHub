@@ -14,6 +14,15 @@ const ok = (n, c, d='') => c ? (pass++, console.log(`  ✓ ${n}`))
 const read = (p) => fs.readFileSync(path.join(OUT, p), 'utf8');
 const html = (p) => read(p);
 
+console.log('\nTHE MENU ON A PHONE');
+{
+  const home = html('index.html');
+  ok('has a menu button, with no script', /class="navtoggle"/.test(home) && /class="navbtn"/.test(home)
+    && !/<script(?![^>]*ld\+json)/.test(home));
+  ok('the menu is still ordinary links', (home.match(/<nav class="main"[\s\S]*?<\/nav>/)?.[0].match(/<a /g) ?? []).length >= 2);
+  ok('on a phone it slides in from the left', /nav\.main\{position:fixed;top:0;left:0;bottom:0/.test(read('theme.css') + home));
+}
+
 console.log('\nSTRUCTURED DATA — the thing Sporty cannot do');
 {
   const wh = html('whanganui/index.html');

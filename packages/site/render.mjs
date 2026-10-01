@@ -153,6 +153,9 @@ header.site a{color:var(--canvas);text-decoration:none}
 nav.main{margin-left:auto;display:flex;gap:20px;font-size:15px;font-weight:500}
 nav.main a{border-bottom:2px solid transparent;padding-bottom:3px}
 nav.main a:hover{border-bottom-color:var(--primary)}
+/* The menu button and its backdrop exist only on a phone. No script: a hidden
+   checkbox holds open/closed, so the menu works wherever the page does. */
+.navtoggle,.navbtn,.navscrim,.navclose{display:none}
 
 .hero{background:var(--ink-soft);color:var(--canvas);padding:56px 0}
 .hero h1{font-family:var(--display);font-size:clamp(32px,5.4vw,52px);font-weight:700;
@@ -216,7 +219,25 @@ footer.site a{color:var(--neutral)}
   .facts .wrap{grid-template-columns:1fr}
   .facts div{border-right:0;border-bottom:1px solid var(--ink-soft)}
   .grid{grid-template-columns:repeat(2,minmax(0,1fr))}
-  nav.main{display:none}
+  .navbtn{display:flex;margin-left:auto;width:44px;height:44px;align-items:center;
+    justify-content:center;cursor:pointer;flex-direction:column;gap:5px}
+  .navbtn i{display:block;width:24px;height:2px;background:var(--canvas)}
+  .navtoggle{display:block;position:absolute;opacity:0;width:1px;height:1px}
+  .navtoggle:focus-visible~.navbtn{outline:3px solid var(--primary);outline-offset:2px}
+  nav.main{position:fixed;top:0;left:0;bottom:0;width:min(280px,82vw);z-index:30;
+    margin:0;flex-direction:column;gap:0;background:var(--ink);padding:64px 0 24px;
+    overflow-y:auto;transform:translateX(-100%);visibility:hidden;
+    transition:transform .2s ease,visibility 0s .2s;font-size:17px}
+  nav.main a{padding:14px 24px;border-bottom:1px solid var(--ink-soft)}
+  .navclose{display:flex;position:absolute;top:10px;right:10px;width:44px;height:44px;
+    align-items:center;justify-content:center;font-size:28px;cursor:pointer;color:var(--canvas)}
+  .navscrim{display:block;position:fixed;inset:0;z-index:20;background:rgba(0,0,0,.5);
+    opacity:0;pointer-events:none;transition:opacity .2s ease}
+  .navtoggle:checked~nav.main{transform:none;visibility:visible;transition:transform .2s ease}
+  .navtoggle:checked~.navscrim{opacity:1;pointer-events:auto}
+}
+@media (max-width:860px) and (prefers-reduced-motion:reduce){
+  nav.main,.navscrim{transition:none!important}
 }
 @media (max-width:600px){
   .grid{grid-template-columns:1fr}
@@ -263,7 +284,10 @@ ${jsonLd.map((l) => `<script type="application/ld+json">${JSON.stringify(l)}</sc
 <body>
 <header class="site"><div class="wrap">
   <a class="brandmark" href="${at('/')}">${esc(federation.name)}<span>${esc(federation.country_code ?? '')}</span></a>
-  <nav class="main">${nav.map((n) => `<a href="${at(n.href)}">${esc(n.label)}</a>`).join('')}</nav>
+  <input type="checkbox" class="navtoggle" id="navtoggle" aria-label="Open the menu">
+  <label class="navbtn" for="navtoggle" aria-hidden="true"><i></i><i></i><i></i></label>
+  <label class="navscrim" for="navtoggle" aria-hidden="true"></label>
+  <nav class="main" aria-label="Main"><label class="navclose" for="navtoggle" aria-hidden="true">×</label>${nav.map((n) => `<a href="${at(n.href)}">${esc(n.label)}</a>`).join('')}</nav>
 </div></header>
 ${body}
 <footer class="site"><div class="wrap">
