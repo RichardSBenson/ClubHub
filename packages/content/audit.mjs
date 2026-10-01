@@ -124,6 +124,14 @@ export function describe(entry) {
       return `changed the site menu to ${(a.items ?? []).length} item`
         + ((a.items ?? []).length === 1 ? '' : 's');
 
+    case 'guardian_link':
+      return `made ${a.guardian ?? 'somebody'} a ${(a.relationship ?? 'parent').replace('_', '-')} of ${a.child ?? 'a child'}`;
+    case 'guardian_unlink':
+      return `ended ${a.guardian ?? 'a guardian'}'s link to ${a.child ?? 'a child'}`;
+    case 'self_update':
+      return `${a.by === 'guardian' ? 'a guardian' : 'the member'} updated ${
+        (a.fields ?? []).map((f) => f.replace(/_/g, ' ')).join(', ')}`;
+
     case 'club_profile_saved': {
       const was = b ?? {};
       const bits = [];
@@ -207,6 +215,9 @@ export const ACTIONS = Object.freeze([
   ['instructor_remove', 'Instructor removed from site'],
   ['navigation_save', 'Menu changed'],
   ['club_added', 'Club added'],
+  ['guardian_link', 'Guardian linked'],
+  ['guardian_unlink', 'Guardian link ended'],
+  ['self_update', 'Member updated their own details'],
   ['club_profile_saved', 'Club details changed'],
   ['event_publish_up_asked', 'Event listing requested'],
   ['event_publish_up', 'Event listing decided'],

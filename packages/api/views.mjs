@@ -244,7 +244,7 @@ function page({ title, me, body, csrf, query = '', wide = false }) {
   <div class="stage">
     <header class="top">
       <a class="brand" href="${me ? '/dashboard' : '/signin'}">Honbu</a>
-      ${search}${who}
+      ${search}${me?.personId ? '<a class="btn quiet" href="/me">My details</a>' : ''}${who}
     </header>
     <main id="main" class="page${wide ? ' wide' : ''}">${body}</main>
     <footer class="foot">Honbu — federation register</footer>
@@ -408,7 +408,7 @@ export const roster = ({ me, csrf, org, roster, canRegister = false,
     : '<div class="note">Nobody on the roll yet.</div>'}` });
 
 export const person = ({ me, csrf, person, history, affiliations, eligibility,
-                        titles = [], changes = [],
+                        titles = [], changes = [], guardians = null,
                         canEdit = false, access = null, link = null,
                         linkExpires = 15, error = null }) => page({
   title: `${person.first_name} ${person.last_name}`, me, csrf, body: `
@@ -510,6 +510,29 @@ export const person = ({ me, csrf, person, history, affiliations, eligibility,
     <p class="hint">Nothing is emailed. You get a link to pass on — useful
       before a federation's own email is set up, and afterwards for anybody
       whose address bounces or who is standing in front of you.</p>
+  </form>` : ''}
+
+  ${canEdit && guardians && (guardians.length || (person.age != null && person.age < 18)) ? `
+  <h2>Parents and guardians</h2>
+  ${guardians.length ? `<table><tbody>${guardians.map((g) => `<tr>
+    <td><a href="/p/${esc(g.person_id)}">${esc(g.first_name)} ${esc(g.last_name)}</a></td>
+    <td>${esc(FAMILY_LABELS[g.relationship] ?? g.relationship)}</td>
+    <td>${g.can_sign_in ? 'Can sign in' : '<span class="muted">No account yet</span>'}</td>
+    <td><form method="post" action="/p/${esc(person.id)}/guardians/${esc(g.id)}/end">
+      <input type="hidden" name="_csrf" value="${esc(csrf ?? '')}">
+      <button class="btn quiet" type="submit">Remove</button></form></td></tr>`).join('')}</tbody></table>`
+    : '<p class="muted">Nobody is linked yet. A parent or guardian can then sign in and enter this child in events.</p>'}
+  <form method="post" action="/p/${esc(person.id)}/guardians">
+    <input type="hidden" name="_csrf" value="${esc(csrf ?? '')}">
+    <div class="row">
+      <div><label for="guardian_number">Their member number
+        <span class="hint">They need to be on the register too, so add them first if they are not.</span></label>
+        <input id="guardian_number" name="guardian_number" maxlength="20" placeholder="MOKNZ-0012"></div>
+      <div><label for="relationship">Related as</label>
+        <select id="relationship" name="relationship">${Object.entries(FAMILY_LABELS)
+          .map(([v, l]) => option(v, l, 'parent')).join('')}</select></div>
+    </div>
+    <div class="actions"><button class="btn" type="submit">Link them</button></div>
   </form>` : ''}
 
   <h2>Affiliation</h2>
@@ -919,6 +942,8 @@ const KIND_LABELS = {
   seminar: 'Seminar', fight_night: 'Fight night', training: 'Training',
   social: 'Social', other: 'Other',
 };
+const FAMILY_LABELS = { parent: 'Parent', step_parent: 'Step-parent',
+  guardian: 'Legal guardian', grandparent: 'Grandparent', carer: 'Carer' };
 const kindLabel = (k) => KIND_LABELS[k] ?? k;
 
 const reachTag = (state, show) => !show ? '' : ({
@@ -2851,4 +2876,76 @@ export const clubProfileScreen = ({ me, csrf, org, club, parent, administrators 
     <td>${esc([a.first_name, a.last_name].filter(Boolean).join(' ') || '—')}</td>
     <td>${esc(a.email)}</td><td>${esc(a.role)}</td></tr>`).join('')}</tbody></table>`
     : '<div class="note">Nobody has administrator access yet. Open a member\'s record to give it.</div>'}` });
+};
+
+/**
+ * A signed-in member's own home: themselves, and any children they look after.
+ */
+export const myHome = ({ me, csrf, self, dependants = [] }) => page({
+  title: 'My details', me, csrf, body: `
+  <h1>${self ? `Kia ora, ${esc(self.preferred_name || self.first_name)}` : 'My details'}</h1>
+  ${self ? `
+  <p class="sub">${esc(self.display_number ?? '')}</p>
+  <div class="row">
+    <div><h2>${esc(self.first_name)} ${esc(self.last_name)}</h2>
+      <p><a class="btn" href="/me/${esc(self.id)}">See and update my details</a></p></div>
+  </div>
+  ${dependants.length ? `<h2>Children I look after</h2>
+  <table><tbody>${dependants.map((d) => `<tr>
+    <td><strong>${esc(d.first_name)} ${esc(d.last_name)}</strong>
+      <div class="muted">${esc(FAMILY_LABELS[d.relationship] ?? d.relationship)}</div></td>
+    <td><a class="btn quiet" href="/me/${esc(d.id)}">See and update</a></td>
+  </tr>`).join('')}</tbody></table>` : ''}`
+  : `<div class="note">This sign-in is not linked to a member record yet, so there is
+    nothing to show here. Ask your club to link it.</div>`}` });
+
+/** One person, as they and their guardians may see and change it. */
+export const myPerson = ({ me, csrf, how, person, private: priv = {}, grade, memberships = [],
+                           values = null, error, done }) => {
+  const v = (k, fallback) => esc(values?.[k] ?? fallback ?? '');
+  const mine = how === 'self';
+  return page({ title: `${person.first_name} ${person.last_name}`, me, csrf, body: `
+  <h1>${esc(person.first_name)} ${esc(person.last_name)}</h1>
+  <p class="sub">${esc(person.display_number ?? '')}${mine ? '' : ' · you look after this person'}
+    · <a href="/me">Back</a></p>
+  ${done ? `<div class="good">${esc(done)}</div>` : ''}
+  ${error ? `<div class="bad">${esc(error)}</div>` : ''}
+
+  <h2>Their place in the club</h2>
+  <p>${grade ? `Current grade: <strong>${esc(grade.label)}</strong>` : '<span class="muted">No grade recorded yet.</span>'}</p>
+  ${memberships.length ? `<ul class="plain">${memberships.map((m) => `<li>
+    <strong>${esc(m.name)}</strong> — ${esc(m.role)}, ${esc(m.status)}${
+      m.paid_until ? `, paid until ${esc(m.paid_until)}` : ''}</li>`).join('')}</ul>` : ''}
+  <p class="muted">Name, date of birth, grade and membership are kept by the club
+    and federation. Ask them if one is wrong.</p>
+
+  <h2>Contact and safety details</h2>
+  <form method="post" action="/me/${esc(person.id)}">
+    <input type="hidden" name="_csrf" value="${esc(csrf ?? '')}">
+    <div class="row">
+      <div><label for="preferred_name">Preferred name</label>
+        <input id="preferred_name" name="preferred_name" maxlength="60" value="${v('preferred_name', person.preferred_name)}"></div>
+      <div><label for="phone">Phone</label>
+        <input id="phone" name="phone" maxlength="40" value="${v('phone', person.phone)}"></div>
+    </div>
+    <label for="email">Email</label>
+    <input id="email" name="email" type="email" maxlength="160" value="${v('email', person.email)}">
+    <p class="hint">This is the address on the register. It does not change the address you sign in with.</p>
+    <label for="address_line">Address</label>
+    <input id="address_line" name="address_line" maxlength="160" value="${v('address_line', priv.address_line)}">
+    <div class="row">
+      <div><label for="suburb">Suburb</label><input id="suburb" name="suburb" maxlength="80" value="${v('suburb', priv.suburb)}"></div>
+      <div><label for="city">Town or city</label><input id="city" name="city" maxlength="80" value="${v('city', priv.city)}"></div>
+      <div><label for="postcode">Postcode</label><input id="postcode" name="postcode" maxlength="12" value="${v('postcode', priv.postcode)}"></div>
+    </div>
+    <fieldset><legend>Emergency contact</legend>
+      <div class="row">
+        <div><label for="emergency_name">Name</label><input id="emergency_name" name="emergency_name" maxlength="80" value="${v('emergency_name', priv.emergency_name)}"></div>
+        <div><label for="emergency_phone">Phone</label><input id="emergency_phone" name="emergency_phone" maxlength="40" value="${v('emergency_phone', priv.emergency_phone)}"></div>
+      </div>
+    </fieldset>
+    <label for="medical_notes">Medical notes <span class="muted">(injuries, conditions, allergies — instructors may need to know)</span></label>
+    <textarea id="medical_notes" name="medical_notes" rows="4" maxlength="2000">${v('medical_notes', priv.medical_notes)}</textarea>
+    <div class="actions"><button class="btn" type="submit">Save</button></div>
+  </form>` });
 };

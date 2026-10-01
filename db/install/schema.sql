@@ -1581,3 +1581,22 @@ alter table dojo_profile
   add column page_note         text,
   add column published_by      uuid references account(id),
   add column published_at      timestamptz;
+
+-- A parent or guardian is a person, linked to the child (migration 024).
+create table guardian_link (
+  id            uuid primary key default uuid_generate_v4(),
+  guardian_id   uuid not null references person(id) on delete cascade,
+  child_id      uuid not null references person(id) on delete cascade,
+  relationship  text not null default 'parent'
+                check (relationship in ('parent','step_parent','guardian',
+                                        'grandparent','carer')),
+  created_by    uuid references account(id),
+  created_at    timestamptz not null default now(),
+  ended_on      date,
+  check (guardian_id <> child_id)
+);
+
+create unique index one_current_guardian_link
+  on guardian_link (guardian_id, child_id) where ended_on is null;
+create index on guardian_link (child_id) where ended_on is null;
+create index on guardian_link (guardian_id) where ended_on is null;

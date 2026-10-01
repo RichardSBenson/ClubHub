@@ -33,10 +33,11 @@
 import crypto from 'node:crypto';
 import { URL } from 'node:url';
 import { pool, orgs, people, rank, events, competition, pages, assets, news,
-         instructors, navigation, audit, search, clubPages, appearance, clubs, clubProfile,
+         instructors, navigation, audit, search, clubPages, appearance, clubs, clubProfile, family, myself,
          Forbidden, NotFound, Invalid } from './data.mjs';
 import * as auth from './auth.mjs';
 import * as V from './views.mjs';
+import { readSelfEdit } from '../core/domain/family.mjs';
 import { readClubProfile } from '../core/domain/club-profile.mjs';
 import { readNewClub } from '../core/domain/new-club.mjs';
 import { BUILT_IN } from '../site/builtin-themes.mjs';
@@ -254,6 +255,10 @@ post('/signout', async (ctx) => {
 
 get('/dashboard', async (ctx) => {
   ctx.requireActor();
+  // Somebody whose only role is "member" has no organisation to run. Their
+  // home is their own details, not an empty list of organisations.
+  if (ctx.me.grants.length && ctx.me.grants.every((g) => g.role === 'member') && ctx.me.personId)
+    return ctx.redirect('/me');
   const { rows } = await pool.query(`
     select o.id, o.name, o.slug, o.type, o.path::text as path,
            (select count(*) from affiliation a
@@ -343,7 +348,82 @@ get('/p/:id', async (ctx) => {
       : [],
     access: canEdit ? await people.accessFor(ctx.me.accountId, record.person.id)
                     : null,
+    guardians: canEdit ? await family.guardiansOf(ctx.me.accountId, record.person.id)
+                       : null,
   }));
+});
+
+post('/p/:id/guardians', async (ctx) => {
+  ctx.requireActor();
+  const form = await ctx.form();
+  const back = `/p/${ctx.params.id}`;
+  const number = String(form.guardian_number ?? '').trim().toUpperCase();
+  try {
+    // Authority first. Looking a member number up before checking the right to
+    // act would let anybody learn which numbers exist by being refused
+    // differently.
+    await family.guardiansOf(ctx.me.accountId, ctx.params.id);
+    const guardian = number
+      ? (await pool.query('select id from person where upper(display_number)=$1', [number])).rows[0]
+      : null;
+    if (!guardian) throw new Invalid(`There is nobody with the member number "${number}". `
+      + 'Add them to the register first.');
+    await family.link(ctx.me.accountId, { guardianId: guardian.id,
+      childId: ctx.params.id, relationship: form.relationship });
+  } catch (e) {
+    if (e instanceof Invalid) {
+      const record = await people.record(ctx.me.accountId, ctx.params.id);
+      return ctx.send(422, V.person({
+        me: ctx.me, ...record, eligibility: null, csrf: ctx.csrf, canEdit: true,
+        titles: [], changes: [], error: e.message,
+        access: await people.accessFor(ctx.me.accountId, ctx.params.id),
+        guardians: await family.guardiansOf(ctx.me.accountId, ctx.params.id),
+      }));
+    }
+    throw e;
+  }
+  return ctx.redirect(back);
+});
+
+post('/p/:id/guardians/:linkId/end', async (ctx) => {
+  ctx.requireActor();
+  await ctx.form();
+  await family.unlink(ctx.me.accountId, ctx.params.linkId);
+  return ctx.redirect(`/p/${ctx.params.id}`);
+});
+
+// ---- a member's own screens ------------------------------------------------
+//
+// Everything here goes through family.mayActFor first: a member sees
+// themselves and the minors they are a guardian of, and nobody else.
+
+get('/me', async (ctx) => {
+  ctx.requireActor();
+  const { self, dependants } = await family.mine(ctx.me.accountId);
+  return ctx.send(200, V.myHome({ me: ctx.me, csrf: ctx.csrf, self, dependants }));
+});
+
+get('/me/:personId', async (ctx) => {
+  ctx.requireActor();
+  const record = await myself.get(ctx.me.accountId, ctx.params.personId);
+  return ctx.send(200, V.myPerson({ me: ctx.me, csrf: ctx.csrf, ...record,
+    done: ctx.url.searchParams.get('done') }));
+});
+
+post('/me/:personId', async (ctx) => {
+  ctx.requireActor();
+  const form = await ctx.form();
+  try {
+    await myself.update(ctx.me.accountId, ctx.params.personId, readSelfEdit(form));
+    return ctx.redirect(`/me/${ctx.params.personId}?done=${encodeURIComponent('Saved.')}`);
+  } catch (e) {
+    if (e instanceof Invalid) {
+      const record = await myself.get(ctx.me.accountId, ctx.params.personId);
+      return ctx.send(422, V.myPerson({ me: ctx.me, csrf: ctx.csrf, ...record,
+        values: form, error: e.message }));
+    }
+    throw e;
+  }
 });
 
 // ---- adding and correcting a member ---------------------------------------

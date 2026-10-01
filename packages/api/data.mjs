@@ -1296,6 +1296,8 @@ import { assertMayPublish } from '../core/domain/instructing.mjs';
 import { readTheme } from '../site/theme.mjs';
 import { problemsWithClubProfile, changesTheSite }
   from '../core/domain/club-profile.mjs';
+import { problemsWithGuardianLink, isMinor, readSelfEdit, problemsWithSelfEdit }
+  from '../core/domain/family.mjs';
 import { problemsWithNewClub, clubSlugFrom, hasAdministrator }
   from '../core/domain/new-club.mjs';
 import { destinations, problemsWithNavigation, navigationFrom, MAX_ITEMS }
@@ -2066,6 +2068,190 @@ export const clubs = {
       }
     }
     return { club, admin };
+  },
+};
+
+// ---------------------------------------------------------------------------
+// families, and a person's own view of themselves
+//
+// A signed-in member sees themselves and, if they are a parent or guardian,
+// the children linked to them while those children are minors. Nothing else:
+// every function here starts by working out who this account may act for, and
+// refuses anyone outside that set before reading a row.
+// ---------------------------------------------------------------------------
+
+const PERSON_COLUMNS = `p.id, p.display_number, p.first_name, p.last_name, p.preferred_name,
+  p.date_of_birth::text as date_of_birth, p.gender, p.email, p.phone`;
+
+async function homesOf(personId) {
+  const { rows } = await pool.query(`
+    select organisation_id from affiliation where person_id=$1 and ends is null`, [personId]);
+  return rows.map((r) => r.organisation_id);
+}
+
+export const family = {
+  /** The person behind an account, and the children they may act for. */
+  async mine(actor) {
+    const self = await one(`
+      select ${PERSON_COLUMNS} from account a join person p on p.id = a.person_id
+      where a.id = $1`, [actor]);
+    if (!self) return { self: null, dependants: [] };
+    const { rows: dependants } = await pool.query(`
+      select ${PERSON_COLUMNS}, gl.relationship
+      from guardian_link gl join person p on p.id = gl.child_id
+      where gl.guardian_id = $1 and gl.ended_on is null
+        and p.date_of_birth is not null
+        and p.date_of_birth > current_date - interval '18 years'
+      order by p.first_name`, [self.id]);
+    return { self, dependants };
+  },
+
+  /** 'self', 'guardian', or null. The only door every self-service screen uses. */
+  async mayActFor(actor, personId) {
+    const { self, dependants } = await this.mine(actor);
+    if (!self) return null;
+    if (self.id === personId) return 'self';
+    return dependants.some((d) => d.id === personId) ? 'guardian' : null;
+  },
+
+  async assertMayActFor(actor, personId) {
+    const how = await this.mayActFor(actor, personId);
+    if (!how) throw new Forbidden();
+    return how;
+  },
+
+  /** A registrar links a parent or guardian to a child at the child's club. */
+  async link(actor, { guardianId, childId, relationship = 'parent' }) {
+    const guardian = await one(`select ${PERSON_COLUMNS} from person p where p.id=$1`, [guardianId]);
+    const child = await one(`select ${PERSON_COLUMNS} from person p where p.id=$1`, [childId]);
+    if (!guardian || !child) throw new NotFound('Person');
+
+    const homes = await homesOf(childId);
+    let home = null;
+    for (const h of homes) {
+      const ok = await one('select has_role_at($1,$2,$3) as ok', [actor, h, REGISTER]);
+      if (ok?.ok) { home = h; break; }
+    }
+    if (!home) throw new Forbidden();
+
+    const problems = problemsWithGuardianLink({ guardian, child, relationship });
+    if (problems.length) throw new Invalid(problems.join(' '));
+
+    const row = await one(`
+      insert into guardian_link (guardian_id, child_id, relationship, created_by)
+      values ($1,$2,$3,$4)
+      on conflict (guardian_id, child_id) where ended_on is null do nothing
+      returning *`, [guardianId, childId, relationship, actor]);
+    if (!row) throw new Invalid(`${guardian.first_name} is already linked to ${child.first_name}.`);
+
+    await pool.query(`
+      insert into audit_log (account_id, organisation_id, action, entity, entity_id, after)
+      values ($1,$2,'guardian_link','person',$3,$4)`,
+      [actor, home, childId, JSON.stringify({
+        guardian: `${guardian.first_name} ${guardian.last_name}`,
+        child: `${child.first_name} ${child.last_name}`, relationship })]);
+    return row;
+  },
+
+  async unlink(actor, linkId) {
+    const link = await one(`
+      select gl.*, g.first_name as g_first, g.last_name as g_last,
+             c.first_name as c_first, c.last_name as c_last
+      from guardian_link gl
+      join person g on g.id = gl.guardian_id join person c on c.id = gl.child_id
+      where gl.id=$1 and gl.ended_on is null`, [linkId]);
+    if (!link) throw new NotFound('Link');
+    let home = null;
+    for (const h of await homesOf(link.child_id)) {
+      const ok = await one('select has_role_at($1,$2,$3) as ok', [actor, h, REGISTER]);
+      if (ok?.ok) { home = h; break; }
+    }
+    if (!home) throw new Forbidden();
+    await pool.query('update guardian_link set ended_on = current_date where id=$1', [linkId]);
+    await pool.query(`
+      insert into audit_log (account_id, organisation_id, action, entity, entity_id, after)
+      values ($1,$2,'guardian_unlink','person',$3,$4)`,
+      [actor, home, link.child_id, JSON.stringify({
+        guardian: `${link.g_first} ${link.g_last}`, child: `${link.c_first} ${link.c_last}` })]);
+  },
+
+  /** The guardians of a child, for the child's own record. */
+  async guardiansOf(actor, childId) {
+    let allowed = false;
+    for (const h of await homesOf(childId)) {
+      const ok = await one('select has_role_at($1,$2,$3) as ok', [actor, h, REGISTER]);
+      if (ok?.ok) { allowed = true; break; }
+    }
+    if (!allowed) throw new Forbidden();
+    const { rows } = await pool.query(`
+      select gl.id, gl.relationship, g.id as person_id, g.first_name, g.last_name,
+             g.email, exists(select 1 from account a where a.person_id = g.id) as can_sign_in
+      from guardian_link gl join person g on g.id = gl.guardian_id
+      where gl.child_id=$1 and gl.ended_on is null order by gl.created_at`, [childId]);
+    return rows;
+  },
+};
+
+export const myself = {
+  /** Everything a member sees about themselves or a child they look after. */
+  async get(actor, personId) {
+    const how = await family.assertMayActFor(actor, personId);
+    const person = await one(`select ${PERSON_COLUMNS} from person p where p.id=$1`, [personId]);
+    if (!person) throw new NotFound('Person');
+    const priv = await one(`select address_line, suburb, city, postcode, emergency_name,
+      emergency_phone, medical_notes from person_private where person_id=$1`, [personId]) ?? {};
+    const grade = await one(`select label, awarded_on::text as awarded_on
+      from person_current_grade where person_id=$1`, [personId]);
+    const { rows: memberships } = await pool.query(`
+      select o.name, o.slug, a.role, a.status, a.paid_until::text as paid_until
+      from affiliation a join organisation o on o.id = a.organisation_id
+      where a.person_id=$1 and a.ends is null order by o.name`, [personId]);
+    return { how, person, private: priv, grade, memberships };
+  },
+
+  /** Only the fields a person may change about themselves. */
+  async update(actor, personId, input) {
+    await family.assertMayActFor(actor, personId);
+    const problems = problemsWithSelfEdit(input);
+    if (problems.length) throw new Invalid(problems.join(' '));
+
+    const before = await this.get(actor, personId);
+    const client = await pool.connect();
+    try {
+      await client.query('begin');
+      await client.query(`update person set preferred_name=$2, phone=$3, email=$4 where id=$1`,
+        [personId, input.preferred_name, input.phone, input.email]);
+      await client.query(`
+        insert into person_private (person_id, address_line, suburb, city, postcode,
+          emergency_name, emergency_phone, medical_notes, updated_at)
+        values ($1,$2,$3,$4,$5,$6,$7,$8, now())
+        on conflict (person_id) do update set address_line=excluded.address_line,
+          suburb=excluded.suburb, city=excluded.city, postcode=excluded.postcode,
+          emergency_name=excluded.emergency_name, emergency_phone=excluded.emergency_phone,
+          medical_notes=excluded.medical_notes, updated_at=now()`,
+        [personId, input.address_line, input.suburb, input.city, input.postcode,
+         input.emergency_name, input.emergency_phone, input.medical_notes]);
+
+      // Which fields, never what they said: medical notes are the most
+      // sensitive thing on the register and the history is read by more people
+      // than the notes are.
+      const changed = [];
+      for (const k of ['preferred_name', 'phone', 'email'])
+        if ((before.person[k] ?? null) !== (input[k] ?? null)) changed.push(k);
+      for (const k of ['address_line', 'suburb', 'city', 'postcode',
+                       'emergency_name', 'emergency_phone', 'medical_notes'])
+        if ((before.private[k] ?? null) !== (input[k] ?? null)) changed.push(k);
+      const org = (await client.query(`select organisation_id from affiliation
+        where person_id=$1 and ends is null order by starts desc limit 1`, [personId])).rows[0]
+        ?.organisation_id ?? null;
+      if (changed.length)
+        await client.query(`
+          insert into audit_log (account_id, organisation_id, action, entity, entity_id, after)
+          values ($1,$2,'self_update','person',$3,$4)`,
+          [actor, org, personId, JSON.stringify({ fields: changed, by: before.how })]);
+      await client.query('commit');
+    } catch (e) { await client.query('rollback'); throw e; }
+    finally { client.release(); }
   },
 };
 

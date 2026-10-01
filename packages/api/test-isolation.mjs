@@ -108,6 +108,16 @@ const theirPerson = await one(`
   select p.* from affiliation a join person p on p.id = a.person_id
   where a.organisation_id = $1 and a.ends is null limit 1`, [theirs.id]);
 
+// A real guardian link of theirs, so the probe on ending one asks for something
+// that exists.
+const theirGuardian = await one(`
+  select p.* from affiliation a join person p on p.id = a.person_id
+  where a.organisation_id = $1 and a.ends is null and p.id <> $2 limit 1`,
+  [theirs.id, theirPerson.id]);
+const theirLink = await one(`
+  insert into guardian_link (guardian_id, child_id) values ($1,$2) returning *`,
+  [theirGuardian.id, theirPerson.id]);
+
 // A real article of theirs, so the probe asks for something that exists.
 const theirArticle = await one(`
   insert into article (organisation_id, slug, title, summary, body, status)
@@ -164,6 +174,8 @@ function pathFor(pattern) {
     pageId: theirPage.id,
     pageSlug: theirPage.slug,
     id: theirPerson ? theirPerson.id : '00000000-0000-0000-0000-000000000000',
+    personId: theirPerson ? theirPerson.id : '00000000-0000-0000-0000-000000000000',
+    linkId: theirLink.id,
     // /p/:id/access — creating an account for somebody else's member is
     // exactly the kind of thing this probe exists to refuse.
     assetId: theirAsset.id,
@@ -211,6 +223,7 @@ const THEIR_WORDS = [
  */
 const SCOPED = new Map([
   ['GET /search', 'everybody may search; the scoping is in the query'],
+  ['GET /me', 'a person sees themselves and their own children; scoped by family.mayActFor'],
 ]);
 
 console.log('\nEVERY ROUTE IS EITHER PUBLIC ON PURPOSE OR PROTECTED');
@@ -222,7 +235,7 @@ console.log('\nEVERY ROUTE IS EITHER PUBLIC ON PURPOSE OR PROTECTED');
     // scoped by path — an asset id carries its own federation — but it is
     // probed too, and the probe below is what proves it refuses.
     .filter((key) => !key.includes('/o/:slug') && !key.includes('/p/:id')
-                  && !key.includes('/a/:'));
+                  && !key.includes('/a/:') && !key.includes('/me/:'));
 
   ok(`all ${routes.length} routes are accounted for`,
     unclassified.length === 0,
@@ -288,6 +301,15 @@ console.log('\nSEARCHING FOR THEIRS FINDS NOTHING');
   }
 }
 
+console.log('\nTHEIR OWN HOME SHOWS NOTHING OF THEIRS');
+{
+  const r = await req('/me');
+  const leaked = THEIR_WORDS.filter((w) => r.html.includes(w));
+  ok('/me answers them, and contains nothing of theirs',
+    (r.status === 200 || r.status === 302) && !leaked.length,
+    `${r.status}${leaked.length ? ' leaked: ' + leaked.join(', ') : ''}`);
+}
+
 console.log('\nAND NOTHING OF THEIRS CAN BE CHANGED');
 {
   const census = async () => {
@@ -302,6 +324,9 @@ console.log('\nAND NOTHING OF THEIRS CAN BE CHANGED');
           where a.organisation_id = $1) as gradings,
         (select count(*)::int from page_revision r
           join page p on p.id = r.page_id where p.organisation_id = $1) as revisions,
+        (select count(*)::int from guardian_link
+          where ended_on is null and child_id in
+            (select person_id from affiliation where organisation_id = $1)) as guardian_links,
         (select count(*)::int from dojo_profile
           where organisation_id = $1
             and (published or page_requested_at is not null)) as club_pages
