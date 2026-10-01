@@ -3841,17 +3841,28 @@ export const attendance = {
       from attendance t join person p on p.id = t.person_id
       where t.organisation_id=$1 and t.session_id=$2 and t.session_date=$3::date`, [orgId, sessionId, date]))
       .filter((v) => !memberIds.has(v.person_id));
-    return { org, session, date, today, members: members.map((m) => ({ ...m, present: present.has(m.person_id) })), visitors };
+    const tryers = await q(`select n.id, n.first_name, n.last_name, n.status,
+        (select count(*)::int from newcomer_attendance v where v.newcomer_id = n.id) as visits,
+        exists (select 1 from newcomer_attendance v where v.newcomer_id = n.id
+          and v.session_id = $2 and v.session_date = $3::date) as present
+      from newcomer n where n.organisation_id = $1
+        and (n.status = 'trialling' or exists (select 1 from newcomer_attendance v where v.newcomer_id = n.id
+          and v.session_id = $2 and v.session_date = $3::date))
+      order by n.first_name, n.last_name`, [orgId, sessionId, date]);
+    return { org, session, date, today, members: members.map((m) => ({ ...m, present: present.has(m.person_id) })), visitors,
+      newcomers: tryers };
   },
 
   /**
    * Set the roll for a class on a day to exactly these people. Taking the roll
    * twice is fine — it is a set, not a log of button presses.
    */
-  async save(actor, orgId, sessionId, date, { personIds = [], visitorNumbers = [] }) {
+  async save(actor, orgId, sessionId, date, { personIds = [], visitorNumbers = [], newcomerIds = [] }) {
     const sheet = await attendance.sheet(actor, orgId, sessionId, date);   // authority, date, class
     const allowed = new Set([...sheet.members, ...sheet.visitors].map((m) => m.person_id));
     const ids = new Set(personIds.filter((id) => allowed.has(id)));
+    const allowedNew = new Set(sheet.newcomers.map((n) => n.id));
+    const newIds = [...new Set(newcomerIds.filter((id) => allowedNew.has(id)))];
 
     // A visitor is somebody from another club in the same federation.
     const unknown = [];
@@ -3881,13 +3892,18 @@ export const attendance = {
         on conflict (person_id, organisation_id, session_date, session_id) do nothing`,
         [orgId, date, sessionId, by, [...ids]]);
       after = ids.size;
+      await client.query(`delete from newcomer_attendance where organisation_id=$1 and session_id=$2
+        and session_date=$3::date and not (newcomer_id = any($4::uuid[]))`, [orgId, sessionId, date, newIds]);
+      if (newIds.length) await client.query(`insert into newcomer_attendance (newcomer_id, organisation_id, session_id, session_date)
+        select x, $1, $2, $3::date from unnest($4::uuid[]) as x
+        on conflict (newcomer_id, session_id, session_date) do nothing`, [orgId, sessionId, date, newIds]);
       await client.query(`insert into audit_log (account_id, organisation_id, action, entity, entity_id, before, after)
         values ($1,$2,'roll_taken','training_session',$3,$4,$5)`, [actor, orgId, sessionId,
         JSON.stringify({ came: before }), JSON.stringify({ came: after, date, label: sheet.session.label,
-          visitors: visitorNumbers.length })]);
+          visitors: visitorNumbers.length, newcomers: newIds.length })]);
       await client.query('commit');
     } catch (e) { await client.query('rollback'); throw e; } finally { client.release(); }
-    return { came: after };
+    return { came: after + newIds.length };
   },
 
   /** How much one person has trained. For those who look after them. */
@@ -3901,5 +3917,132 @@ export const attendance = {
         count(*)::int as ever,
         to_char(max(session_date), 'YYYY-MM-DD') as last_seen
       from attendance where person_id = $1`, [personId, today]);
+  },
+};
+
+
+// ---------------------------------------------------------------------------
+// newcomers: people trying a class before they join
+//
+// Kept apart from people on purpose (see domain/newcomer.mjs). An instructor
+// can add one on the night; a registrar turns them into a member.
+// ---------------------------------------------------------------------------
+
+import { readNewcomer, problemsWithNewcomer, isChild, timeToTalk, RETAIN_DAYS }
+  from '../core/domain/newcomer.mjs';
+
+export const newcomers = {
+  async list(actor, orgId) {
+    await assertRole(actor, orgId, TEACHERS);
+    const org = await attendanceClub(orgId);
+    const today = await todayAt(org);
+    const rows = await q(`select n.id, n.first_name, n.last_name, n.email, n.phone, n.status,
+        to_char(n.date_of_birth,'YYYY-MM-DD') as date_of_birth, n.guardian_name, n.guardian_phone,
+        n.emergency_name, n.emergency_phone, n.medical_notes, n.consent_by,
+        to_char(n.consent_at at time zone $2,'YYYY-MM-DD') as consent_on, n.person_id,
+        (select count(*)::int from newcomer_attendance v where v.newcomer_id = n.id) as visits,
+        (select to_char(max(v.session_date),'YYYY-MM-DD') from newcomer_attendance v where v.newcomer_id = n.id) as last_visit
+      from newcomer n where n.organisation_id = $1
+        and (n.status = 'trialling' or n.updated_at > now() - interval '30 days')
+      order by (n.status = 'trialling') desc, n.created_at desc`, [orgId, org.timezone]);
+    return { org, today, newcomers: rows.map((r) => ({ ...r,
+      child: isChild(r.date_of_birth, today), readyToTalk: r.status === 'trialling' && timeToTalk(r.visits) })) };
+  },
+
+  /** Add a newcomer, and — if asked — mark them as at a class today. */
+  async add(actor, orgId, input, { sessionId = null, date = null } = {}) {
+    await assertRole(actor, orgId, TEACHERS);
+    const org = await attendanceClub(orgId);
+    const today = await todayAt(org);
+    const problems = problemsWithNewcomer(input, today);
+    if (problems.length) throw new Invalid(problems.join(' '));
+
+    if (input.email) {
+      const member = await one(`select 1 from person p join affiliation a on a.person_id = p.id
+        where lower(p.email) = $2 and a.organisation_id = $1 and a.ends is null`, [orgId, input.email]);
+      if (member) throw new Invalid('That email belongs to somebody who is already a member here — find them on the roll.');
+    }
+    const twin = await one(`select 1 from newcomer where organisation_id = $1 and status = 'trialling'
+        and ((email is not null and email = $2) or (phone is not null and phone = $3 and lower(last_name) = lower($4)))`,
+      [orgId, input.email || null, input.phone || null, input.lastName]);
+    if (twin) throw new Invalid('They are already on the newcomers list.');
+
+    let sheet = null;
+    if (sessionId) sheet = await attendance.sheet(actor, orgId, sessionId, date);   // validates class and date
+
+    const client = await pool.connect();
+    try {
+      await client.query('begin');
+      const { rows: [n] } = await client.query(`insert into newcomer (organisation_id, first_name, last_name, email, phone,
+          date_of_birth, guardian_name, guardian_phone, emergency_name, emergency_phone, medical_notes, consent_by, consent_taken_by)
+        values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) returning id`,
+        [orgId, input.firstName, input.lastName, input.email || null, input.phone || null, input.dateOfBirth,
+         input.guardianName || null, input.guardianPhone || null, input.emergencyName || null,
+         input.emergencyPhone || null, input.medicalNotes || null, input.consentName, actor]);
+      if (sheet) await client.query(`insert into newcomer_attendance (newcomer_id, organisation_id, session_id, session_date)
+        values ($1,$2,$3,$4::date)`, [n.id, orgId, sessionId, date]);
+      await client.query(`insert into audit_log (account_id, organisation_id, action, entity, entity_id, after)
+        values ($1,$2,'newcomer_added','newcomer',$3,$4)`, [actor, orgId, n.id,
+        JSON.stringify({ child: isChild(input.dateOfBirth, today), consent_by: input.consentName })]);
+      await client.query('commit');
+      return { id: n.id };
+    } catch (e) { await client.query('rollback'); throw e; } finally { client.release(); }
+  },
+
+  /** They are staying: make them a member. Their classes so far count. */
+  async join(actor, orgId, newcomerId, { paidUntil = null } = {}) {
+    await assertRole(actor, orgId, REGISTER);
+    const n = await one(`select *, to_char(date_of_birth,'YYYY-MM-DD') as dob from newcomer
+      where id=$1 and organisation_id=$2`, [newcomerId, orgId]);
+    if (!n) throw new NotFound('Newcomer');
+    if (n.status === 'joined') throw new Invalid('They have already joined.');
+
+    const child = isChild(n.dob, (await todayAt(await one('select timezone from organisation where id=$1', [orgId]))));
+    const person = await people.enrol(actor, { organisationId: orgId, firstName: n.first_name, lastName: n.last_name,
+      dateOfBirth: n.dob, email: n.email, phone: n.phone, role: 'member', paidUntil,
+      emergencyName: n.emergency_name ?? (child ? n.guardian_name : null),
+      emergencyPhone: n.emergency_phone ?? (child ? n.guardian_phone : null) });
+
+    const client = await pool.connect();
+    try {
+      await client.query('begin');
+      if (n.medical_notes) await client.query(`insert into person_private (person_id, medical_notes) values ($1,$2)
+        on conflict (person_id) do update set medical_notes = excluded.medical_notes`, [person.id, n.medical_notes]);
+      await client.query(`insert into attendance (person_id, organisation_id, session_date, session_id, recorded_by)
+        select $1, v.organisation_id, v.session_date, v.session_id, null from newcomer_attendance v
+        where v.newcomer_id = $2 and v.session_id is not null
+        on conflict (person_id, organisation_id, session_date, session_id) do nothing`, [person.id, newcomerId]);
+      // What was collected for the trial now lives on the member; keep only the consent record here.
+      await client.query(`update newcomer set status='joined', person_id=$2, medical_notes=null, guardian_name=null,
+        guardian_phone=null, emergency_name=null, emergency_phone=null, email=null, phone=null, updated_at=now()
+        where id=$1`, [newcomerId, person.id]);
+      await client.query(`delete from newcomer_attendance where newcomer_id=$1`, [newcomerId]);
+      await client.query(`insert into audit_log (account_id, organisation_id, action, entity, entity_id, after)
+        values ($1,$2,'newcomer_joined','newcomer',$3,$4)`, [actor, orgId, newcomerId,
+        JSON.stringify({ person: person.display_number })]);
+      await client.query('commit');
+    } catch (e) { await client.query('rollback'); throw e; } finally { client.release(); }
+    return { person };
+  },
+
+  /** They are not coming back. Their details go now, not in six months. */
+  async notContinuing(actor, orgId, newcomerId) {
+    await assertRole(actor, orgId, TEACHERS);
+    const n = await one('select status from newcomer where id=$1 and organisation_id=$2', [newcomerId, orgId]);
+    if (!n) throw new NotFound('Newcomer');
+    if (n.status !== 'trialling') throw new Invalid('They are not trialling.');
+    await q(`update newcomer set status='not_continuing', email=null, phone=null, medical_notes=null,
+      guardian_name=null, guardian_phone=null, emergency_name=null, emergency_phone=null, updated_at=now()
+      where id=$1`, [newcomerId]);
+    await q(`insert into audit_log (account_id, organisation_id, action, entity, entity_id)
+      values ($1,$2,'newcomer_left','newcomer',$3)`, [actor, orgId, newcomerId]);
+  },
+
+  /** Daily: forget people who tried a class and went quiet. Returns how many. */
+  async purgeStale() {
+    const gone = await q(`delete from newcomer n where n.status <> 'joined'
+      and greatest(n.updated_at, coalesce((select max(v.session_date)::timestamptz from newcomer_attendance v
+        where v.newcomer_id = n.id), n.created_at)) < now() - make_interval(days => $1) returning 1`, [RETAIN_DAYS]);
+    return gone.length;
   },
 };

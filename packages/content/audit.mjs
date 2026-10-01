@@ -169,6 +169,12 @@ export function describe(entry) {
       return `carried a membership on to ${a.paidUntil ?? 'a later date'} with no payment`;
     case 'reminders_setting':
       return a.enabled ? 'switched automatic fees reminders on' : 'switched automatic fees reminders off';
+    case 'newcomer_added':
+      return `added a newcomer${a.child ? ' (under 18)' : ''}; waiver accepted by ${a.consent_by ?? 'someone'}`;
+    case 'newcomer_joined':
+      return `made a newcomer a member${a.person ? ` (${a.person})` : ''}`;
+    case 'newcomer_left':
+      return 'removed a newcomer who is not continuing';
     case 'roll_taken':
       return `took the roll for ${a.label ? quote(a.label) : 'a class'} on ${a.date ?? 'a day'}: ${a.came ?? 0} came`
         + (b?.came != null && b.came !== a.came ? ` (was ${b.came})` : '');
@@ -256,6 +262,9 @@ export const ACTIONS = Object.freeze([
   ['club_profile_saved', 'Club details changed'],
   ['message_sent', 'Message sent'],
   ['roll_taken', 'Roll taken'],
+  ['newcomer_added', 'Newcomer added'],
+  ['newcomer_joined', 'Newcomer became a member'],
+  ['newcomer_left', 'Newcomer removed'],
   ['reminders_setting', 'Automatic reminders changed'],
   ['payment_requested', 'Payment asked for'],
   ['payment_made', 'Payment made'],

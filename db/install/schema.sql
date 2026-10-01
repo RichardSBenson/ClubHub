@@ -1699,3 +1699,36 @@ alter table message add constraint message_kind_check
   check (kind in ('announcement','event','renewal'));
 create index if not exists attendance_org_date_idx
   on attendance (organisation_id, session_date desc);
+create table newcomer (
+  id               uuid primary key default uuid_generate_v4(),
+  organisation_id  uuid not null references organisation(id) on delete cascade,
+  first_name       text not null,
+  last_name        text not null,
+  email            citext,
+  phone            text,
+  date_of_birth    date not null,
+  guardian_name    text,
+  guardian_phone   text,
+  emergency_name   text,
+  emergency_phone  text,
+  medical_notes    text,
+  consent_by       text not null,                    -- who accepted the waiver
+  consent_at       timestamptz not null default now(),
+  consent_taken_by uuid references account(id),
+  status           text not null default 'trialling'
+                   check (status in ('trialling','joined','not_continuing')),
+  person_id        uuid references person(id) on delete set null,   -- once they join
+  created_at       timestamptz not null default now(),
+  updated_at       timestamptz not null default now()
+);
+create index on newcomer (organisation_id, status);
+
+create table newcomer_attendance (
+  id              uuid primary key default uuid_generate_v4(),
+  newcomer_id     uuid not null references newcomer(id) on delete cascade,
+  organisation_id uuid not null references organisation(id) on delete cascade,
+  session_id      uuid references training_session(id) on delete set null,
+  session_date    date not null,
+  unique (newcomer_id, session_id, session_date)
+);
+create index on newcomer_attendance (organisation_id, session_date desc);

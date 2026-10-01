@@ -284,6 +284,7 @@ export function rail({ org, vocabulary = {}, can = {}, path = '' }) {
     can.register && link(`${base}/members/import`, 'Import a roll'),
     can.register && link(`${base}/grading`, vocabulary.grading ?? 'Grading'),
     isClub && can.teach && link(`${base}/attendance`, 'Attendance'),
+    isClub && can.teach && link(`${base}/newcomers`, 'Newcomers'),
     isClub && can.register && link(`${base}/renewals`, 'Renewals'),
     can.manage && link(`${base}/messages`, 'Messages'),
     can.manage && link(`${base}/payments`, 'Payments'),
@@ -3456,7 +3457,7 @@ export const attendanceScreen = ({ me, csrf, org, today, day, classes = [], hasT
     <td class="muted">${m.last_seen ? `last seen ${esc(m.last_seen)}` : 'never recorded'}</td></tr>`).join('')}</tbody></table>`
     : '<p class="muted">Everybody has been in recently.</p>'}` });
 
-export const rollScreen = ({ me, csrf, org, session, date, members = [], visitors = [], visitorText = '', error, done }) => page({
+export const rollScreen = ({ me, csrf, org, session, date, members = [], visitors = [], newcomers = [], visitorText = '', error, done }) => page({
   title: `${session.label} — roll`, me, csrf, body: `
   <p><a href="/o/${esc(org.slug)}/attendance?date=${esc(date)}">← Attendance</a></p>
   <h1>${esc(session.label)}</h1>
@@ -3473,7 +3474,74 @@ export const rollScreen = ({ me, csrf, org, session, date, members = [], visitor
     </fieldset>
     ${visitors.length ? `<fieldset><legend>Visitors already here</legend>${visitors.map((v) => `<label class="check">
       <input type="checkbox" name="here_${esc(v.person_id)}" value="1" checked> ${esc(v.name)} <span class="muted">${esc(v.display_number ?? '')}</span></label>`).join('')}</fieldset>` : ''}
+    <fieldset><legend>Giving it a go</legend>
+      ${newcomers.map((n) => `<label class="check"><input type="checkbox" name="new_${esc(n.id)}" value="1"${n.present ? ' checked' : ''}>
+        ${esc(n.first_name)} ${esc(n.last_name)} <span class="muted">(${n.visits} ${n.visits === 1 ? 'class' : 'classes'} so far)</span></label>`).join('')}
+      <p><a href="/o/${esc(org.slug)}/newcomers/new?session=${esc(session.id)}&amp;date=${esc(date)}">+ Somebody new today</a></p>
+    </fieldset>
     <label for="visitors">Visitors from another club <span class="muted">(member numbers, separated by spaces or commas)</span></label>
     <input id="visitors" name="visitors" value="${esc(visitorText ?? '')}" maxlength="300">
     <div class="actions"><button class="btn" type="submit">Save the roll</button></div>
   </form>` });
+
+
+// ---------------------------------------------------------------------------
+// newcomers
+// ---------------------------------------------------------------------------
+
+export const newcomerForm = ({ me, csrf, org, values = {}, error, sessionId = '', date = '' }) => {
+  const v = (k) => esc(values[k] ?? '');
+  const f = (id, label, extra = '') => `<label for="${id}">${label}</label><input id="${id}" name="${id}" value="${v(id)}" ${extra}>`;
+  return page({ title: `${org.name} — new person`, me, csrf, body: `
+  <p><a href="/o/${esc(org.slug)}/${sessionId ? `attendance/${esc(sessionId)}?date=${esc(date)}` : 'newcomers'}">← Back</a></p>
+  <h1>Somebody new</h1>
+  <p class="sub">Trying a class. They are not a member and take no member number.</p>
+  ${error ? `<div class="bad">${esc(error)}</div>` : ''}
+  <form method="post" action="/o/${esc(org.slug)}/newcomers">
+    <input type="hidden" name="_csrf" value="${esc(csrf ?? '')}">
+    <input type="hidden" name="session" value="${esc(sessionId)}">
+    <input type="hidden" name="date" value="${esc(date)}">
+    ${f('firstName', 'First name', 'required maxlength="60"')}
+    ${f('lastName', 'Last name', 'required maxlength="60"')}
+    ${f('dateOfBirth', 'Date of birth <span class="muted">(2015-03-14)</span>', 'required maxlength="10" inputmode="numeric"')}
+    ${f('email', 'Email', 'type="email" maxlength="120"')}
+    ${f('phone', 'Phone', 'maxlength="30"')}
+    <fieldset><legend>Under 18? A parent or guardian</legend>
+      ${f('guardianName', 'Name', 'maxlength="100"')}
+      ${f('guardianPhone', 'Phone', 'maxlength="30"')}
+    </fieldset>
+    <fieldset><legend>In an emergency</legend>
+      ${f('emergencyName', 'Name', 'maxlength="100"')}
+      ${f('emergencyPhone', 'Phone <span class="muted">(a child\'s parent\'s phone will do)</span>', 'maxlength="30"')}
+    </fieldset>
+    <label for="medicalNotes">Anything the instructor should know — injuries, asthma, allergies</label>
+    <textarea id="medicalNotes" name="medicalNotes" rows="3" maxlength="1000">${v('medicalNotes')}</textarea>
+    <fieldset><legend>Waiver</legend>
+      <label class="check"><input type="checkbox" name="consent" value="1"${values.consentGiven ? ' checked' : ''}>
+        They (or their parent or guardian) accept the club's waiver and understand karate involves physical contact.</label>
+      ${f('consentName', 'Accepted by — full name', 'maxlength="100"')}
+    </fieldset>
+    <div class="actions"><button class="btn" type="submit">${sessionId ? 'Add and mark as here' : 'Add'}</button></div>
+  </form>` });
+};
+
+export const newcomersScreen = ({ me, csrf, org, today, newcomers = [], error, done }) => page({
+  title: `${org.name} — newcomers`, me, csrf, body: `
+  <h1>Giving it a go</h1>
+  <p class="sub">People trying a class. They are not members until you make them one. If they stop coming, their details are removed.</p>
+  ${done ? `<div class="good">${esc(done)}</div>` : ''}
+  ${error ? `<div class="bad">${esc(error)}</div>` : ''}
+  <p><a class="btn" href="/o/${esc(org.slug)}/newcomers/new">Add somebody</a></p>
+  ${newcomers.length ? `<table><thead><tr><th>Name</th><th>Classes</th><th>Contact</th><th></th></tr></thead><tbody>
+  ${newcomers.map((n) => `<tr>
+    <td>${esc(n.first_name)} ${esc(n.last_name)}${n.child ? ' <span class="muted">(under 18)</span>' : ''}
+      ${n.medical_notes ? `<br><span class="muted">Medical: ${esc(n.medical_notes)}</span>` : ''}</td>
+    <td>${n.status === 'trialling' ? `${n.visits}${n.last_visit ? ` · last ${esc(n.last_visit)}` : ''}${n.readyToTalk ? ' <strong>— ask about joining</strong>' : ''}`
+      : n.status === 'joined' ? 'Joined' : 'Not continuing'}</td>
+    <td>${n.status === 'trialling' ? `${esc(n.child ? `${n.guardian_name ?? ''} ${n.guardian_phone ?? ''}` : [n.email, n.phone].filter(Boolean).join(' · '))}` : ''}</td>
+    <td>${n.status === 'trialling' ? `<form method="post" action="/o/${esc(org.slug)}/newcomers/${esc(n.id)}/join" style="display:inline">
+        <input type="hidden" name="_csrf" value="${esc(csrf ?? '')}"><button class="btn" type="submit">Make a member</button></form>
+      <form method="post" action="/o/${esc(org.slug)}/newcomers/${esc(n.id)}/stop" style="display:inline">
+        <input type="hidden" name="_csrf" value="${esc(csrf ?? '')}"><button class="btn secondary" type="submit">Not continuing</button></form>`
+      : n.person_id ? `<a href="/p/${esc(n.person_id)}">View</a>` : ''}</td></tr>`).join('')}
+  </tbody></table>` : '<p class="muted">Nobody is trying a class at the moment.</p>'}` });

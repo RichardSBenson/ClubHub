@@ -33,7 +33,7 @@
 import crypto from 'node:crypto';
 import { URL } from 'node:url';
 import { pool, orgs, people, rank, events, competition, pages, assets, news,
-         instructors, navigation, audit, search, clubPages, appearance, clubs, clubProfile, family, myself, memberEvents, messages, emailPreferences, payments, fees, renewals, reminders, attendance,
+         instructors, navigation, audit, search, clubPages, appearance, clubs, clubProfile, family, myself, memberEvents, messages, emailPreferences, payments, fees, renewals, reminders, attendance, newcomers,
          Forbidden, NotFound, Invalid } from './data.mjs';
 import * as auth from './auth.mjs';
 import * as V from './views.mjs';
@@ -44,6 +44,7 @@ import { readMessage } from '../core/domain/messaging.mjs';
 import { readPayment, readPaymentRequest } from '../core/domain/payments.mjs';
 import { readFee, readExemption, reminderText } from '../core/domain/membership.mjs';
 import { readVisitors, isDate } from '../core/domain/attendance.mjs';
+import { readNewcomer } from '../core/domain/newcomer.mjs';
 import { paymentProviderFrom, isTestProvider } from '../infrastructure/payments/providers.mjs';
 import { BUILT_IN } from '../site/builtin-themes.mjs';
 import { readTheme, serialise } from '../site/theme.mjs';
@@ -1201,8 +1202,10 @@ post('/o/:slug/attendance/:sessionId', async (ctx) => {
   const personIds = Object.keys(form).filter((k) => k.startsWith('here_') && form[k] === '1')
     .map((k) => k.slice(5)).filter((id) => UUID_RE.test(id));
   try {
+    const newcomerIds = Object.keys(form).filter((k) => k.startsWith('new_') && form[k] === '1')
+      .map((k) => k.slice(4)).filter((id) => UUID_RE.test(id));
     const out = await attendance.save(ctx.me.accountId, org.id, ctx.params.sessionId, date,
-      { personIds, visitorNumbers: readVisitors(form.visitors) });
+      { personIds, visitorNumbers: readVisitors(form.visitors), newcomerIds });
     return ctx.redirect(`/o/${org.slug}/attendance?date=${encodeURIComponent(date)}&done=${
       encodeURIComponent(`Saved. ${out.came} came.`)}`);
   } catch (e) {
@@ -1308,6 +1311,70 @@ post('/o/:slug/renewals/reminders', async (ctx) => {
     form.enabled === '1' ? 'Automatic reminders are on.' : 'Automatic reminders are off.')}`);
 });
 
+// ---- newcomers: people giving it a go ----------------------------------------
+
+async function newcomersScreen(ctx, org, extra = {}) {
+  return ctx.send(extra.status ?? 200, V.newcomersScreen({ me: ctx.me, org, csrf: ctx.csrf,
+    ...(await newcomers.list(ctx.me.accountId, org.id)),
+    done: ctx.url.searchParams.get('done'), ...extra }));
+}
+
+get('/o/:slug/newcomers', async (ctx) => {
+  const org = await organisationFor(ctx);
+  if (org.type !== 'club') return ctx.redirect(`/o/${org.slug}/clubs`);
+  return newcomersScreen(ctx, org);
+});
+
+get('/o/:slug/newcomers/new', async (ctx) => {
+  const org = await organisationFor(ctx);
+  if (org.type !== 'club') return ctx.redirect(`/o/${org.slug}/clubs`);
+  await newcomers.list(ctx.me.accountId, org.id);   // authority
+  return ctx.send(200, V.newcomerForm({ me: ctx.me, org, csrf: ctx.csrf,
+    sessionId: ctx.url.searchParams.get('session') ?? '', date: ctx.url.searchParams.get('date') ?? '' }));
+});
+
+post('/o/:slug/newcomers', async (ctx) => {
+  const org = await organisationFor(ctx);
+  const form = await ctx.form();
+  const input = readNewcomer(form);
+  const sessionId = UUID_RE.test(String(form.session ?? '')) ? form.session : null;
+  const date = sessionId ? String(form.date ?? '') : null;
+  try {
+    await newcomers.add(ctx.me.accountId, org.id, input, { sessionId, date });
+    return ctx.redirect(sessionId
+      ? `/o/${org.slug}/attendance/${sessionId}?date=${encodeURIComponent(date)}&done=${encodeURIComponent('Added, and marked as here.')}`
+      : `/o/${org.slug}/newcomers?done=${encodeURIComponent('Added.')}`);
+  } catch (e) {
+    if (e instanceof Invalid) return ctx.send(422, V.newcomerForm({ me: ctx.me, org, csrf: ctx.csrf,
+      values: input, error: e.message, sessionId: sessionId ?? '', date: date ?? '' }));
+    throw e;
+  }
+});
+
+post('/o/:slug/newcomers/:id/join', async (ctx) => {
+  const org = await organisationFor(ctx);
+  if (!UUID_RE.test(ctx.params.id)) throw new NotFound('Newcomer');
+  try {
+    const { person } = await newcomers.join(ctx.me.accountId, org.id, ctx.params.id);
+    return ctx.redirect(`/p/${person.id}`);
+  } catch (e) {
+    if (e instanceof Invalid) return newcomersScreen(ctx, org, { status: 422, error: e.message });
+    throw e;
+  }
+});
+
+post('/o/:slug/newcomers/:id/stop', async (ctx) => {
+  const org = await organisationFor(ctx);
+  if (!UUID_RE.test(ctx.params.id)) throw new NotFound('Newcomer');
+  try {
+    await newcomers.notContinuing(ctx.me.accountId, org.id, ctx.params.id);
+    return ctx.redirect(`/o/${org.slug}/newcomers?done=${encodeURIComponent('Their details have been removed.')}`);
+  } catch (e) {
+    if (e instanceof Invalid) return newcomersScreen(ctx, org, { status: 422, error: e.message });
+    throw e;
+  }
+});
+
 // The scheduler's door. Open to nobody without the shared secret, and shut
 // entirely when none is configured — "no secret set" must never mean "no lock".
 get('/cron/renewals', async (ctx) => {
@@ -1316,10 +1383,11 @@ get('/cron/renewals', async (ctx) => {
   const a = Buffer.from(given), b = Buffer.from(secret ?? '');
   if (!secret || a.length !== b.length || !crypto.timingSafeEqual(a, b))
     throw new Forbidden('Not permitted');
+  const forgotten = await newcomers.purgeStale();
   const report = await reminders.run({ messenger: messengerFrom(), baseFrom: sendingAddress(),
     origin: process.env.VERCEL_PROJECT_PRODUCTION_URL
       ? `https://${process.env.VERCEL_PROJECT_PRODUCTION_URL}` : originOf(ctx) });
-  return ctx.send(200, `<pre>${JSON.stringify(report, null, 1).replace(/</g, '&lt;')}</pre>`);
+  return ctx.send(200, `<pre>${JSON.stringify({ report, newcomersForgotten: forgotten }, null, 1).replace(/</g, '&lt;')}</pre>`);
 });
 
 post('/o/:slug/renewals/fees', async (ctx) => {
