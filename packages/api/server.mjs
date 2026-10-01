@@ -33,7 +33,7 @@
 import crypto from 'node:crypto';
 import { URL } from 'node:url';
 import { pool, orgs, people, rank, events, competition, pages, assets, news,
-         instructors, navigation, audit, search, clubPages, appearance, clubs, clubProfile, family, myself, memberEvents, messages, emailPreferences, payments, fees, renewals, reminders, attendance, newcomers,
+         instructors, navigation, audit, search, clubPages, appearance, clubs, clubProfile, family, myself, memberEvents, messages, emailPreferences, payments, fees, renewals, reminders, attendance, newcomers, reports,
          Forbidden, NotFound, Invalid } from './data.mjs';
 import * as auth from './auth.mjs';
 import * as V from './views.mjs';
@@ -45,6 +45,7 @@ import { readPayment, readPaymentRequest } from '../core/domain/payments.mjs';
 import { readFee, readExemption, reminderText } from '../core/domain/membership.mjs';
 import { readVisitors, isDate } from '../core/domain/attendance.mjs';
 import { readNewcomer } from '../core/domain/newcomer.mjs';
+import { toCsv, fileName } from '../core/domain/csv.mjs';
 import { paymentProviderFrom, isTestProvider } from '../infrastructure/payments/providers.mjs';
 import { BUILT_IN } from '../site/builtin-themes.mjs';
 import { readTheme, serialise } from '../site/theme.mjs';
@@ -1373,6 +1374,29 @@ post('/o/:slug/newcomers/:id/stop', async (ctx) => {
     if (e instanceof Invalid) return newcomersScreen(ctx, org, { status: 422, error: e.message });
     throw e;
   }
+});
+
+// ---- reports -------------------------------------------------------------------
+
+get('/o/:slug/reports', async (ctx) => {
+  const org = await organisationFor(ctx);
+  const allowed = [];
+  for (const [name, def] of Object.entries(reports.list)) {
+    try { await reports.run(ctx.me.accountId, org.id, name); allowed.push({ name, ...def }); }
+    catch (e) { if (!(e instanceof Forbidden)) throw e; }
+  }
+  if (!allowed.length) throw new Forbidden();
+  return ctx.send(200, V.reportsScreen({ me: ctx.me, org, csrf: ctx.csrf, reports: allowed }));
+});
+
+get('/o/:slug/reports/:name', async (ctx) => {
+  const org = await organisationFor(ctx);
+  const sp = ctx.url.searchParams;
+  const csv = sp.get('format') === 'csv';
+  const r = await reports.run(ctx.me.accountId, org.id, ctx.params.name,
+    { from: sp.get('from'), to: sp.get('to'), download: csv });
+  if (csv) return ctx.download(fileName(org.slug, r.name, r.range?.to ?? r.today), 'text/csv', toCsv(r.columns, r.rows));
+  return ctx.send(200, V.reportScreen({ me: ctx.me, org, csrf: ctx.csrf, report: r }));
 });
 
 // The scheduler's door. Open to nobody without the shared secret, and shut

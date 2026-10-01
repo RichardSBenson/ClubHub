@@ -175,6 +175,8 @@ export function describe(entry) {
       return `made a newcomer a member${a.person ? ` (${a.person})` : ''}`;
     case 'newcomer_left':
       return 'removed a newcomer who is not continuing';
+    case 'report_exported':
+      return `downloaded the ${a.report ?? ''} report (${a.rows ?? 0} rows)`;
     case 'roll_taken':
       return `took the roll for ${a.label ? quote(a.label) : 'a class'} on ${a.date ?? 'a day'}: ${a.came ?? 0} came`
         + (b?.came != null && b.came !== a.came ? ` (was ${b.came})` : '');
@@ -262,6 +264,7 @@ export const ACTIONS = Object.freeze([
   ['club_profile_saved', 'Club details changed'],
   ['message_sent', 'Message sent'],
   ['roll_taken', 'Roll taken'],
+  ['report_exported', 'Report downloaded'],
   ['newcomer_added', 'Newcomer added'],
   ['newcomer_joined', 'Newcomer became a member'],
   ['newcomer_left', 'Newcomer removed'],

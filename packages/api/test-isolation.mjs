@@ -205,6 +205,7 @@ function pathFor(pattern) {
     affiliationId: theirAffiliation.id,
     sessionId: theirSession.id,
     feeId: theirFee.id,
+    name: 'members',
     clubId: theirs.id,
     token: 'not-a-real-token',
     secret: 'not-a-real-secret',

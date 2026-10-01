@@ -4046,3 +4046,115 @@ export const newcomers = {
     return gone.length;
   },
 };
+
+// ---------------------------------------------------------------------------
+// reports: what the treasurer, the registrar and the national office ask for
+//
+// Each report is a list of rows with named columns; the route turns it into a
+// CSV or a table. They work for a club or for any organisation above clubs,
+// which sees everybody beneath it. Downloading personal data is itself written
+// to the audit log, because "who took the member list" is a fair question.
+// ---------------------------------------------------------------------------
+
+import { REPORTS, readRange, cents } from '../core/domain/csv.mjs';
+
+const IN_TREE = `(select o.id from organisation root join organisation o on o.path <@ root.path where root.id = $1)`;
+const REPORT_ROLES = { register: REGISTER, manage: ['owner', 'administrator'], teach: TEACHERS };
+
+export const reports = {
+  list: REPORTS,
+
+  async run(actor, orgId, name, { from = null, to = null, download = false } = {}) {
+    const def = REPORTS[name];
+    if (!def) throw new NotFound('Report');
+    await assertRole(actor, orgId, REPORT_ROLES[def.needs]);
+    const org = await one('select id, name, slug, type, timezone from organisation where id=$1', [orgId]);
+    if (!org) throw new NotFound('Organisation');
+    const today = (await one(`select to_char((now() at time zone $1)::date,'YYYY-MM-DD') as d`, [org.timezone])).d;
+    const range = readRange(from, to, today);
+    const out = await reports[`_${name}`](orgId, today, range);
+
+    if (download) await q(`insert into audit_log (account_id, organisation_id, action, entity, entity_id, after)
+      values ($1,$2,'report_exported','organisation',$2,$3)`, [actor, orgId,
+      JSON.stringify({ report: name, rows: out.rows.length, ...(def.dates ? range : {}) })]);
+    return { org, today, name, label: def.label, range: def.dates ? range : null, ...out };
+  },
+
+  async _members(orgId, today) {
+    const rows = await q(`
+      select o.name as club, p.display_number as number, p.first_name, p.last_name, a.role, a.status,
+             to_char(p.date_of_birth,'YYYY-MM-DD') as date_of_birth,
+             case when p.date_of_birth is null then null else date_part('year', age($2::date, p.date_of_birth))::int end as age,
+             p.gender, p.email, p.phone, cg.label as grade, to_char(cg.awarded_on,'YYYY-MM-DD') as graded_on,
+             to_char(a.starts,'YYYY-MM-DD') as joined, to_char(a.paid_until,'YYYY-MM-DD') as paid_until,
+             a.fee_exempt,
+             (select to_char(max(t.session_date),'YYYY-MM-DD') from attendance t where t.person_id = p.id) as last_trained
+      from affiliation a join person p on p.id = a.person_id join organisation o on o.id = a.organisation_id
+      left join person_current_grade cg on cg.person_id = p.id
+      where a.organisation_id in ${IN_TREE} and a.ends is null and a.role in ('member','instructor','assistant')
+        and a.status in ('active','lapsed','pending')
+      order by o.name, p.last_name, p.first_name`, [orgId, today]);
+    return { columns: [['club', 'Club'], ['number', 'Member number'], ['first_name', 'First name'], ['last_name', 'Last name'],
+      ['role', 'Role'], ['status', 'Status'], ['date_of_birth', 'Date of birth'], ['age', 'Age'], ['gender', 'Gender'],
+      ['email', 'Email'], ['phone', 'Phone'], ['grade', 'Grade'], ['graded_on', 'Graded on'], ['joined', 'Joined'],
+      ['paid_until', 'Paid until'], ['standing', 'Fees'], ['last_trained', 'Last trained']]
+      .map(([key, label]) => ({ key, label })),
+      rows: rows.map((r) => ({ ...r, standing: standing({ paidUntil: r.paid_until, exempt: r.fee_exempt }, today) })) };
+  },
+
+  async _fees(orgId, today) {
+    const { rows } = await reports._members(orgId, today);
+    const owing = rows.filter((r) => ['unpaid', 'overdue', 'due'].includes(r.standing)).map((r) => ({
+      ...r, days_late: r.standing === 'overdue' ? Math.round((Date.parse(today) - Date.parse(r.paid_until)) / 864e5) : null }));
+    owing.sort((a, b) => (b.days_late ?? -1) - (a.days_late ?? -1));
+    return { columns: [['club', 'Club'], ['number', 'Member number'], ['first_name', 'First name'], ['last_name', 'Last name'],
+      ['standing', 'Fees'], ['paid_until', 'Paid until'], ['days_late', 'Days overdue'], ['age', 'Age'], ['email', 'Email'], ['phone', 'Phone']]
+      .map(([key, label]) => ({ key, label })), rows: owing };
+  },
+
+  async _payments(orgId, _today, { from, to }) {
+    const rows = await q(`
+      select to_char(coalesce(py.settled_at, py.created_at),'YYYY-MM-DD') as date, py.receipt_no as receipt,
+             po.name as payee, p.display_number as number,
+             nullif(trim(concat_ws(' ', p.first_name, p.last_name)), '') as payer,
+             (select string_agg(l.kind, ' + ' order by l.id) from payment_line l where l.payment_id = py.id) as kinds,
+             (select string_agg(l.description, '; ' order by l.id) from payment_line l where l.payment_id = py.id) as description,
+             py.method, py.amount_cents
+      from payment py join organisation po on po.id = py.organisation_id left join person p on p.id = py.person_id
+      where py.organisation_id in ${IN_TREE} and py.status = 'succeeded'
+        and coalesce(py.settled_at, py.created_at)::date between $2::date and $3::date
+      order by coalesce(py.settled_at, py.created_at), py.receipt_no`, [orgId, from, to]);
+    return { columns: [['date', 'Date'], ['receipt', 'Receipt'], ['payee', 'Paid to'], ['number', 'Member number'],
+      ['payer', 'Paid by'], ['kinds', 'For'], ['description', 'Details'], ['method', 'Method'], ['amount', 'Amount']]
+      .map(([key, label]) => ({ key, label })),
+      rows: rows.map((r) => ({ ...r, amount: cents(r.amount_cents) })),
+      total: rows.reduce((s, r) => s + r.amount_cents, 0) };
+  },
+
+  async _attendance(orgId, _today, { from, to }) {
+    const rows = await q(`
+      select o.name as club, p.display_number as number, p.first_name, p.last_name,
+             count(*)::int as classes, count(distinct t.session_date)::int as days,
+             to_char(max(t.session_date),'YYYY-MM-DD') as last_trained
+      from attendance t join person p on p.id = t.person_id join organisation o on o.id = t.organisation_id
+      where t.organisation_id in ${IN_TREE} and t.session_date between $2::date and $3::date
+      group by o.name, p.id, p.display_number, p.first_name, p.last_name
+      order by o.name, classes desc, p.last_name`, [orgId, from, to]);
+    return { columns: [['club', 'Club'], ['number', 'Member number'], ['first_name', 'First name'], ['last_name', 'Last name'],
+      ['classes', 'Classes'], ['days', 'Days'], ['last_trained', 'Last trained']].map(([key, label]) => ({ key, label })), rows };
+  },
+
+  async _gradings(orgId, _today, { from, to }) {
+    const rows = await q(`
+      select to_char(gr.awarded_on,'YYYY-MM-DD') as date, p.display_number as number, p.first_name, p.last_name,
+             g.label as grade, gr.result, o.name as awarded_by, gr.certificate_no as certificate,
+             to_char(gr.ratified_on,'YYYY-MM-DD') as ratified_on, e.title as event
+      from grading_record gr join person p on p.id = gr.person_id join grade g on g.id = gr.grade_id
+      join organisation o on o.id = gr.awarded_by_org left join event e on e.id = gr.event_id
+      where gr.awarded_by_org in ${IN_TREE} and gr.awarded_on between $2::date and $3::date
+      order by gr.awarded_on desc, p.last_name`, [orgId, from, to]);
+    return { columns: [['date', 'Date'], ['number', 'Member number'], ['first_name', 'First name'], ['last_name', 'Last name'],
+      ['grade', 'Grade'], ['result', 'Result'], ['awarded_by', 'Awarded by'], ['certificate', 'Certificate'],
+      ['ratified_on', 'Ratified'], ['event', 'Event']].map(([key, label]) => ({ key, label })), rows };
+  },
+};

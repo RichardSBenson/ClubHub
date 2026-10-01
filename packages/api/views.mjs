@@ -288,6 +288,7 @@ export function rail({ org, vocabulary = {}, can = {}, path = '' }) {
     isClub && can.register && link(`${base}/renewals`, 'Renewals'),
     can.manage && link(`${base}/messages`, 'Messages'),
     can.manage && link(`${base}/payments`, 'Payments'),
+    can.teach && link(`${base}/reports`, 'Reports'),
   ])}
   ${group('Events', [link(`${base}/events`, 'Events')])}
   ${can.write ? group('Website', [
@@ -3545,3 +3546,34 @@ export const newcomersScreen = ({ me, csrf, org, today, newcomers = [], error, d
         <input type="hidden" name="_csrf" value="${esc(csrf ?? '')}"><button class="btn secondary" type="submit">Not continuing</button></form>`
       : n.person_id ? `<a href="/p/${esc(n.person_id)}">View</a>` : ''}</td></tr>`).join('')}
   </tbody></table>` : '<p class="muted">Nobody is trying a class at the moment.</p>'}` });
+
+
+// ---------------------------------------------------------------------------
+// reports
+// ---------------------------------------------------------------------------
+
+export const reportsScreen = ({ me, csrf, org, reports = [] }) => page({
+  title: `${org.name} — reports`, me, csrf, body: `
+  <h1>Reports</h1>
+  <p class="sub">${org.type === 'club' ? 'For this club.' : 'Everybody beneath this organisation.'} Downloads open in Excel or Sheets. A download of personal details is noted in the audit log.</p>
+  <table><tbody>${reports.map((r) => `<tr><td><strong>${esc(r.label)}</strong></td>
+    <td><a class="btn" href="/o/${esc(org.slug)}/reports/${esc(r.name)}">View</a>
+        <a class="btn secondary" href="/o/${esc(org.slug)}/reports/${esc(r.name)}?format=csv">Download CSV</a></td></tr>`).join('')}</tbody></table>` });
+
+export const reportScreen = ({ me, csrf, org, report }) => {
+  const SHOWN = 200;
+  const q = report.range ? `from=${esc(report.range.from)}&amp;to=${esc(report.range.to)}` : '';
+  return page({ title: `${org.name} — ${report.label}`, me, csrf, body: `
+  <p><a href="/o/${esc(org.slug)}/reports">← Reports</a></p>
+  <h1>${esc(report.label)}</h1>
+  ${report.range ? `<form method="get" action="/o/${esc(org.slug)}/reports/${esc(report.name)}">
+    <label for="from">From</label><input id="from" name="from" value="${esc(report.range.from)}" maxlength="10">
+    <label for="to">To</label><input id="to" name="to" value="${esc(report.range.to)}" maxlength="10">
+    <button class="btn secondary" type="submit">Show</button></form>` : ''}
+  <p>${report.rows.length} ${report.rows.length === 1 ? 'row' : 'rows'}${report.total != null ? ` · total $${(report.total / 100).toFixed(2)}` : ''}
+    · <a class="btn" href="/o/${esc(org.slug)}/reports/${esc(report.name)}?format=csv${q ? `&amp;${q}` : ''}">Download CSV</a></p>
+  ${report.rows.length ? `<table><thead><tr>${report.columns.map((c) => `<th>${esc(c.label)}</th>`).join('')}</tr></thead><tbody>
+    ${report.rows.slice(0, SHOWN).map((r) => `<tr>${report.columns.map((c) => `<td>${esc(r[c.key] ?? '')}</td>`).join('')}</tr>`).join('')}
+  </tbody></table>${report.rows.length > SHOWN ? `<p class="muted">Showing the first ${SHOWN}. The download has all of them.</p>` : ''}`
+    : '<p class="muted">Nothing to show.</p>'}` });
+};
