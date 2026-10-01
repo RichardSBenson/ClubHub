@@ -187,6 +187,23 @@ console.log('\nIMAGES ARE WRITTEN OUT, AND THE BLOCK POINTS AT THEM');
     !fs.existsSync(path.join(OUT, 'a')));
 }
 
+console.log('\nNEWS ARTICLES HAVE BODIES');
+{
+  // They did not. The site query selected slug, title, summary and date but
+  // not body, and the build renders '' when body is undefined — so every news
+  // page on the hosted site was a headline and a date. The flat store spreads
+  // every column, so only the deployed build was affected.
+  const { rows: [a] } = await pool.query(
+    `select slug from article where status='published' limit 1`);
+  const html = fs.readFileSync(
+    path.join(OUT, 'news', a.slug, 'index.html'), 'utf8');
+  ok('the article page has its paragraph, not an empty section',
+    /<section>\s*<div class="wrap narrow">\s*<p>/.test(html),
+    'the body rendered as nothing');
+  ok('and the section is not empty',
+    !/<div class="wrap narrow"><\/div>/.test(html));
+}
+
 fs.rmSync(OUT, { recursive: true, force: true });
 
 console.log(`\n${pass} passed, ${fail} failed\n`);

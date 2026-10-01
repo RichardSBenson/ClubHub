@@ -267,8 +267,16 @@ export class PostgresSiteContent {
    * is the kind of leak that is only funny until it happens in a demo.
    */
   async articles(federationId = null) {
+    // body, hero and tags were missing from this list. The build does
+    // `article.body ? renderBlocks(...) : ''`, so every news article on the
+    // hosted site has been a headline, a date and nothing else — a page of
+    // 1,764 bytes with no content in it. The flat store spreads every column,
+    // so a build from files had bodies and only the deployed one did not,
+    // which is why it went unnoticed.
     const { rows } = await this.pool.query(`
-      select a.slug, a.title, a.summary, a.published_at, o.name as about_org
+      select a.slug, a.title, a.summary, a.body, a.tags,
+             a.hero_asset_id as "heroAssetId",
+             a.published_at, o.name as about_org
       from article a left join organisation o on o.id = a.about_org_id
       where a.status='published'
         and ($1::uuid is null or a.organisation_id in (
