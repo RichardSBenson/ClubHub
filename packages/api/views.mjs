@@ -3307,7 +3307,7 @@ export const paymentsScreen = ({ me, csrf, org, rows = [], totals = [], methods 
 const STANDING_TAG = { exempt: 'ok', current: 'ok', due: 'warn', overdue: 'no', unpaid: 'no' };
 
 export const renewalsScreen = ({ me, csrf, org, today, rows = [], prices = [], canSetPrices = false,
-                                 canExempt = false, values = null, error, done, notes = [] }) => {
+                                 canExempt = false, reminderText: remind = null, autoReminders = false, values = null, error, done, notes = [] }) => {
   const v = (k) => esc(values?.[k] ?? '');
   const periods = [...new Set(prices.map((f) => f.period))].filter((p) => FEE_PERIODS[p].months);
   const due = rows.filter((r) => ['overdue', 'due', 'unpaid'].includes(r.standing) && !r.asked);
@@ -3346,7 +3346,7 @@ export const renewalsScreen = ({ me, csrf, org, today, rows = [], prices = [], c
   <h2>Who is due</h2>
   <form method="post" action="/o/${esc(org.slug)}/renewals">
     <input type="hidden" name="_csrf" value="${esc(csrf ?? '')}">
-    <table><thead><tr><th></th><th>Member</th><th>Fees run to</th><th></th><th></th></tr></thead><tbody>${
+    <table><thead><tr><th></th><th>Member</th><th>Fees run to</th><th></th><th>Last reminded</th></tr></thead><tbody>${
     rows.map((r) => `<tr>
       <td>${r.standing === 'exempt' || r.asked ? '' : `<input type="checkbox" name="pick_${esc(r.affiliation_id)}" value="1"${
         ['overdue', 'due', 'unpaid'].includes(r.standing) ? ' checked' : ''} aria-label="Ask ${esc(r.name)}">`}</td>
@@ -3356,7 +3356,7 @@ export const renewalsScreen = ({ me, csrf, org, today, rows = [], prices = [], c
       <td><span class="tag ${STANDING_TAG[r.standing]}">${esc(STANDING_WORDS[r.standing])}</span>${
         r.asked ? ' <span class="muted">asked</span>' : ''}${
         r.fee_exempt ? ` <span class="muted">${esc(EXEMPT_REASONS[r.fee_exempt_reason] ?? '')}</span>` : ''}</td>
-      <td></td></tr>`).join('')}</tbody></table>
+      <td class="muted">${esc(r.last_reminded ?? '—')}</td></tr>`).join('')}</tbody></table>
     ${periods.length ? `<div class="row">
       <div><label for="renewPeriod">Ask them to renew</label><select id="renewPeriod" name="period">${periods.map((p) =>
         `<option value="${p}">${esc(FEE_PERIODS[p].label.toLowerCase())}</option>`).join('')}</select></div>
@@ -3365,8 +3365,30 @@ export const renewalsScreen = ({ me, csrf, org, today, rows = [], prices = [], c
           `<option value="${k}">Yes — ${esc(l.toLowerCase())}</option>`).join('')}</select></div></div>
     <p class="muted">${due.length} need renewing. Tick who to include. “Already handed over” records the payment
       and a receipt number straight away, for people paying at the door.</p>
-    <div class="actions"><button class="btn" type="submit">Renew the ticked</button></div>` : ''}
+    <div class="actions"><button class="btn" type="submit" name="action" value="renew">Renew the ticked</button></div>` : ''}
+
+    <h2>Remind the ticked</h2>
+    <p class="muted">Writes to the ticked members as ${esc(org.name)}. Children are written to through their parent
+      or guardian. Anybody not charged is left out. A fees reminder is sent even to people who have
+      stopped announcements, and says so. <code>{club}</code> and <code>{payLink}</code> are filled in for you.</p>
+    <label for="subject">Subject</label>
+    <input id="subject" name="subject" maxlength="150" value="${esc(values?.subject ?? remind?.subject ?? '')}">
+    <label for="body">Message</label>
+    <textarea id="body" name="body" rows="8" maxlength="10000">${esc(values?.body ?? remind?.body ?? '')}</textarea>
+    <div class="actions"><button class="btn" type="submit" name="action" value="remind">Send the reminder</button></div>
   </form>
+
+  ${canExempt ? `<h2>Automatic reminders</h2>
+  <form method="post" action="/o/${esc(org.slug)}/renewals/reminders">
+    <input type="hidden" name="_csrf" value="${esc(csrf ?? '')}">
+    <p>${autoReminders ? '<strong>On.</strong>' : '<strong>Off.</strong>'}
+      Each morning ${esc(org.name)} writes to members whose fees run out within 30 days, and again to those whose
+      fees ran out in the last 60 days — never more than once every 14 days, never to anybody not charged,
+      and never to somebody with no paid-until date at all (so an imported roll is not a flood).
+      It needs the club's contact email on its page, so replies have somewhere to go.</p>
+    <input type="hidden" name="enabled" value="${autoReminders ? '0' : '1'}">
+    <div class="actions"><button class="btn quiet" type="submit">${autoReminders ? 'Turn automatic reminders off' : 'Turn automatic reminders on'}</button></div>
+  </form>` : ''}
 
   ${canExempt ? `<h2>People who are not charged</h2>
   <p class="muted">Some people do not pay — an instructor who gives their time, a life member. They stay members and

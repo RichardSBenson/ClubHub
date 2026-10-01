@@ -16,6 +16,7 @@ export const AUDIENCES = Object.freeze([
   ['instructors', 'Instructors only'],
   ['event',       'People entered in an event'],
   ['person',      'One person'],
+  ['selected',    'People picked from a list'],   // not offered on the compose screen
 ]);
 
 /**
@@ -26,6 +27,7 @@ export const AUDIENCES = Object.freeze([
 export const KINDS = Object.freeze([
   ['announcement', 'Announcement'],
   ['event', 'About an event they entered'],
+  ['renewal', 'About their membership fees'],
 ]);
 
 const EMAIL = /^[^\s@,;<>"]+@[^\s@,;<>"]+\.[^\s@,;<>"]+$/;
@@ -72,6 +74,8 @@ export function problemsWithMessage(m) {
   if (!KINDS.some(([k]) => k === m.kind)) out.push('Choose what kind of message this is.');
   if (m.audience === 'event' && !m.eventId) out.push('Choose the event.');
   if (m.audience === 'person' && !m.personNumber) out.push('Enter the member number of the person.');
+  if (m.kind === 'renewal' && m.audience !== 'selected')
+    out.push('A fees reminder goes to people picked from the renewals list.');
   if (m.kind === 'event' && m.audience !== 'event')
     out.push('A message about an event they entered can only go to people entered in an event.');
   if (!m.subject) out.push('A message needs a subject.');
@@ -80,12 +84,12 @@ export function problemsWithMessage(m) {
 }
 
 /** What the recipient reads: the words, a line saying who it is from, a way out. */
-export function renderBody({ text, club, unsubscribeUrl = null, optOutHonoured = true }) {
+export function renderBody({ text, club, unsubscribeUrl = null, optOutHonoured = true, serviceNote = null }) {
   const lines = [String(text).trim(), '', '—', `Sent by ${club.name}.`];
   if (unsubscribeUrl && optOutHonoured)
     lines.push(`Stop getting announcements from clubs: ${unsubscribeUrl}`);
   else if (unsubscribeUrl)
-    lines.push('This is about something you entered, so it is sent whatever your email settings.');
+    lines.push(serviceNote ?? 'This is about something you entered, so it is sent whatever your email settings.');
   return lines.join('\n');
 }
 

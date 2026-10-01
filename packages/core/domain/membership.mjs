@@ -119,3 +119,41 @@ export function readExemption(form = {}) {
 export function problemsWithExemption({ exempt, reason }) {
   return exempt && !EXEMPT_REASONS[reason] ? ['Choose why they are not charged.'] : [];
 }
+
+
+/**
+ * What a fees reminder says. Two tones: fees about to run out, and fees that
+ * have. {club} and {payLink} are filled in when it is sent, so the same text
+ * serves every club. It never says how much: the amount is the dojo's own and
+ * differs by person, and the pay link shows it.
+ */
+export function reminderText(kind) {
+  if (kind === 'overdue') return {
+    subject: 'Your {club} membership fees have run out',
+    body: 'Kia ora,\n\nThe membership fees at {club} have run out. To keep training with us, '
+      + 'please renew — you can pay online here:\n\n{payLink}\n\n'
+      + 'If you have already paid in cash or by bank transfer, thank you — just reply and let us know.',
+  };
+  return {
+    subject: 'Your {club} membership fees are due soon',
+    body: 'Kia ora,\n\nThe membership fees at {club} are due to be renewed soon. '
+      + 'You can pay online here:\n\n{payLink}\n\n'
+      + 'If you pay in cash or by bank transfer, just let us know and we will record it.',
+  };
+}
+
+/** How long before we write to somebody again, and how far past due we keep trying. */
+export const REMIND_EVERY_DAYS = 14;
+export const STOP_REMINDING_AFTER_DAYS = 60;
+
+/** Who the automatic reminder writes to. Never someone with no date: an imported roll would be a flood. */
+export function dueForReminder(rows, today) {
+  const ago = (n) => { const d = new Date(`${today}T00:00:00Z`); d.setUTCDate(d.getUTCDate() - n);
+    return d.toISOString().slice(0, 10); };
+  const recent = ago(REMIND_EVERY_DAYS), cutoff = ago(STOP_REMINDING_AFTER_DAYS);
+  const pick = (r) => !r.fee_exempt && (!r.last_reminded || r.last_reminded <= recent);
+  return {
+    due: rows.filter((r) => r.standing === 'due' && pick(r)),
+    overdue: rows.filter((r) => r.standing === 'overdue' && r.paid_until >= cutoff && pick(r)),
+  };
+}

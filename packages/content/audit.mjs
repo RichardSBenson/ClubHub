@@ -142,7 +142,7 @@ export function describe(entry) {
     }
 
     case 'message_sent': {
-      const who = { members: 'the members', instructors: 'the instructors',
+      const who = { members: 'the members', instructors: 'the instructors', selected: 'people picked from the renewals list',
                     event: 'people entered in an event', person: 'one person' }[a.audience] ?? 'people';
       return `wrote ${a.subject ? quote(a.subject) : 'a message'} to ${who} (${a.recipients ?? 0} `
         + `address${a.recipients === 1 ? '' : 'es'}${a.skipped ? `, ${a.skipped} skipped` : ''})`;
@@ -167,6 +167,8 @@ export function describe(entry) {
                       : `started charging ${a.person ?? 'a member'} fees again`;
     case 'membership_carried_on':
       return `carried a membership on to ${a.paidUntil ?? 'a later date'} with no payment`;
+    case 'reminders_setting':
+      return a.enabled ? 'switched automatic fees reminders on' : 'switched automatic fees reminders off';
     case 'email_preference':
       return a.optedOut ? 'a member stopped getting announcement emails'
                         : 'a member started getting announcement emails again';
@@ -250,6 +252,7 @@ export const ACTIONS = Object.freeze([
   ['self_update', 'Member updated their own details'],
   ['club_profile_saved', 'Club details changed'],
   ['message_sent', 'Message sent'],
+  ['reminders_setting', 'Automatic reminders changed'],
   ['payment_requested', 'Payment asked for'],
   ['payment_made', 'Payment made'],
   ['payment_failed', 'Payment failed'],

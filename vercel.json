@@ -33,6 +33,10 @@
       "destination": "/api/index"
     },
     {
+      "source": "/cron/renewals",
+      "destination": "/api/index"
+    },
+    {
       "source": "/me",
       "destination": "/api/index"
     },
@@ -63,6 +67,12 @@
     {
       "source": "/try/:path*",
       "destination": "/api/index"
+    }
+  ],
+  "crons": [
+    {
+      "path": "/cron/renewals",
+      "schedule": "0 18 * * *"
     }
   ]
 }

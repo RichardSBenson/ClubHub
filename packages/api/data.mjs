@@ -15,7 +15,7 @@ import { problemsWithPerson, problemsWithMembership }
 import { payeeFor, groupByPayee, problemsWithPaymentRequest, problemsWithPayment, KINDS as PAY_KINDS }
   from '../core/domain/payments.mjs';
 import { isTestProvider } from '../infrastructure/payments/providers.mjs';
-import { PERIODS, extendedUntil, standing, feeFor, problemsWithFee, problemsWithExemption,
+import { dueForReminder, reminderText, PERIODS, extendedUntil, standing, feeFor, problemsWithFee, problemsWithExemption,
          MANUAL_METHODS } from '../core/domain/membership.mjs';
 import { centsFrom } from '../core/domain/payments.mjs';
 import { problemsWithMessage, senderFor, chooseRecipients, renderBody }
@@ -3004,7 +3004,16 @@ export const clubPages = {
 // the people it reached, so "did they get it?" has an answer afterwards.
 // ---------------------------------------------------------------------------
 
-const peopleIn = async (org, audience, { eventId, personId }) => {
+const peopleIn = async (org, audience, { eventId, personId, personIds }) => {
+  if (audience === 'selected') {
+    // Only people actually in this organisation: an id from anywhere else is dropped, not trusted.
+    const r = await q(`
+      select distinct a.person_id as id from affiliation a
+      join organisation o on o.id = a.organisation_id
+      where a.person_id = any($2::uuid[]) and a.ends is null and o.path <@ $1::ltree`,
+      [org.path, personIds]);
+    return r.map((x) => x.id);
+  }
   if (audience === 'person') {
     const r = await q(`
       select distinct a.person_id as id from affiliation a
@@ -3034,8 +3043,8 @@ const peopleIn = async (org, audience, { eventId, personId }) => {
 
 export const messages = {
   /** What the compose screen offers, and what a message would be sent as. */
-  async options(actor, orgId, { baseFrom }) {
-    await assertRole(actor, orgId, MANAGE);
+  async options(actor, orgId, { baseFrom, trusted = false }) {
+    if (!trusted) await assertRole(actor, orgId, MANAGE);
     const org = await one('select * from organisation where id=$1', [orgId]);
     if (!org) throw new NotFound('Organisation');
     const events = await q(`
@@ -3046,7 +3055,7 @@ export const messages = {
       order by e.starts_at desc limit 40`, [org.path]);
     const contact = org.type === 'club'
       ? (await one('select email from dojo_profile where organisation_id=$1', [orgId]))?.email : null;
-    const me = await one('select email from account where id=$1', [actor]);
+    const me = actor ? await one('select email from account where id=$1', [actor]) : null;
     const sender = senderFor({ club: org, baseFrom, contactEmail: contact, actorEmail: me?.email });
     return { org, events, sender, contactEmail: contact };
   },
@@ -3088,16 +3097,18 @@ export const messages = {
    * Work out who this reaches and write the message down, every recipient
    * queued. Nothing is sent here.
    */
-  async prepare(actor, orgId, input, { baseFrom }) {
-    await assertRole(actor, orgId, MANAGE);
+  async prepare(actor, orgId, input, { baseFrom, trusted = false }) {
+    if (!trusted) await assertRole(actor, orgId, MANAGE);
     const problems = problemsWithMessage(input);
     if (problems.length) throw new Invalid(problems.join(' '));
 
-    const { org, sender } = await messages.options(actor, orgId, { baseFrom });
+    const { org, sender } = await messages.options(actor, orgId, { baseFrom, trusted });
     if (!sender)
       throw new Invalid('Email is not set up to send from this system yet — ask whoever installed it to add a sending address.');
     if (!sender.replyTo)
       throw new Invalid('Add a contact email on the club\'s page first, so replies have somewhere to go.');
+    if (input.audience === 'selected' && !input.personIds?.length)
+      throw new Invalid('Choose who this is for.');
 
     let personId = null;
     if (input.audience === 'person') {
@@ -3106,6 +3117,8 @@ export const messages = {
       if (!personId) throw new Invalid(`There is no member numbered ${input.personNumber}.`);
     }
     const ids = await peopleIn(org, input.audience, { ...input, personId });
+    if (!ids.length && input.audience === 'selected')
+      throw new Invalid('None of those people are in this club.');
     const candidates = ids.length ? (await q(`
       select p.id as "personId", p.email,
         (p.date_of_birth is not null and p.date_of_birth > current_date - interval '18 years') as "isMinor",
@@ -3119,7 +3132,7 @@ export const messages = {
       where p.id = any($1::uuid[])`, [ids])) : [];
 
     const { recipients, skipped } = chooseRecipients(candidates,
-      { honourOptOut: input.kind !== 'event' });
+      { honourOptOut: input.kind === 'announcement' });
     if (!recipients.length)
       throw new Invalid(ids.length
         ? 'Nobody here can be emailed — they have no address on file, or have opted out.'
@@ -3168,8 +3181,8 @@ export const messages = {
    * again: a recipient is claimed before it is sent, so two presses of the
    * button do not write to anybody twice.
    */
-  async sendBatch(actor, orgId, messageId, { messenger, origin, budgetMs = 6000, concurrency = 5 }) {
-    await assertRole(actor, orgId, MANAGE);
+  async sendBatch(actor, orgId, messageId, { messenger, origin, budgetMs = 6000, concurrency = 5, trusted = false }) {
+    if (!trusted) await assertRole(actor, orgId, MANAGE);
     const message = await one('select * from message where id=$1 and organisation_id=$2',
       [messageId, orgId]);
     if (!message) throw new NotFound('Message');
@@ -3200,9 +3213,12 @@ export const messages = {
         try {
           const res = await messenger.send({
             to: r.email, subject: message.subject, kind: 'message', sender,
-            text: renderBody({ text: message.body, club: org, unsubscribeUrl: url,
-                               optOutHonoured: message.kind !== 'event' }),
-            headers: url && message.kind !== 'event' ? { 'List-Unsubscribe': `<${url}>` } : null,
+            text: renderBody({ text: String(message.body)
+                .replaceAll('{club}', org.name).replaceAll('{payLink}', origin ? `${origin}/me/payments` : 'your club'),
+              club: org, unsubscribeUrl: url,
+                               optOutHonoured: message.kind === 'announcement',
+                               serviceNote: message.kind === 'renewal' ? 'This is about your membership fees, so it is sent whatever your email settings.' : undefined }),
+            headers: url && message.kind === 'announcement' ? { 'List-Unsubscribe': `<${url}>` } : null,
           });
           await pool.query(`update message_recipient set status='sent', sent_at=now(),
             provider_id=$2, error=null where id=$1`, [r.id, res?.id ?? null]);
@@ -3549,11 +3565,8 @@ export const fees = {
   },
 };
 
-export const renewals = {
-  /** Everybody at the club, and where their fees stand. */
-  async roster(actor, orgId) {
-    await assertRole(actor, orgId, REGISTER);
-    const org = await clubOnly(orgId);
+async function rosterFor(orgId) {
+  const org = await clubOnly(orgId);
     const rows = await q(`
       select a.id as affiliation_id, a.role, a.status, a.fee_exempt, a.fee_exempt_reason,
              a.paid_until::text as paid_until, p.id as person_id, p.display_number,
@@ -3561,13 +3574,50 @@ export const renewals = {
              case when p.date_of_birth is null then null
                   else date_part('year', age((now() at time zone $2)::date, p.date_of_birth))::int end as age,
              exists (select 1 from payment_line l join payment py on py.id = l.payment_id
-                      where l.renews_affiliation_id = a.id and py.status in ('pending','awaiting','failed')) as asked
+                      where l.renews_affiliation_id = a.id and py.status in ('pending','awaiting','failed')) as asked,
+             (select max(mr.sent_at)::date::text from message_recipient mr join message m on m.id = mr.message_id
+               where m.kind = 'renewal' and mr.status = 'sent' and (mr.person_id = p.id or mr.about_id = p.id)) as last_reminded
       from affiliation a join person p on p.id = a.person_id
       where a.organisation_id = $1 and a.ends is null
         and a.role in ('member','instructor','assistant') and a.status in ('active','lapsed','pending')
       order by p.last_name, p.first_name`, [orgId, org.timezone]);
     const today = (await one(`select to_char((now() at time zone $1)::date,'YYYY-MM-DD') as d`, [org.timezone])).d;
     return { today, rows: rows.map((r) => ({ ...r, standing: standing({ paidUntil: r.paid_until, exempt: r.fee_exempt }, today) })) };
+}
+
+export const renewals = {
+  /** Everybody at the club, and where their fees stand. */
+  async roster(actor, orgId) {
+    await assertRole(actor, orgId, REGISTER);
+    return rosterFor(orgId);
+  },
+
+  /** Write to the ticked members about their fees, as the club. */
+  async remind(actor, orgId, { affiliationIds, subject, body }, { baseFrom }) {
+    await assertRole(actor, orgId, REGISTER);
+    const { rows } = await rosterFor(orgId);
+    const people = rows.filter((r) => affiliationIds.includes(r.affiliation_id) && !r.fee_exempt)
+      .map((r) => r.person_id);
+    if (!people.length) throw new Invalid('Tick the people to remind. Anybody who is not charged is left out.');
+    return messages.prepare(actor, orgId, { audience: 'selected', kind: 'renewal', personIds: people,
+      subject: String(subject ?? '').replace(/\s+/g, ' ').trim().slice(0, 150),
+      body: String(body ?? '').trim().slice(0, 10_000), eventId: null, personNumber: null },
+      { baseFrom, trusted: true });
+  },
+
+  /** Whether this club writes its own reminders automatically. */
+  async reminderSetting(orgId) {
+    return (await one(`select coalesce((settings->'reminders'->>'enabled')::boolean, false) as on
+      from organisation where id=$1`, [orgId])).on;
+  },
+
+  async setReminders(actor, orgId, enabled) {
+    await assertRole(actor, orgId, MANAGE);
+    await clubOnly(orgId);
+    await pool.query(`update organisation set settings = jsonb_set(coalesce(settings,'{}'::jsonb),
+      '{reminders}', jsonb_build_object('enabled', $2::boolean), true), updated_at = now() where id = $1`, [orgId, !!enabled]);
+    await pool.query(`insert into audit_log (account_id, organisation_id, action, entity, entity_id, after)
+      values ($1,$2,'reminders_setting','organisation',$2,$3)`, [actor, orgId, JSON.stringify({ enabled: !!enabled })]);
   },
 
   /**
@@ -3645,5 +3695,57 @@ export const renewals = {
       values ($1,$2,'membership_carried_on','person',$3,$4)`, [actor, orgId, a.person_id,
       JSON.stringify({ paidUntil: until })]);
     return until;
+  },
+};
+
+/**
+ * The daily run: for every club that has switched automatic reminders on, write
+ * to members whose fees are about to run out or have recently. Meant to be
+ * called by a scheduler; it is safe to run twice, because nobody is written to
+ * again within REMIND_EVERY_DAYS and a half-sent message is resumed, not remade.
+ *
+ * There is no signed-in person here. Each message is the club's, from the
+ * club's sender, and records that nobody in particular sent it.
+ */
+export const reminders = {
+  async run({ messenger, origin, baseFrom, budgetMs = 9000 }) {
+    const started = Date.now();
+    const clubs = await q(`select id, name, slug from organisation
+      where type = 'club' and status = 'active' and (settings->'reminders'->>'enabled')::boolean is true
+      order by name`);
+    const report = [];
+
+    for (const club of clubs) {
+      const line = { club: club.slug, written: 0, skipped: null };
+      try {
+        // First, finish anything an earlier run left unsent.
+        const open = await q(`select distinct m.id from message m join message_recipient r on r.message_id = m.id
+          where m.organisation_id = $1 and m.kind = 'renewal' and m.sent_by is null
+            and r.status in ('queued','sending')`, [club.id]);
+        for (const m of open) {
+          if (Date.now() - started > budgetMs) break;
+          await messages.sendBatch(null, club.id, m.id, { messenger, origin, trusted: true,
+            budgetMs: Math.max(1000, budgetMs - (Date.now() - started)) });
+        }
+
+        const { today, rows } = await rosterFor(club.id);
+        const groups = dueForReminder(rows, today);
+        for (const [which, list] of [['due', groups.due], ['overdue', groups.overdue]]) {
+          if (!list.length || Date.now() - started > budgetMs) continue;
+          const text = reminderText(which);
+          const made = await messages.prepare(null, club.id, { audience: 'selected', kind: 'renewal',
+            personIds: list.slice(0, 200).map((r) => r.person_id), subject: text.subject, body: text.body,
+            eventId: null, personNumber: null }, { baseFrom, trusted: true });
+          line.written += made.recipients;
+          await messages.sendBatch(null, club.id, made.message.id, { messenger, origin, trusted: true,
+            budgetMs: Math.max(1000, budgetMs - (Date.now() - started)) });
+        }
+      } catch (e) {
+        // One club's missing contact address must not stop the others.
+        line.skipped = String(e.message ?? e).slice(0, 200);
+      }
+      report.push(line);
+    }
+    return report;
   },
 };

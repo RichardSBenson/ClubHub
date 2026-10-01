@@ -1691,3 +1691,9 @@ create table if not exists receipt_counter (
   last_number     integer not null default 0,
   primary key (organisation_id, year)
 );
+alter table message drop constraint if exists message_audience_check;
+alter table message add constraint message_audience_check
+  check (audience in ('members','instructors','event','person','selected'));
+alter table message drop constraint if exists message_kind_check;
+alter table message add constraint message_kind_check
+  check (kind in ('announcement','event','renewal'));

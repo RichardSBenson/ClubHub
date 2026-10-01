@@ -109,3 +109,32 @@ With SMTP the mailbox can only be itself, so a club lends its *name* and its
 - Sending is in batches, with the first sent immediately and the rest behind a
   **Send the next batch** button, because a serverless function has seconds.
   Every recipient is on the record with sent, failed, opted out, or no address.
+
+## Fees reminders
+
+From **Renewals**, a registrar ticks members and chooses **Send the reminder**. It
+goes out through Messages as the club (same sender rules as above), children via
+their parent or guardian, anybody not charged left out, and people from other
+clubs cannot be added. It is a *service* message: it reaches people who have
+stopped announcements and says so, because a fees notice is not marketing. That
+kind can only be sent from the renewals list, so the compose screen cannot be
+used to send an announcement that ignores opt-outs.
+
+`{club}` and `{payLink}` in the text are filled in when it is sent; the link goes
+to the member's own Payments page, where the amount shows. The list shows when
+each person was last reminded.
+
+### Automatic reminders
+
+Each club chooses (administrators only; off by default). A daily run, at 7am New
+Zealand time, writes to members whose fees run out within 30 days, and again to
+those whose fees ran out in the last 60 days. It never writes to the same person
+within 14 days, never to anybody not charged, and **never to somebody with no
+paid-until date** — so importing a roll does not send the whole club a demand. Due
+and run-out members get different words. A message left half-sent is finished the
+next day rather than started again, and one club's problem (no contact email, say)
+does not stop the others.
+
+**Set once on Vercel:** an environment variable `CRON_SECRET` (any long random
+string). Vercel sends it with the scheduled call. With no secret set the endpoint
+is shut entirely.

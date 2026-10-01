@@ -83,6 +83,7 @@ const PUBLIC = new Map([
   ['GET /try/:slug', 'the demonstration; refuses any federation not marked demo'],
   ['POST /signout', 'leaving must always work'],
   ['GET /dashboard', 'shows only what the signer-in may see'],
+  ['GET /cron/renewals', 'the scheduler; refuses without the shared secret and when none is configured'],
   ['GET /unsubscribe/:token', 'the link in an email; the token is the authorisation and it shows only a setting'],
   ['POST /unsubscribe/:token', 'turning off announcements; the token is the authorisation'],
 ]);

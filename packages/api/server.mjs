@@ -33,7 +33,7 @@
 import crypto from 'node:crypto';
 import { URL } from 'node:url';
 import { pool, orgs, people, rank, events, competition, pages, assets, news,
-         instructors, navigation, audit, search, clubPages, appearance, clubs, clubProfile, family, myself, memberEvents, messages, emailPreferences, payments, fees, renewals,
+         instructors, navigation, audit, search, clubPages, appearance, clubs, clubProfile, family, myself, memberEvents, messages, emailPreferences, payments, fees, renewals, reminders,
          Forbidden, NotFound, Invalid } from './data.mjs';
 import * as auth from './auth.mjs';
 import * as V from './views.mjs';
@@ -42,7 +42,7 @@ import { readClubProfile } from '../core/domain/club-profile.mjs';
 import { readNewClub } from '../core/domain/new-club.mjs';
 import { readMessage } from '../core/domain/messaging.mjs';
 import { readPayment, readPaymentRequest } from '../core/domain/payments.mjs';
-import { readFee, readExemption } from '../core/domain/membership.mjs';
+import { readFee, readExemption, reminderText } from '../core/domain/membership.mjs';
 import { paymentProviderFrom, isTestProvider } from '../infrastructure/payments/providers.mjs';
 import { BUILT_IN } from '../site/builtin-themes.mjs';
 import { readTheme, serialise } from '../site/theme.mjs';
@@ -1206,7 +1206,8 @@ async function renewalsScreen(ctx, org, extra = {}) {
   const canSetPrices = await mayManageAt(ctx, org.id);
   return ctx.send(extra.status ?? 200, V.renewalsScreen({
     me: ctx.me, org, csrf: ctx.csrf, today, rows, prices: await fees.list(actor, org.id),
-    canSetPrices, canExempt: canSetPrices,
+    canSetPrices, canExempt: canSetPrices, reminderText: reminderText('due'),
+    autoReminders: await renewals.reminderSetting(org.id),
     done: ctx.url.searchParams.get('done'), ...extra }));
 }
 
@@ -1221,6 +1222,18 @@ post('/o/:slug/renewals', async (ctx) => {
   const form = await ctx.form();
   const ids = Object.keys(form).filter((k) => k.startsWith('pick_') && form[k] === '1')
     .map((k) => k.slice(5)).filter((id) => UUID_RE.test(id));
+  if (form.action === 'remind') {
+    try {
+      const made = await renewals.remind(ctx.me.accountId, org.id,
+        { affiliationIds: ids, subject: form.subject, body: form.body }, { baseFrom: sendingAddress() });
+      await messages.sendBatch(ctx.me.accountId, org.id, made.message.id,
+        { messenger: messengerFrom(), origin: originOf(ctx), trusted: true });
+      return ctx.redirect(`/o/${org.slug}/messages/${made.message.id}`);
+    } catch (e) {
+      if (e instanceof Invalid) return renewalsScreen(ctx, org, { status: 422, error: e.message });
+      throw e;
+    }
+  }
   try {
     const out = await renewals.ask(ctx.me.accountId, org.id,
       { affiliationIds: ids, period: form.period, received: form.received });
@@ -1231,6 +1244,28 @@ post('/o/:slug/renewals', async (ctx) => {
     if (e instanceof Invalid) return renewalsScreen(ctx, org, { status: 422, error: e.message });
     throw e;
   }
+});
+
+post('/o/:slug/renewals/reminders', async (ctx) => {
+  const org = await organisationFor(ctx);
+  const form = await ctx.form();
+  await renewals.setReminders(ctx.me.accountId, org.id, form.enabled === '1');
+  return ctx.redirect(`/o/${org.slug}/renewals?done=${encodeURIComponent(
+    form.enabled === '1' ? 'Automatic reminders are on.' : 'Automatic reminders are off.')}`);
+});
+
+// The scheduler's door. Open to nobody without the shared secret, and shut
+// entirely when none is configured — "no secret set" must never mean "no lock".
+get('/cron/renewals', async (ctx) => {
+  const secret = process.env.CRON_SECRET;
+  const given = String(ctx.req.headers.authorization ?? '').replace(/^Bearer /, '');
+  const a = Buffer.from(given), b = Buffer.from(secret ?? '');
+  if (!secret || a.length !== b.length || !crypto.timingSafeEqual(a, b))
+    throw new Forbidden('Not permitted');
+  const report = await reminders.run({ messenger: messengerFrom(), baseFrom: sendingAddress(),
+    origin: process.env.VERCEL_PROJECT_PRODUCTION_URL
+      ? `https://${process.env.VERCEL_PROJECT_PRODUCTION_URL}` : originOf(ctx) });
+  return ctx.send(200, `<pre>${JSON.stringify(report, null, 1).replace(/</g, '&lt;')}</pre>`);
 });
 
 post('/o/:slug/renewals/fees', async (ctx) => {
