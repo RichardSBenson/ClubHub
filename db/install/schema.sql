@@ -1550,3 +1550,20 @@ create trigger audit_log_is_append_only
   for each row execute function audit_log_refuse_change();
 
 create index audit_log_actor_idx on audit_log (account_id, at desc);
+
+-- ---------------------------------------------------------------------------
+--  020 — folding for search
+--
+--  "Tamati" must find "Tāmati" and the reverse: a register here holds macrons
+--  and the people typing into it often have no macron key. translate() rather
+--  than the unaccent extension, so no migration can fail on a hosted database
+--  that does not have one installed.
+-- ---------------------------------------------------------------------------
+
+create or replace function fold(value text) returns text
+language sql immutable strict parallel safe as $$
+  select translate(
+    lower(value),
+    'āēīōūãáàâäåéèêëíìîïóòôöõúùûüñçýÿšžœæ',
+    'aeiouaaaaaaeeeeiiiiooooouuuuncyyszoa')
+$$;

@@ -33,7 +33,7 @@
 import crypto from 'node:crypto';
 import { URL } from 'node:url';
 import { pool, orgs, people, rank, events, competition, pages, assets, news,
-         instructors, navigation, audit,
+         instructors, navigation, audit, search,
          Forbidden, NotFound, Invalid } from './data.mjs';
 import * as auth from './auth.mjs';
 import * as V from './views.mjs';
@@ -656,6 +656,26 @@ const previewBanner = (org, pg) => `
   <a href="/o/${org.slug}/pages/${pg.id}"
     style="margin-left:auto;color:#F0CE41">Back to editing</a>
 </div>`;
+
+// ---- search ----------------------------------------------------------------
+
+/**
+ * Finding things.
+ *
+ * Not scoped to an organisation in the path, because the question "where is
+ * Aroha" is asked by somebody who does not know which club she is at. The
+ * scoping is in the query — every branch starts from visible_orgs — so this
+ * returns exactly what this account may already see and nothing else.
+ */
+get('/search', async (ctx) => {
+  ctx.requireActor();
+  const raw = ctx.url.searchParams.get('q') ?? '';
+  const { query, results } = await search.everything(ctx.me.accountId, raw);
+  return ctx.send(200, V.searchResults({
+    me: ctx.me, csrf: ctx.csrf, query, results,
+    vocabulary: await orgs.vocabulary(ctx.me.home?.id ?? null),
+  }));
+});
 
 // ---- the audit log ---------------------------------------------------------
 

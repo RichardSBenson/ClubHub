@@ -1,6 +1,8 @@
 import fs from 'node:fs';
 import { describe as auditDescribe, weight as auditWeight }
   from '../content/audit.mjs';
+import { highlight as searchHighlight, linkTo as searchLinkTo }
+  from '../content/search.mjs';
 import path from 'node:path';
 import { BLOCKS } from '../content/blocks.mjs';
 import { BLOCK_MENU } from '../content/page-form.mjs';
@@ -115,14 +117,26 @@ td .btn{padding:6px 12px;font-size:14px}
 @media(max-width:600px){
   table{font-size:14px} td,th{padding:9px 8px}
   .hide-sm{display:none}
-}`;
+}
+header .find{display:flex;gap:6px;align-items:center;margin-left:auto;
+  margin-right:14px}
+header .find input{padding:6px 10px;border-radius:6px;border:1px solid #3A3A3C;
+  background:#1C1C1E;color:#F2F2F7;min-width:150px;font-size:14px}
+header .find label{color:#BDBDBF;font-size:13px}
+@media (max-width:640px){header .find input{min-width:90px}}`;
 
-function page({ title, me, body, csrf }) {
+function page({ title, me, body, csrf, query = '' }) {
   return `<!DOCTYPE html><html lang="en-NZ"><head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>${esc(title)} — Honbu</title><style>${CSS}</style></head><body>
 <header><div class="wrap">
   <a href="/dashboard"><strong>Honbu</strong></a>
+  ${me ? `<form method="get" action="/search" class="find">
+    <label class="hide-sm" for="q">Find</label>
+    <input id="q" name="q" type="search" placeholder="name, number, anything"
+      value="${esc(query ?? '')}">
+    <button class="quiet">Find</button>
+  </form>` : ''}
   ${me ? `<span class="who">${esc(me.name)}
     <form method="post" action="/signout">
       <input type="hidden" name="_csrf" value="${esc(csrf ?? '')}">
@@ -1647,6 +1661,64 @@ export const pageEditor = ({ me, csrf, org, page: pg, values = {},
             <button class="btn quiet" type="submit">Go back to this</button>
           </form>` : '')}</td>
     </tr>`).join('')}</tbody></table>` : ''}` });
+};
+
+/**
+ * Search results.
+ *
+ * Grouped by what the thing is, because "a person called Ngata" and "a page
+ * mentioning Ngata" are different answers to the same word and a flat list
+ * makes somebody read them all to find out which is which.
+ *
+ * The matched part is marked. A result that cannot be seen to match looks
+ * like a bug, and somebody who cannot see why a page came back does not trust
+ * the next search either.
+ */
+export const searchResults = ({ me, csrf, query, results = [],
+                                vocabulary = {} }) => {
+  const mark = (value) => searchHighlight(value, query?.folded ?? '')
+    .map((part) => part.match ? `<mark>${esc(part.text)}</mark>` : esc(part.text))
+    .join('');
+
+  const kinds = ['person', 'organisation', 'event', 'page', 'article', 'image'];
+  const groups = kinds
+    .map((kind) => ({ kind, rows: results.filter((r) => r.kind === kind) }))
+    .filter((g) => g.rows.length);
+
+  const heading = {
+    person: 'People', organisation: 'Organisations', event: 'Events',
+    page: 'Pages', article: 'News', image: 'Images',
+  };
+
+  return page({ title: query?.text ? `${query.text} — search` : 'Search',
+    me, csrf, query: query?.text ?? '', body: `
+  <h1>${query?.text ? `Results for ${esc(query.text)}` : 'Find something'}</h1>
+
+  ${query?.kind === 'too-short' ? `<div class="note">Two letters at least —
+    one letter matches most of the register and tells you nothing.</div>` : ''}
+
+  ${query?.kind === 'empty' ? `<div class="note">Type a name, a member number,
+    an email address or a grade. Searching looks through people, ${
+      esc((vocabulary.clubPlural ?? 'clubs').toLowerCase())}, events, pages,
+    news and images — but only the ones you can already see.</div>` : ''}
+
+  ${query?.text && query.kind !== 'too-short' && query.kind !== 'empty'
+    && !results.length
+    ? `<div class="note"><strong>Nothing found.</strong> Searching only looks
+        at what you have permission to see, so something you expected may
+        belong to an organisation you are not part of. Macrons do not matter
+        either way — "Tamati" and "Tāmati" find each other.</div>` : ''}
+
+  ${groups.map((g) => `
+  <h2>${esc(heading[g.kind])}</h2>
+  <div class="grid">${g.rows.map((r) => `<a class="card"
+    href="${esc(searchLinkTo(r))}" style="display:block;text-decoration:none">
+    <strong>${mark(r.title ?? '')}</strong>
+    ${r.detail ? `<div class="muted">${mark(r.detail)}</div>` : ''}
+  </a>`).join('')}</div>`).join('')}
+
+  ${results.length >= 40 ? `<p class="muted">The first 40. Type more of it to
+    narrow this down.</p>` : ''}` });
 };
 
 /**

@@ -29,6 +29,10 @@
       "destination": "/api/index"
     },
     {
+      "source": "/search",
+      "destination": "/api/index"
+    },
+    {
       "source": "/bootstrap/:path*",
       "destination": "/api/index"
     },

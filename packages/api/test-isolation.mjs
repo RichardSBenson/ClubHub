@@ -198,11 +198,25 @@ const THEIR_WORDS = [
   theirEvent && theirEvent.title,
 ].filter(Boolean);
 
+/**
+ * Routes that answer anybody signed in, and must simply contain nothing of
+ * theirs.
+ *
+ * A third category, and search forced it. Refusing a search would be wrong —
+ * everybody may search — so the protection is not a 403, it is that the
+ * results are scoped in the query. That is a weaker-looking guarantee and a
+ * more dangerous one to get wrong, so it is probed harder below: with their
+ * words as the query, rather than with no query at all.
+ */
+const SCOPED = new Map([
+  ['GET /search', 'everybody may search; the scoping is in the query'],
+]);
+
 console.log('\nEVERY ROUTE IS EITHER PUBLIC ON PURPOSE OR PROTECTED');
 {
   const unclassified = routes
     .map((r) => `${r.method} ${r.pattern}`)
-    .filter((key) => !PUBLIC.has(key))
+    .filter((key) => !PUBLIC.has(key) && !SCOPED.has(key))
     // Scoped by path, and every one of them is probed below. /a/ is not
     // scoped by path — an asset id carries its own federation — but it is
     // probed too, and the probe below is what proves it refuses.
@@ -227,6 +241,8 @@ console.log('\nNOTHING OF THEIRS IS READABLE');
       continue;
     }
 
+    if (SCOPED.has(key)) continue;   // probed on its own terms below
+
     const r = await req(path);
     const refused = r.status === 403 || r.status === 404;
     const leaked = THEIR_WORDS.filter((w) => r.html.includes(w));
@@ -234,6 +250,40 @@ console.log('\nNOTHING OF THEIRS IS READABLE');
     ok(`${route.pattern}`, refused && leaked.length === 0,
       refused ? `${r.status} but leaked: ${leaked.join(', ')}`
               : `returned ${r.status}${r.location ? ' → ' + r.location : ''}`);
+  }
+}
+
+console.log('\nSEARCHING FOR THEIRS FINDS NOTHING');
+{
+  // The point of probing this separately. Fetching /search with no query
+  // proves only that an empty search is empty. Every word that identifies
+  // their data is typed into it in turn, and none of it may come back.
+  for (const word of THEIR_WORDS) {
+    const r = await req(`/search?q=${encodeURIComponent(word)}`);
+    const leaked = THEIR_WORDS.filter((w) => {
+      // The page echoes the query in its heading and keeps it in the box, so
+      // the searched-for word is present either way. Only the OTHER words
+      // appearing would mean a result came back — and for the word itself,
+      // the check is that no result card was rendered.
+      if (w === word) return false;
+      return r.html.includes(w);
+    });
+    const foundSomething = /<h2>(People|Organisations|Events|Pages|News|Images)<\/h2>/
+      .test(r.html);
+
+    ok(`searching "${word}" returns nothing of theirs`,
+      r.status === 200 && !leaked.length && !foundSomething,
+      `${r.status}${leaked.length ? ` leaked: ${leaked.join(', ')}` : ''}`
+      + `${foundSomething ? ' — a result was rendered' : ''}`);
+  }
+
+  // And their member number, which is the most precise thing somebody could
+  // guess at.
+  if (theirPerson?.display_number) {
+    const r = await req(
+      `/search?q=${encodeURIComponent(theirPerson.display_number)}`);
+    ok('nor does their exact member number',
+      !r.html.includes(theirPerson.last_name), 'LEAKED by member number');
   }
 }
 

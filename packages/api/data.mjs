@@ -1233,6 +1233,7 @@ import { validate, excerpt, toText } from '../content/blocks.mjs';
 import { assertMayPublish } from '../core/domain/instructing.mjs';
 import { destinations, problemsWithNavigation, navigationFrom, MAX_ITEMS }
   from '../content/navigation.mjs';
+import { readQuery, fold } from '../content/search.mjs';
 
 /**
  * Writing a page and publishing one are different jobs. A contributor is
@@ -1985,5 +1986,168 @@ export const audit = {
       where l.account_id is not null
       order by name`, [orgId]);
     return rows;
+  },
+};
+
+// ---------------------------------------------------------------------------
+// search
+//
+// Scoped in the query, never filtered afterwards. Search is the classic place
+// an authorisation model leaks: a query that reads everything and then removes
+// what the actor may not see still tells them it existed, through a count,
+// through an ordering, through how long it took. Every branch below starts
+// from visible_orgs($1), which is the same gate the rest of the system uses.
+// ---------------------------------------------------------------------------
+
+export const search = {
+  /**
+   * Everything this account may see that matches.
+   *
+   * Returns a flat list, typed, best first. One query per kind rather than one
+   * enormous union: they have genuinely different shapes and different
+   * permission rules, and a union of six selects with padding columns is how
+   * somebody later adds a seventh and forgets the scoping.
+   */
+  async everything(actor, raw, { limit = 40 } = {}) {
+    const q = readQuery(raw);
+    if (q.kind === 'empty' || q.kind === 'too-short') return { query: q, results: [] };
+
+    const like = `%${q.folded}%`;
+    const results = [];
+
+    // People. TEACH, not MANAGE: an instructor needs to find somebody in the
+    // hall. Private detail is never selected here — a search result shows
+    // what a roll already shows.
+    const { rows: people } = await pool.query(`
+      select distinct on (p.id)
+             p.id, p.first_name as "firstName", p.last_name as "lastName",
+             p.display_number as "displayNumber",
+             cg.label as grade, o.name as "organisationName", o.slug as "orgSlug"
+      from visible_orgs($1) v
+      join organisation o on o.id = v.organisation_id
+      join affiliation a on a.organisation_id = o.id and a.ends is null
+      join person p on p.id = a.person_id
+      left join person_current_grade cg on cg.person_id = p.id
+      where has_role_at($1, o.id,
+              array['owner','administrator','registrar','instructor']::role_name[])
+        and (fold(concat_ws(' ', p.first_name, p.last_name)) like $2
+          or fold(coalesce(p.display_number,'')) like $2
+          or fold(coalesce(cg.label,'')) like $2)
+      order by p.id, o.name
+      limit $3`, [actor, like, limit]);
+    for (const p of people)
+      results.push({ kind: 'person', ...p,
+        title: `${p.firstName} ${p.lastName}`.trim(),
+        detail: [p.displayNumber, p.grade, p.organisationName]
+          .filter(Boolean).join(' · ') });
+
+    // An email finds an account, and only for somebody who may manage where
+    // that person trains. An address is a way to reach a person, not a label.
+    if (q.kind === 'email') {
+      const { rows } = await pool.query(`
+        select distinct on (p.id) p.id, acct.email,
+               p.first_name as "firstName", p.last_name as "lastName",
+               o.name as "organisationName", o.slug as "orgSlug"
+        from visible_orgs($1) v
+        join organisation o on o.id = v.organisation_id
+        join affiliation a on a.organisation_id = o.id and a.ends is null
+        join person p on p.id = a.person_id
+        join account acct on acct.person_id = p.id
+        where has_role_at($1, o.id, array['owner','administrator']::role_name[])
+          and fold(acct.email) like $2
+        order by p.id, o.name
+        limit $3`, [actor, like, limit]);
+      for (const r of rows)
+        if (!results.some((x) => x.kind === 'person' && x.id === r.id))
+          results.push({ kind: 'person', ...r,
+            title: `${r.firstName} ${r.lastName}`.trim(),
+            detail: [r.email, r.organisationName].filter(Boolean).join(' · ') });
+    }
+
+    const { rows: orgs_ } = await pool.query(`
+      select o.id, o.name, o.slug, o.type
+      from visible_orgs($1) v
+      join organisation o on o.id = v.organisation_id
+      where fold(o.name) like $2 or fold(o.slug) like $2
+      order by o.name
+      limit $3`, [actor, like, limit]);
+    for (const o of orgs_)
+      results.push({ kind: 'organisation', ...o,
+        title: o.name, detail: o.type });
+
+    const { rows: evs } = await pool.query(`
+      select e.id, e.title, e.slug, e.starts_at as "startsAt",
+             o.slug as "orgSlug", o.name as "organisationName"
+      from visible_orgs($1) v
+      join organisation o on o.id = v.organisation_id
+      join event e on e.organisation_id = o.id
+      where fold(e.title) like $2 or fold(coalesce(e.venue_name,'')) like $2
+      order by e.starts_at desc nulls last
+      limit $3`, [actor, like, limit]);
+    for (const e of evs)
+      results.push({ kind: 'event', ...e, detail: [e.organisationName,
+        e.startsAt ? new Date(e.startsAt).toISOString().slice(0, 10) : null]
+        .filter(Boolean).join(' · ') });
+
+    // Pages and news need the right to write them — a draft is not public,
+    // and search must not be the way somebody reads one.
+    const { rows: pgs } = await pool.query(`
+      select pg.id, pg.title, pg.slug, pg.status,
+             o.slug as "orgSlug", o.name as "organisationName"
+      from visible_orgs($1) v
+      join organisation o on o.id = v.organisation_id
+      join page pg on pg.organisation_id = o.id
+      where has_role_at($1, o.id,
+              array['owner','administrator','contributor']::role_name[])
+        and (fold(pg.title) like $2 or fold(pg.slug) like $2
+          or fold(pg.body::text) like $2)
+      order by pg.updated_at desc nulls last
+      limit $3`, [actor, like, limit]);
+    for (const pg of pgs)
+      results.push({ kind: 'page', ...pg,
+        detail: [pg.organisationName, pg.status].filter(Boolean).join(' · ') });
+
+    const { rows: arts } = await pool.query(`
+      select ar.id, ar.title, ar.slug, ar.status,
+             o.slug as "orgSlug", o.name as "organisationName"
+      from visible_orgs($1) v
+      join organisation o on o.id = v.organisation_id
+      join article ar on ar.organisation_id = o.id
+      where has_role_at($1, o.id,
+              array['owner','administrator','contributor']::role_name[])
+        and (fold(ar.title) like $2 or fold(coalesce(ar.summary,'')) like $2
+          or fold(ar.body::text) like $2)
+      order by ar.published_at desc nulls last
+      limit $3`, [actor, like, limit]);
+    for (const ar of arts)
+      results.push({ kind: 'article', ...ar,
+        detail: [ar.organisationName, ar.status].filter(Boolean).join(' · ') });
+
+    const { rows: imgs } = await pool.query(`
+      select a.id, a.filename, a.alt_text as "altText",
+             o.slug as "orgSlug", o.name as "organisationName"
+      from visible_orgs($1) v
+      join organisation o on o.id = v.organisation_id
+      join asset a on a.organisation_id = o.id
+      where has_role_at($1, o.id,
+              array['owner','administrator','contributor']::role_name[])
+        and (fold(coalesce(a.filename,'')) like $2
+          or fold(coalesce(a.alt_text,'')) like $2)
+      order by a.created_at desc
+      limit $3`, [actor, like, limit]);
+    for (const a of imgs)
+      results.push({ kind: 'image', ...a,
+        title: a.filename ?? 'image', detail: a.altText ?? a.organisationName });
+
+    // A member number or an email was typed because somebody wanted one exact
+    // thing; put the exact match first and leave the rest in the order each
+    // query returned.
+    const exact = (r) => (
+      fold(r.displayNumber ?? '') === q.folded
+      || fold(r.email ?? '') === q.folded
+      || fold(r.title ?? '') === q.folded) ? 0 : 1;
+    results.sort((a, b) => exact(a) - exact(b));
+
+    return { query: q, results: results.slice(0, limit) };
   },
 };
