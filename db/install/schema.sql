@@ -1486,3 +1486,16 @@ comment on table asset_blob is
 alter table asset alter column storage_key set default '';
 
 create index asset_organisation_idx on asset (organisation_id, created_at desc);
+
+-- ---------------------------------------------------------------------------
+--  017 — a dojo asks, the federation decides
+--
+--  Articles get the same publish-upward approval events already had. A dojo
+--  may say what it likes on its own site; putting it in the federation's
+--  voice needs the federation to agree. Declined is a state, not a deletion:
+--  the article stays published on the author's own site.
+-- ---------------------------------------------------------------------------
+
+alter table article
+  add column publish_up_state text not null default 'none'
+    check (publish_up_state in ('none','requested','approved','declined'));

@@ -32,7 +32,7 @@
 
 import crypto from 'node:crypto';
 import { URL } from 'node:url';
-import { pool, orgs, people, rank, events, competition, pages, assets,
+import { pool, orgs, people, rank, events, competition, pages, assets, news,
          Forbidden, NotFound, Invalid } from './data.mjs';
 import * as auth from './auth.mjs';
 import * as V from './views.mjs';
@@ -640,7 +640,172 @@ const previewBanner = (org, pg) => `
     style="margin-left:auto;color:#F0CE41">Back to editing</a>
 </div>`;
 
-// ---- media ----------------------------------------------------------------
+// ---- news ------------------------------------------------------------------
+
+get('/o/:slug/news', async (ctx) => {
+  const org = await organisationFor(ctx, { toWrite: true });
+  const canDecide = await mayPublishAt(ctx, org.id);
+  return ctx.send(200, V.newsList({
+    me: ctx.me, org, csrf: ctx.csrf,
+    articles: await news.list(ctx.me.accountId, org.id),
+    // Only shown to somebody who can actually decide, and only containing
+    // what sits beneath them.
+    waiting: canDecide ? await news.awaitingDecision(ctx.me.accountId, org.id) : [],
+    canPublish: canDecide,
+    done: ctx.url.searchParams.get('done'),
+    error: ctx.url.searchParams.get('error'),
+    rebuild: ctx.url.searchParams.get('rebuild'),
+  }));
+});
+
+get('/o/:slug/news/new', async (ctx) => {
+  const org = await organisationFor(ctx, { toWrite: true });
+  const doc = { blocks: [] };
+  return ctx.send(200, V.articleEditor({
+    me: ctx.me, org, csrf: ctx.csrf, blocks: doc.blocks,
+    values: { ...formFromDocument(doc) },
+    images: await assets.list(ctx.me.accountId, org.id),
+    canPublish: await mayPublishAt(ctx, org.id),
+  }));
+});
+
+post('/o/:slug/news/new', async (ctx) => {
+  const org = await organisationFor(ctx, { toWrite: true });
+  return articlePost(ctx, { org });
+});
+
+get('/o/:slug/news/:articleId', async (ctx) => {
+  const org = await organisationFor(ctx, { toWrite: true });
+  const a = await news.byId(ctx.me.accountId, ctx.params.articleId);
+  const doc = a.body ?? { blocks: [] };
+  return ctx.send(200, V.articleEditor({
+    me: ctx.me, org, article: a, csrf: ctx.csrf, blocks: doc.blocks,
+    values: { ...formFromDocument(doc), title: a.title, slug: a.slug,
+              summary: a.summary ?? '', heroAssetId: a.hero_asset_id ?? '',
+              tags: (a.tags ?? []).join(', ') },
+    images: await assets.list(ctx.me.accountId, org.id),
+    canPublish: await mayPublishAt(ctx, org.id),
+    done: ctx.url.searchParams.get('done'),
+  }));
+});
+
+post('/o/:slug/news/:articleId', async (ctx) => {
+  const org = await organisationFor(ctx, { toWrite: true });
+  const a = await news.byId(ctx.me.accountId, ctx.params.articleId);
+  return articlePost(ctx, { org, article: a });
+});
+
+post('/o/:slug/news/:articleId/ask', async (ctx) => {
+  const org = await organisationFor(ctx, { toWrite: true });
+  await ctx.form();
+  const back = `/o/${org.slug}/news`;
+  try {
+    const a = await news.requestPublishUp(ctx.me.accountId, ctx.params.articleId);
+    return ctx.redirect(`${back}?done=` + encodeURIComponent(
+      `Asked for "${a.title}" to appear on the federation's site.`));
+  } catch (e) {
+    if (e instanceof Invalid)
+      return ctx.redirect(`${back}?error=${encodeURIComponent(e.message)}`);
+    throw e;
+  }
+});
+
+/**
+ * The federation's answer.
+ *
+ * Posted at the deciding organisation, not at the article's own, because the
+ * right to decide belongs to whoever's site it would appear on.
+ */
+post('/o/:slug/news/:articleId/decide', async (ctx) => {
+  const org = await organisationFor(ctx, { toWrite: true });
+  const form = await ctx.form();
+  const approve = form.answer === 'approve';
+  const back = `/o/${org.slug}/news`;
+  try {
+    const a = await news.decidePublishUp(ctx.me.accountId, ctx.params.articleId,
+      approve, { decidedBy: org.id });
+    const rebuild = approve
+      ? await requestRebuild({ reason: `approve ${a.slug}` })
+      : { detail: 'Nothing to rebuild — it was not on the site.' };
+    return ctx.redirect(`${back}?done=` + encodeURIComponent(approve
+      ? `"${a.title}" now appears on this site.`
+      : `"${a.title}" was declined. It stays on their own site.`)
+      + '&rebuild=' + encodeURIComponent(rebuild.detail));
+  } catch (e) {
+    if (e instanceof Invalid)
+      return ctx.redirect(`${back}?error=${encodeURIComponent(e.message)}`);
+    throw e;
+  }
+});
+
+/** Shared by both article posts, the way editorPost is shared by pages. */
+async function articlePost(ctx, { org, article = null }) {
+  const form = await ctx.form();
+  const op = String(form.op ?? 'save');
+  const canPublish = await mayPublishAt(ctx, org.id);
+
+  const submitted = documentFromForm(form);
+  const structural = op.startsWith('up:') || op.startsWith('down:')
+    || op.startsWith('remove:') || op === 'add';
+  const doc = applyOperation(submitted, op === 'add' ? `add:${form.addType}` : op);
+
+  const title = String(form.title ?? '').trim();
+  const slug = slugify(form.slug || title);
+  const summary = String(form.summary ?? '').trim();
+  const heroAssetId = String(form.heroAssetId ?? '').trim() || null;
+  const tags = String(form.tags ?? '').split(',');
+
+  const render = async (extra = {}) => ctx.send(extra.status ?? 200,
+    V.articleEditor({
+      me: ctx.me, org, article, csrf: ctx.csrf, blocks: doc.blocks, canPublish,
+      images: await assets.list(ctx.me.accountId, org.id),
+      values: { ...formFromDocument(doc), title, slug, summary,
+                heroAssetId: heroAssetId ?? '', tags: form.tags ?? '' },
+      ...extra,
+    }));
+
+  if (structural) return render();
+
+  if (!title) return render({ status: 422, error: 'The article needs a headline.' });
+  if (!slug) return render({ status: 422,
+    error: 'The article needs a web address. Give it a headline with some '
+      + 'letters in it, or type one.' });
+  if (looksEmpty(doc)) return render({ status: 422,
+    error: 'There is nothing in this article yet. Add something and type into '
+      + 'it before saving.' });
+
+  try {
+    const { article: saved, dropped } = await news.save(ctx.me.accountId, {
+      articleId: article?.id ?? null,
+      organisationId: article ? null : org.id,
+      slug, title, summary: summary || null, body: doc,
+      heroAssetId, tags,
+    });
+
+    if (op === 'publish' || op === 'unpublish') {
+      if (!canPublish) return render({ status: 403, article: saved,
+        error: 'Your changes are saved. Putting news in front of the public '
+          + 'needs an owner or administrator.' });
+      if (op === 'publish') await news.publish(ctx.me.accountId, saved.id);
+      else await news.unpublish(ctx.me.accountId, saved.id);
+
+      const rebuild = await requestRebuild({ reason: `${op} ${org.slug}/${slug}` });
+      return ctx.redirect(`/o/${org.slug}/news?done=`
+        + encodeURIComponent(op === 'publish'
+          ? `"${saved.title}" is published.` : `"${saved.title}" is off the site.`)
+        + '&rebuild=' + encodeURIComponent(rebuild.detail));
+    }
+
+    if (dropped.length) return render({ article: saved, dropped,
+      done: 'Saved as a draft.' });
+    return ctx.redirect(`/o/${org.slug}/news/${saved.id}?done=`
+      + encodeURIComponent('Saved as a draft.'));
+  } catch (e) {
+    return render({ status: e.status ?? 422, error: e.message });
+  }
+}
+
+// ---- media ------------------------------------------------------------------
 
 get('/o/:slug/media', async (ctx) => {
   const org = await organisationFor(ctx, { toWrite: true });

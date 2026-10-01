@@ -279,9 +279,16 @@ export class PostgresSiteContent {
              a.published_at, o.name as about_org
       from article a left join organisation o on o.id = a.about_org_id
       where a.status='published'
-        and ($1::uuid is null or a.organisation_id in (
-          select d.id from organisation d, organisation root
-          where root.id = $1 and d.path <@ root.path))
+        and ($1::uuid is null or a.organisation_id = $1 or (
+          -- Somebody else's article reaches this site only if they asked and
+          -- this federation agreed. A dojo may say what it likes on its own
+          -- site; putting it in the federation's voice is the federation's
+          -- decision, because its name on a page reads as an endorsement
+          -- whether or not it was meant as one.
+          a.publish_up and a.publish_up_state = 'approved'
+          and a.organisation_id in (
+            select d.id from organisation d, organisation root
+            where root.id = $1 and d.path <@ root.path)))
       order by a.published_at desc`, [federationId]);
     return rows;
   }

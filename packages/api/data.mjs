@@ -1519,3 +1519,169 @@ export const assets = {
     return { deleted: true, filename: asset.filename };
   },
 };
+
+// ---------------------------------------------------------------------------
+// news
+//
+// Articles are pages with a date, a hero image and somewhere to go. The one
+// thing that makes them different is that a dojo's article can ask to appear
+// on the federation's site, and the federation decides — see db/017. A
+// federation's name on a page reads as an endorsement whether it was meant as
+// one or not.
+// ---------------------------------------------------------------------------
+
+export const news = {
+  /** One organisation's articles, newest first. Drafts included. */
+  async list(actor, orgId) {
+    await assertRole(actor, orgId, WRITE_PAGES);
+    const { rows } = await pool.query(`
+      select a.id, a.slug, a.title, a.summary, a.status, a.published_at,
+             a.publish_up, a.publish_up_state, a.tags, a.hero_asset_id,
+             about.name as about_org
+      from article a
+      left join organisation about on about.id = a.about_org_id
+      where a.organisation_id = $1
+      order by coalesce(a.published_at, 'infinity'::timestamptz) desc,
+               a.title`, [orgId]);
+    return rows;
+  },
+
+  /** Articles beneath this organisation that are waiting on its decision. */
+  async awaitingDecision(actor, orgId) {
+    await assertRole(actor, orgId, MANAGE);
+    const { rows } = await pool.query(`
+      select a.id, a.slug, a.title, a.summary, a.published_at,
+             o.name as from_org, o.slug as from_slug
+      from article a
+      join organisation o on o.id = a.organisation_id
+      join organisation root on root.id = $1 and o.path <@ root.path
+      where a.publish_up_state = 'requested' and o.id <> $1
+      order by a.published_at desc nulls last`, [orgId]);
+    return rows;
+  },
+
+  async byId(actor, id) {
+    const row = await one(`select * from article where id = $1`, [id]);
+    if (!row) throw new NotFound('Article');
+    await assertRole(actor, row.organisation_id, WRITE_PAGES);
+    return row;
+  },
+
+  /**
+   * Create or update a draft.
+   *
+   * The body goes through the same validator pages use, so a block type
+   * nobody whitelisted cannot arrive here by being posted at a different URL.
+   */
+  async save(actor, { articleId, organisationId, slug, title, summary, body,
+                      heroAssetId = null, tags = [], aboutOrgId = null }) {
+    const orgId = organisationId ?? (await one(
+      'select organisation_id from article where id=$1', [articleId]))?.organisation_id;
+    if (!orgId) throw new NotFound('Article');
+    await assertRole(actor, orgId, WRITE_PAGES);
+
+    const { doc, dropped } = validate(body);
+    if (!toText(doc).trim()) throw new Invalid('The article has no content');
+
+    // A hero image has to belong to this federation. Otherwise an article
+    // could point at another federation's photograph by id, and the build
+    // would dutifully copy it onto this site.
+    if (heroAssetId) {
+      const owns = await one(`
+        select 1 from asset a
+        join organisation o on o.id = a.organisation_id
+        join organisation mine on mine.id = $2
+        where a.id = $1 and (o.path <@ mine.path or mine.path <@ o.path)`,
+        [heroAssetId, orgId]);
+      if (!owns) throw new Invalid('That image does not belong to this organisation');
+    }
+
+    const clean = (tags ?? []).map((t) => String(t).trim().toLowerCase())
+      .filter(Boolean).slice(0, 12);
+
+    const row = articleId
+      ? await one(`
+          update article set slug=$2, title=$3, summary=$4, body=$5,
+                             hero_asset_id=$6, tags=$7, about_org_id=$8
+          where id=$1 returning *`,
+          [articleId, slug, title, summary, doc, heroAssetId, clean, aboutOrgId])
+      : await one(`
+          insert into article (organisation_id, slug, title, summary, body,
+                               hero_asset_id, tags, about_org_id, status)
+          values ($1,$2,$3,$4,$5,$6,$7,$8,'draft') returning *`,
+          [orgId, slug, title, summary, doc, heroAssetId, clean, aboutOrgId]);
+
+    await pool.query(`
+      insert into audit_log (account_id, organisation_id, action, entity,
+                             entity_id, after)
+      values ($1,$2,$3,'article',$4,$5)`,
+      [actor, orgId, articleId ? 'article_update' : 'article_create', row.id,
+       JSON.stringify({ slug, title })]);
+
+    return { article: row, dropped };
+  },
+
+  async publish(actor, id) {
+    const a = await this.byId(actor, id);
+    await assertRole(actor, a.organisation_id, MANAGE);
+    return one(`update article set status='published',
+                  published_at = coalesce(published_at, now())
+                where id=$1 returning *`, [id]);
+  },
+
+  async unpublish(actor, id) {
+    const a = await this.byId(actor, id);
+    await assertRole(actor, a.organisation_id, MANAGE);
+    return one(`update article set status='draft' where id=$1 returning *`, [id]);
+  },
+
+  /** The author asks for it to appear on the federation's site. */
+  async requestPublishUp(actor, id) {
+    const a = await this.byId(actor, id);
+    await assertRole(actor, a.organisation_id, MANAGE);
+    if (a.status !== 'published')
+      throw new Invalid('Publish it on your own site before asking for it to '
+        + 'appear on the federation\'s.');
+    return one(`update article set publish_up=true, publish_up_state='requested'
+                where id=$1 returning *`, [id]);
+  },
+
+  /**
+   * The federation decides.
+   *
+   * Declining is not deleting: the article stays published on the author's own
+   * site. What is refused is the federation's endorsement, and an author told
+   * no should be able to see that they were told no.
+   */
+  async decidePublishUp(actor, id, approve, { decidedBy }) {
+    const a = await one(`select * from article where id=$1`, [id]);
+    if (!a) throw new NotFound('Article');
+    await assertRole(actor, decidedBy, MANAGE);
+
+    // The decision belongs to an organisation this article sits beneath, and
+    // not to the article's own, or a dojo would approve itself.
+    const beneath = await one(`
+      select 1 from organisation mine, organisation theirs
+      where mine.id = $1 and theirs.id = $2
+        and theirs.path <@ mine.path and theirs.id <> mine.id`,
+      [decidedBy, a.organisation_id]);
+    if (!beneath)
+      throw new Invalid('That article does not sit beneath this organisation.');
+
+    const row = await one(`
+      update article set publish_up_state=$2, publish_up=$3
+      where id=$1 returning *`,
+      [id, approve ? 'approved' : 'declined', approve]);
+
+    await pool.query(`
+      insert into audit_log (account_id, organisation_id, action, entity,
+                             entity_id, before, after)
+      values ($1,$2,'article_publish_up','article',$3,$4,$5)`,
+      [actor, decidedBy, id,
+       JSON.stringify({ publish_up_state: a.publish_up_state }),
+       JSON.stringify({ publish_up_state: row.publish_up_state,
+                        title: row.title })]);
+
+    return row;
+  },
+};

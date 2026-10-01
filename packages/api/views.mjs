@@ -1376,6 +1376,7 @@ export const pageList = ({ me, csrf, org, pages = [], canPublish = false,
   title: `Website — ${org.name}`, me, csrf, body: `
   <h1>Website</h1>
   <p class="sub">${esc(org.name)} ·
+    <a href="/o/${esc(org.slug)}/news">News</a> ·
     <a href="/o/${esc(org.slug)}/media">Images</a> ·
     <a href="/o/${esc(org.slug)}/roster">Back to the roll</a></p>
 
@@ -1622,6 +1623,198 @@ export const pageEditor = ({ me, csrf, org, page: pg, values = {},
             <button class="btn quiet" type="submit">Go back to this</button>
           </form>` : '')}</td>
     </tr>`).join('')}</tbody></table>` : ''}` });
+};
+
+/**
+ * A federation or dojo's news.
+ *
+ * Two lists, and the second one only exists for somebody who can decide:
+ * articles from beneath this organisation whose authors have asked for them to
+ * appear here. A dojo may say what it likes on its own site; putting it in the
+ * federation's voice is the federation's call, because its name on a page
+ * reads as an endorsement whether or not it was meant as one.
+ */
+export const newsList = ({ me, csrf, org, articles = [], waiting = [],
+                           canPublish = false, done, error, rebuild }) => {
+  const state = (a) => {
+    if (a.publish_up_state === 'approved')
+      return '<span class="tag ok">On the federation site</span>';
+    if (a.publish_up_state === 'requested')
+      return '<span class="tag">Waiting on the federation</span>';
+    if (a.publish_up_state === 'declined')
+      return '<span class="tag no">Federation declined</span>';
+    return '';
+  };
+
+  return page({ title: `News — ${org.name}`, me, csrf, body: `
+  <h1>News</h1>
+  <p class="sub">${esc(org.name)} ·
+    <a href="/o/${esc(org.slug)}/pages">Website</a> ·
+    <a href="/o/${esc(org.slug)}/media">Images</a></p>
+
+  ${done ? `<div class="good">${esc(done)}</div>` : ''}
+  ${error ? `<div class="bad">${esc(error)}</div>` : ''}
+  ${rebuild ? `<div class="note">${esc(rebuild)}</div>` : ''}
+
+  ${waiting.length ? `
+  <h2>Asking to appear here</h2>
+  <p class="muted">Published on their own site already. Approving puts it on
+    this one, under this organisation's name.</p>
+  ${waiting.map((a) => `<div class="card">
+    <h3>${esc(a.title)}</h3>
+    <p class="muted">${esc(a.from_org)}${a.published_at
+      ? ` · ${esc(new Date(a.published_at).toISOString().slice(0, 10))}` : ''}</p>
+    ${a.summary ? `<p>${esc(a.summary)}</p>` : ''}
+    <form method="post"
+          action="/o/${esc(org.slug)}/news/${esc(a.id)}/decide">
+      <input type="hidden" name="_csrf" value="${esc(csrf ?? '')}">
+      <button class="btn" type="submit" name="answer" value="approve">
+        Put it on this site</button>
+      <button class="btn quiet" type="submit" name="answer" value="decline">
+        Decline</button>
+    </form>
+    <p class="hint">Declining leaves it published on their own site. It is
+      their article; what is being decided is whether it appears here.</p>
+  </div>`).join('')}` : ''}
+
+  <h2>${esc(org.name)}'s own</h2>
+  <p><a class="btn" href="/o/${esc(org.slug)}/news/new">Write something</a></p>
+
+  ${articles.length ? `<table>
+    <thead><tr><th>Headline</th><th>Status</th>
+      <th class="hide-sm">Published</th><th></th></tr></thead>
+    <tbody>${articles.map((a) => `<tr${a.status === 'draft' ? ' class="draft"' : ''}>
+      <td><strong>${esc(a.title)}</strong>
+        ${a.about_org ? `<div class="muted">about ${esc(a.about_org)}</div>` : ''}
+        ${(a.tags ?? []).length
+          ? `<div class="muted">${(a.tags ?? []).map(esc).join(' · ')}</div>` : ''}</td>
+      <td>${a.status === 'published'
+        ? '<span class="tag ok">Live</span>'
+        : '<span class="tag no">Draft</span>'} ${state(a)}</td>
+      <td class="hide-sm muted">${a.published_at
+        ? esc(new Date(a.published_at).toISOString().slice(0, 10)) : ''}</td>
+      <td>
+        <a class="btn quiet" href="/o/${esc(org.slug)}/news/${esc(a.id)}">Edit</a>
+        ${a.status === 'published' && a.publish_up_state === 'none' ? `
+        <form method="post" action="/o/${esc(org.slug)}/news/${esc(a.id)}/ask"
+              style="display:inline">
+          <input type="hidden" name="_csrf" value="${esc(csrf ?? '')}">
+          <button class="btn quiet" type="submit">Ask the federation</button>
+        </form>` : ''}
+      </td>
+    </tr>`).join('')}</tbody></table>`
+    : `<div class="note">Nothing written yet. News is the part of a site that
+        shows somebody it is still alive — a grading result, a visiting
+        instructor, a change of training night.</div>`}` });
+};
+
+/**
+ * Writing one. The same block editor pages use, with the things an article
+ * has and a page does not: a summary, a hero image and tags.
+ */
+export const articleEditor = ({ me, csrf, org, article: a = null, values = {},
+                                blocks = [], dropped = [], images = [],
+                                canPublish = false, done, error }) => {
+  const isNew = !a;
+  const action = isNew
+    ? `/o/${org.slug}/news/new`
+    : `/o/${org.slug}/news/${a.id}`;
+
+  return page({
+    title: isNew ? `Write news — ${org.name}` : `${a.title} — ${org.name}`,
+    me, csrf, body: `
+  <h1>${isNew ? 'Write something' : esc(a.title)}</h1>
+  <p class="sub">${esc(org.name)} ·
+    <a href="/o/${esc(org.slug)}/news">Back to news</a>
+    ${isNew ? '' : ` · ${a.status === 'published'
+      ? '<span class="tag ok">Live</span>' : '<span class="tag no">Draft</span>'}`}</p>
+
+  ${done ? `<div class="good">${esc(done)}</div>` : ''}
+  ${error ? `<div class="bad">${esc(error)}</div>` : ''}
+  ${dropped.length ? `<div class="note"><strong>Some of that could not be
+    kept.</strong> ${dropped.map(esc).join('; ')}</div>` : ''}
+
+  <form method="post" action="${esc(action)}">
+    <input type="hidden" name="_csrf" value="${esc(csrf ?? '')}">
+    <input type="hidden" name="blockCount" value="${blocks.length}">
+
+    <fieldset>
+      <legend>The article</legend>
+      <div class="row">
+        <div>
+          <label for="title">Headline</label>
+          <input id="title" name="title" required maxlength="200"
+            value="${esc(values.title ?? '')}">
+        </div>
+        <div>
+          <label for="slug">Web address
+            <span class="hint">/news/${esc(values.slug ?? '…')}</span></label>
+          <input id="slug" name="slug" maxlength="120"
+            pattern="[a-z0-9]+(-[a-z0-9]+)*" value="${esc(values.slug ?? '')}">
+        </div>
+      </div>
+
+      <label for="summary">Summary
+        <span class="hint">One or two sentences. This is what shows on the
+          news list and what a search engine quotes.</span></label>
+      <input id="summary" name="summary" maxlength="400"
+        value="${esc(values.summary ?? '')}" style="max-width:560px">
+
+      <div class="row">
+        <div>
+          <label for="heroAssetId">Picture at the top</label>
+          <select id="heroAssetId" name="heroAssetId" style="max-width:340px">
+            <option value="">None</option>
+            ${images.map((img) => `<option value="${esc(img.id)}"${
+              values.heroAssetId === img.id ? ' selected' : ''}>${
+              esc(img.filename ?? img.id)}${img.alt_text ? '' : ' — no description'}</option>`).join('')}
+          </select>
+          ${images.length ? '' : `<p class="hint">No images yet.
+            <a href="/o/${esc(org.slug)}/media">Upload one</a> first.</p>`}
+        </div>
+        <div>
+          <label for="tags">Tags
+            <span class="hint">Separated by commas. Up to twelve.</span></label>
+          <input id="tags" name="tags" maxlength="300"
+            value="${esc(values.tags ?? '')}">
+        </div>
+      </div>
+    </fieldset>
+
+    <h2>What it says</h2>
+    <p class="muted">${esc(SHORTHAND_HELP)} — anywhere you can type a sentence.</p>
+
+    ${blocks.map((b, i) => blockFieldset(b, i, values)).join('')}
+
+    ${blocks.length ? '' : `<div class="note">Nothing written yet.
+      Add something below.</div>`}
+
+    <fieldset>
+      <legend>Add something</legend>
+      <div class="row">
+        <div>
+          <select name="addType" style="max-width:280px">
+            ${BLOCK_MENU.map(([t, label]) => option(t, label, 'paragraph')).join('')}
+          </select>
+        </div>
+        <div>
+          <button class="btn quiet" type="submit" name="op" value="add">
+            Add it</button>
+        </div>
+      </div>
+    </fieldset>
+
+    <div class="actions">
+      <button class="btn" type="submit" name="op" value="save">
+        ${isNew ? 'Create it' : 'Save changes'}</button>
+      ${isNew || !canPublish ? '' : (a.status === 'published'
+        ? `<button class="btn quiet" type="submit" name="op" value="unpublish">
+            Take it off the site</button>`
+        : `<button class="btn quiet" type="submit" name="op" value="publish">
+            Save and put it live</button>`)}
+      <a class="btn quiet" href="/o/${esc(org.slug)}/news">Cancel</a>
+    </div>
+  </form>` });
 };
 
 /** One block, as a set of inputs somebody can actually fill in. */

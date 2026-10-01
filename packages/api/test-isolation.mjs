@@ -108,6 +108,13 @@ const theirPerson = await one(`
   select p.* from affiliation a join person p on p.id = a.person_id
   where a.organisation_id = $1 and a.ends is null limit 1`, [theirs.id]);
 
+// A real article of theirs, so the probe asks for something that exists.
+const theirArticle = await one(`
+  insert into article (organisation_id, slug, title, summary, body, status)
+  values ($1,'committee-only','Committee only','Not for the federation',
+    '{"blocks":[{"type":"paragraph","text":"Internal."}]}'::jsonb,'draft')
+  returning *`, [theirs.id]);
+
 // A real image belonging to them, with real bytes behind it. Probing /a/ with
 // a made-up id proves only that the route 404s on nonsense.
 const theirAsset = await one(`
@@ -160,6 +167,7 @@ function pathFor(pattern) {
     // /p/:id/access — creating an account for somebody else's member is
     // exactly the kind of thing this probe exists to refuse.
     assetId: theirAsset.id,
+    articleId: theirArticle.id,
     token: 'not-a-real-token',
     secret: 'not-a-real-secret',
   };
