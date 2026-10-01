@@ -1384,7 +1384,9 @@ export const pageList = ({ me, csrf, org, pages = [], canPublish = false,
   <h1>Website</h1>
   <p class="sub">${esc(org.name)} ·
     <a href="/o/${esc(org.slug)}/news">News</a> ·
+    <a href="/o/${esc(org.slug)}/instructors">Instructors</a> ·
     <a href="/o/${esc(org.slug)}/media">Images</a> ·
+    <a href="/o/${esc(org.slug)}/menu">Menu</a> ·
     <a href="/o/${esc(org.slug)}/roster">Back to the roll</a></p>
 
   ${done ? `<div class="good">${esc(done)}</div>` : ''}
@@ -1630,6 +1632,77 @@ export const pageEditor = ({ me, csrf, org, page: pg, values = {},
             <button class="btn quiet" type="submit">Go back to this</button>
           </form>` : '')}</td>
     </tr>`).join('')}</tbody></table>` : ''}` });
+};
+
+/**
+ * The site menu.
+ *
+ * Five rows, each a destination and a label. Destinations are a dropdown of
+ * pages this federation actually has, rather than a text box, because the
+ * failure this screen exists to end is an item pointing at a page nobody
+ * wrote — which the build used to drop in silence, mentioning it only in a
+ * log nobody reads.
+ */
+export const menuEditor = ({ me, csrf, org, items = [], destinations = [],
+                             vocabulary = {}, max = 5, stored = false,
+                             done, error, rebuild }) => {
+  const rows = Array.from({ length: max }, (_, i) => items[i] ?? null);
+
+  const choices = (selected) => destinations
+    .filter((d) => d.href !== '/')
+    .map((d) => `<option value="${esc(d.href)}"${
+      d.href === selected ? ' selected' : ''}>${esc(d.label ?? d.href)} — ${
+      esc(d.href)}${d.kind === 'written' ? '' : ' (built in)'}</option>`).join('');
+
+  return page({ title: `Menu — ${org.name}`, me, csrf, body: `
+  <h1>Menu</h1>
+  <p class="sub">${esc(org.name)} ·
+    <a href="/o/${esc(org.slug)}/pages">Website</a> ·
+    <a href="/o/${esc(org.slug)}/news">News</a> ·
+    <a href="/o/${esc(org.slug)}/instructors">Instructors</a></p>
+
+  ${done ? `<div class="good">${esc(done)}</div>` : ''}
+  ${error ? `<div class="bad">${esc(error)}</div>` : ''}
+  ${rebuild ? `<div class="note">${esc(rebuild)}</div>` : ''}
+
+  ${stored ? '' : `<div class="note">This is the menu the site builds with by
+    default. Saving it makes it this federation's own, and it stops following
+    the deployment's settings file.</div>`}
+
+  <form method="post" action="/o/${esc(org.slug)}/menu">
+    <input type="hidden" name="_csrf" value="${esc(csrf ?? '')}">
+
+    ${rows.map((row, i) => `<fieldset>
+      <legend>${i + 1}</legend>
+      <div class="row">
+        <div>
+          <label for="href${i}">Goes to</label>
+          <select id="href${i}" name="href${i}">
+            <option value="">— nothing —</option>
+            ${choices(row?.href)}
+          </select>
+        </div>
+        <div>
+          <label for="label${i}">Called</label>
+          <input id="label${i}" name="label${i}" maxlength="40"
+            value="${esc(row?.label ?? '')}"
+            placeholder="leave blank for the page's own name">
+        </div>
+      </div>
+    </fieldset>`).join('')}
+
+    <div class="actions">
+      <button class="btn" type="submit">Save the menu</button>
+      <a class="btn quiet" href="/o/${esc(org.slug)}/pages">Cancel</a>
+    </div>
+  </form>
+
+  <p class="muted" style="margin-top:20px">${max} items, and that is the
+    limit. Adding a sixth means removing one — it is the rule that stops a
+    menu becoming forty links in five years.</p>
+
+  <p class="muted">Only pages this site has are offered. Write a page first
+    and it appears in this list.</p>` });
 };
 
 /**

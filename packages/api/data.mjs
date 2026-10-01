@@ -1231,6 +1231,8 @@ export const billing = {
 
 import { validate, excerpt, toText } from '../content/blocks.mjs';
 import { assertMayPublish } from '../core/domain/instructing.mjs';
+import { destinations, problemsWithNavigation, navigationFrom, MAX_ITEMS }
+  from '../content/navigation.mjs';
 
 /**
  * Writing a page and publishing one are different jobs. A contributor is
@@ -1838,5 +1840,56 @@ export const instructors = {
       values ($1,$2,'instructor_remove','instructor_profile',$3,$4)`,
       [actor, orgId, row.id, JSON.stringify({ personId, was: row.published })]);
     return row;
+  },
+};
+
+// ---------------------------------------------------------------------------
+// the site menu
+//
+// Stored on the organisation, because a federation's menu is the federation's.
+// data/settings.json remains the fallback for a single-federation install that
+// has never opened the editor — see packages/content/navigation.mjs.
+// ---------------------------------------------------------------------------
+
+export const navigation = {
+  /** What this federation has stored, and everywhere its site has a page. */
+  async forEditing(actor, orgId) {
+    await assertRole(actor, orgId, WRITE_PAGES);
+    const org = await one('select settings from organisation where id=$1', [orgId]);
+    const { rows: authored } = await pool.query(`
+      select slug, title from page
+      where organisation_id=$1 and status='published' order by title`, [orgId]);
+    return { stored: org?.settings?.navigation ?? null, authored };
+  },
+
+  /**
+   * Replace the menu.
+   *
+   * Validated against what the site will actually have a page for, so an item
+   * pointing nowhere is refused here rather than disappearing during a build.
+   */
+  async save(actor, orgId, items, { vocabulary = {} } = {}) {
+    await assertRole(actor, orgId, MANAGE);
+    const { authored } = await this.forEditing(actor, orgId);
+    const existing = destinations({ authored, vocabulary });
+
+    const problems = problemsWithNavigation(items, existing);
+    if (problems.length) throw new Invalid(problems.join(' '));
+
+    const clean = items.map((i) => ({ href: i.href.trim(), label: i.label.trim() }));
+    const row = await one(`
+      update organisation
+         set settings = jsonb_set(settings, '{navigation}', $2::jsonb, true),
+             updated_at = now()
+       where id = $1 returning settings`,
+      [orgId, JSON.stringify({ items: clean })]);
+
+    await pool.query(`
+      insert into audit_log (account_id, organisation_id, action, entity,
+                             entity_id, after)
+      values ($1,$2,'navigation_save','organisation',$2,$3)`,
+      [actor, orgId, JSON.stringify({ items: clean })]);
+
+    return row?.settings?.navigation?.items ?? clean;
   },
 };

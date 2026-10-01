@@ -349,6 +349,51 @@ console.log('\nWRITING SOMEBODY ELSE\'S WEBSITE');
 
 // ---------------------------------------------------------------------------
 
+console.log('\nTHE MENU');
+{
+  const r = await req('/o/moknz/menu');
+  ok('the menu editor renders', r.status === 200);
+  ok('it offers only pages this site has',
+    r.html.includes('/find-a-dojo') && r.html.includes('/instructors'),
+    'built-in destinations missing');
+  const flat = (h) => h.replace(/\s+/g, ' ');
+  ok('and says the menu is limited to five',
+    flat(r.html).includes('5 items, and that is the limit'));
+  ok('it says the site is still following the settings file',
+    flat(r.html).includes("stops following the deployment's settings file"));
+
+  // The failure this screen exists to end: an item pointing at a page nobody
+  // wrote, which the build used to drop with only a line in a log.
+  const dangling = await req('/o/moknz/menu', { method: 'POST',
+    form: { href0: '/classes', label0: 'Classes' } });
+  const why = decodeURIComponent((dangling.location ?? '').split('error=')[1] ?? '');
+  ok('an item pointing nowhere is refused', !!why, dangling.location);
+  ok('by name and destination',
+    why.includes('Classes') && why.includes('/classes'), why);
+  ok('with what to do about it', why.includes('Write that page first'));
+  ok('and nothing was stored',
+    !(await pool.query(`select settings->'navigation' n from organisation
+                        where slug='moknz'`)).rows[0].n);
+
+  const saved = await req('/o/moknz/menu', { method: 'POST',
+    form: { href0: '/events', label0: 'What is on',
+            href1: '/find-a-dojo', label1: '' } });
+  ok('a good menu saves', saved.status === 302
+    && !saved.location.includes('error='), saved.location);
+
+  const after = await req('/o/moknz/menu');
+  ok('the typed label came back', after.html.includes('What is on'));
+  ok('and it no longer says it is following the file',
+    !flat(after.html).includes("stops following the deployment's settings file"));
+
+  const { rows: [org] } = await pool.query(
+    `select settings->'navigation'->'items' as items from organisation
+     where slug='moknz'`);
+  ok('two items stored on the federation', org.items.length === 2);
+  ok('a blank label was left blank rather than invented',
+    org.items[1].label === '', JSON.stringify(org.items));
+}
+
 console.log(`\n${pass} passed, ${fail} failed\n`);
 server.close();
 await pool.end();

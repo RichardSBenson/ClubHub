@@ -11,6 +11,7 @@ import path from 'node:path';
 import { repositories, currentStore } from '../infrastructure/factory.mjs';
 import { renderBlocks, excerpt } from '../content/blocks.mjs';
 import { extensionFor } from '../content/images.mjs';
+import { menuFor } from '../content/navigation.mjs';
 import { loadSettings, SettingsError } from './settings.mjs';
 import * as R from './render.mjs';
 
@@ -18,13 +19,6 @@ import * as R from './render.mjs';
 // same place whether run locally, from a script, or by Vercel at the repo root.
 const OUT = process.env.OUT ?? new URL('../../dist/', import.meta.url).pathname;
 const FED = process.env.FEDERATION ?? 'moknz';
-
-const NAV = [
-  { href: '/find-a-dojo', label: 'Find a club' },
-  { href: '/events', label: 'Events' },
-  { href: '/instructors', label: 'Instructors' },
-  { href: '/about', label: 'About us' },
-];
 
 /**
  * Which federations this deployment publishes, and where each one lives.
@@ -129,13 +123,6 @@ for (const target of SITES) {
   const tokens = { ...(brand?.tokens ?? {}), ...(atRoot ? rootSettings.tokens : {}) };
   const fonts = { ...(brand?.fonts ?? {}), ...(atRoot ? rootSettings.fonts : {}) };
 
-  // The plural, because "Find a academy" is the kind of detail that makes a
-  // demo feel machine-made.
-  const navFor = (v) => (atRoot && rootSettings.navigation.length
-    ? rootSettings.navigation
-    : NAV.map((n) => (n.href === '/find-a-dojo'
-        ? { ...n, label: v.clubPlural ?? v.club ?? 'Clubs' }
-        : n)));
 
   const base = target.base;
   const at = (p) => `${base}${p}`;
@@ -219,14 +206,21 @@ for (const target of SITES) {
   // anything is rendered, because the menu is rendered into every page and a
   // menu item pointing at a page that was never built sends a visitor to a
   // 404 from the one link they are most likely to press.
-  const willExist = new Set([
-    '/', '/find-a-dojo', '/events', '/news',
-    ...authored.map((pg) => `/${pg.slug}`),
-  ]);
-  const nav = navFor(vocabulary).filter((n) => {
-    if (willExist.has(n.href)) return true;
-    console.log(`     nav: dropped ${n.href} — this federation has no such page`);
-    return false;
+  // The menu is the federation's, stored on its own record. The settings file
+  // is the fallback for a single-federation install that has never opened the
+  // editor, and the generated pages are the fallback for a fresh one.
+  //
+  // menuFor drops anything pointing at a page this federation has not got,
+  // which is a backstop and not the protection: the editor refuses to save
+  // such an item, by name, with what to do about it. The build used to be the
+  // only thing that noticed, and it said so in a log nobody reads — which is
+  // how an item added to the hardcoded list this morning was dropped from
+  // every federation's menu without anybody being told.
+  const nav = menuFor({
+    stored: orgSettings.navigation,
+    fileItems: atRoot ? rootSettings.navigation : [],
+    authored,
+    vocabulary,
   });
 
   const shared = { federation, fonts, nav, base, vocabulary, origin: ORIGIN };
