@@ -85,7 +85,7 @@ console.log('\nNOBODY UNDER EIGHTEEN GOES ON A PUBLIC WEBSITE');
   // A sixteen-year-old assistant instructor — an ordinary thing to be.
   const teen = await one(`
     insert into person (first_name, last_name, date_of_birth, gender)
-    values ('Mere','Tahana', (current_date - interval '16 years')::date, 'f')
+    values ('Mere','Tahana', (current_date - interval '16 years 3 months')::date, 'f')
     returning id`);
   await pool.query(`
     insert into affiliation (person_id, organisation_id, role, status, starts)

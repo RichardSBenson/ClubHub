@@ -187,7 +187,7 @@ export class SmtpMessenger {
 
   get implicitTls() { return this.secure; }
 
-  async send({ to, subject, text, kind = 'message' }) {
+  async send({ to, subject, text, kind = 'message', sender = null, headers = null }) {
     const recipient = safeHeader(addressOnly(to), 'The address');
     const line = safeHeader(subject, 'The subject');
     if (!recipient.includes('@'))
@@ -237,7 +237,7 @@ export class SmtpMessenger {
       // answers separately, and from then on every reply is read against the
       // wrong command: the 250 for the message gets matched to the dot, and
       // QUIT reads the error for the dot. So: write, then only listen.
-      s.socket.write(this.#message({ id, recipient, subject: line, text }));
+      s.socket.write(this.#message({ id, recipient, subject: line, text, sender, extra: headers }));
       const accepted = await s.command(null, [250]);
 
       // QUIT is courtesy. The message is accepted by the time 250 comes back,
@@ -256,9 +256,13 @@ export class SmtpMessenger {
   }
 
   /** The message itself, CRLF throughout and dot-stuffed. */
-  #message({ id, recipient, subject, text }) {
-    const from = this.name
-      ? `${encodeHeader(safeHeader(this.name, 'The sender name'))} `
+  #message({ id, recipient, subject, text, sender = null, extra = null }) {
+    // A mailbox sends as itself — the server will not let it be anybody else —
+    // so a club can lend its NAME to the message but not its address. A reply
+    // still goes to the club.
+    const name = sender?.name ?? this.name;
+    const from = name
+      ? `${encodeHeader(safeHeader(name, 'The sender name'))} `
         + `<${addressOnly(this.from)}>`
       : addressOnly(this.from);
 
@@ -274,7 +278,10 @@ export class SmtpMessenger {
       // A sign-in link is not a newsletter. Saying so keeps it out of
       // automatic replies and stops a mailing-list unsubscribe being offered
       // for a message nobody subscribed to.
-      'Auto-Submitted: auto-generated',
+      ...(extra ? [] : ['Auto-Submitted: auto-generated']),
+      ...(sender?.replyTo ? [`Reply-To: <${safeHeader(addressOnly(sender.replyTo), 'The reply address')}>`] : []),
+      ...Object.entries(extra ?? {}).map(([k, v]) =>
+        `${safeHeader(k, 'A header name')}: ${safeHeader(v, 'A header')}`),
     ];
 
     const body = String(text ?? '')

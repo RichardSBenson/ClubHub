@@ -283,6 +283,7 @@ export function rail({ org, vocabulary = {}, can = {}, path = '' }) {
     can.register && link(`${base}/members/new`, 'Add a member'),
     can.register && link(`${base}/members/import`, 'Import a roll'),
     can.register && link(`${base}/grading`, vocabulary.grading ?? 'Grading'),
+    can.manage && link(`${base}/messages`, 'Messages'),
   ])}
   ${group('Events', [link(`${base}/events`, 'Events')])}
   ${can.write ? group('Website', [
@@ -3051,4 +3052,121 @@ export const memberEntryPreview = ({ me, csrf, how, open, event, mine, placement
     ${Object.entries(text).map(([k, v]) => `<input type="hidden" name="${esc(k)}" value="${esc(v)}">`).join('')}
     <input type="hidden" name="confirm" value="yes">
     <div class="actions"><button class="btn" type="submit">Confirm the entry</button></div>
+  </form>` });
+
+
+// ---------------------------------------------------------------------------
+// messages
+// ---------------------------------------------------------------------------
+
+const STATUS_WORDS = { queued: 'Waiting', sending: 'Sending', sent: 'Sent', failed: 'Failed',
+  opted_out: 'Opted out', no_email: 'No email address' };
+
+export const messagesScreen = ({ me, csrf, org, history = [], events = [], sender = null,
+                                 values = null, error, done }) => {
+  const v = (k) => esc(values?.[k] ?? '');
+  const aud = values?.audience ?? 'members';
+  const kind = values?.kind ?? 'announcement';
+  return page({ title: `${org.name} — messages`, me, csrf, body: `
+  <h1>Messages</h1>
+  <p class="sub">${sender
+    ? `Goes out as <strong>${esc(sender.name)}</strong> from ${esc(sender.address)}.
+       ${sender.replyTo ? `Replies go to ${esc(sender.replyTo)}.` : ''}`
+    : 'Email is not set up to send yet.'}</p>
+  ${done ? `<div class="good">${esc(done)}</div>` : ''}
+  ${error ? `<div class="bad">${esc(error)}</div>` : ''}
+  ${sender && !sender.replyTo ? `<div class="note">Add a contact email on the club's page so
+    replies have somewhere to go — until then nothing can be sent.</div>` : ''}
+
+  <h2>Write a message</h2>
+  <form method="post" action="/o/${esc(org.slug)}/messages">
+    <input type="hidden" name="_csrf" value="${esc(csrf ?? '')}">
+    <fieldset><legend>Who is it for?</legend>
+      ${AUDIENCE_CHOICES.map(([k, label]) => `<label><input type="radio" name="audience"
+        value="${k}"${aud === k ? ' checked' : ''}> ${esc(label)}</label>`).join('')}
+    </fieldset>
+    <div class="row">
+      <div><label for="eventId">Event <span class="muted">(only for “people entered in an event”)</span></label>
+        <select id="eventId" name="eventId"><option value="">—</option>${events.map((e) =>
+          `<option value="${esc(e.id)}"${values?.eventId === e.id ? ' selected' : ''}>${
+            esc(e.day)} · ${esc(e.title)}</option>`).join('')}</select></div>
+      <div><label for="personNumber">Member number <span class="muted">(only for “one person”)</span></label>
+        <input id="personNumber" name="personNumber" maxlength="30" value="${v('personNumber')}"></div>
+    </div>
+    <fieldset><legend>What kind of message?</legend>
+      ${KIND_CHOICES.map(([k, label]) => `<label><input type="radio" name="kind"
+        value="${k}"${kind === k ? ' checked' : ''}> ${esc(label)}</label>`).join('')}
+      <p class="muted">Announcements stop for anyone who has opted out. A message about an event
+        they entered is sent regardless, and says so.</p>
+    </fieldset>
+    <label for="subject">Subject</label>
+    <input id="subject" name="subject" required maxlength="150" value="${v('subject')}">
+    <label for="body">Message</label>
+    <textarea id="body" name="body" rows="9" required maxlength="10000">${v('body')}</textarea>
+    <p class="muted">Children with a parent or guardian linked are written to through them.
+      One address gets one copy.</p>
+    <div class="actions"><button class="btn" type="submit"${sender?.replyTo ? '' : ' disabled'}>Send</button></div>
+  </form>
+
+  <h2>Sent</h2>
+  ${history.length ? `<table><thead><tr><th>When</th><th>Subject</th><th>Reached</th><th></th></tr></thead><tbody>${
+    history.map((m) => `<tr>
+      <td>${esc(new Date(m.created_at).toISOString().slice(0, 10))}</td>
+      <td>${esc(m.subject)}</td>
+      <td>${m.sent} of ${m.sent + m.failed + m.waiting}${m.waiting ? ` · ${m.waiting} waiting` : ''}${
+        m.failed ? ` · ${m.failed} failed` : ''}${m.skipped ? ` · ${m.skipped} skipped` : ''}</td>
+      <td><a href="/o/${esc(org.slug)}/messages/${esc(m.id)}">Open</a></td></tr>`).join('')}</tbody></table>`
+    : '<p class="muted">Nothing sent yet.</p>'}` });
+};
+
+const AUDIENCE_CHOICES = [
+  ['members', 'Everyone in the club'], ['instructors', 'Instructors only'],
+  ['event', 'People entered in an event'], ['person', 'One person'],
+];
+const KIND_CHOICES = [['announcement', 'Announcement'], ['event', 'About an event they entered']];
+
+export const messageDetail = ({ me, csrf, org, message, recipients = [], done, error }) => {
+  const count = (s) => recipients.filter((r) => r.status === s).length;
+  const waiting = count('queued') + count('sending');
+  return page({ title: `${message.subject} — message`, me, csrf, body: `
+  <p><a href="/o/${esc(org.slug)}/messages">← Messages</a></p>
+  <h1>${esc(message.subject)}</h1>
+  <p class="sub">From ${esc(message.sender_name)} · ${esc(new Date(message.created_at).toISOString().slice(0, 16).replace('T', ' '))} UTC${
+    message.event_title ? ` · about ${esc(message.event_title)}` : ''}</p>
+  ${done ? `<div class="good">${esc(done)}</div>` : ''}
+  ${error ? `<div class="bad">${esc(error)}</div>` : ''}
+  <div class="row">
+    <div><strong>${count('sent')}</strong> sent</div>
+    <div><strong>${waiting}</strong> waiting</div>
+    <div><strong>${count('failed')}</strong> failed</div>
+    <div><strong>${count('opted_out') + count('no_email')}</strong> skipped</div>
+  </div>
+  ${waiting ? `<form method="post" action="/o/${esc(org.slug)}/messages/${esc(message.id)}/send">
+    <input type="hidden" name="_csrf" value="${esc(csrf ?? '')}">
+    <p>Sending is done in batches. ${waiting} still to go.</p>
+    <div class="actions"><button class="btn" type="submit">Send the next batch</button></div></form>` : ''}
+  ${count('failed') ? `<form method="post" action="/o/${esc(org.slug)}/messages/${esc(message.id)}/retry">
+    <input type="hidden" name="_csrf" value="${esc(csrf ?? '')}">
+    <div class="actions"><button class="btn quiet" type="submit">Try the failed ones again</button></div></form>` : ''}
+  <h2>Message</h2>
+  <pre style="white-space:pre-wrap">${esc(message.body)}</pre>
+  <h2>Who</h2>
+  <table><thead><tr><th>Person</th><th>Address</th><th>Status</th></tr></thead><tbody>${
+    recipients.map((r) => `<tr><td>${esc(r.name ?? '—')}${r.about ? ` <span class="muted">(for ${esc(r.about)})</span>` : ''}</td>
+      <td>${esc(r.email ?? '—')}</td>
+      <td>${esc(STATUS_WORDS[r.status] ?? r.status)}${r.error ? ` <span class="muted">— ${esc(r.error)}</span>` : ''}</td></tr>`).join('')}</tbody></table>` });
+};
+
+export const unsubscribePage = ({ csrf, token, first, optedOut, changed }) => page({
+  title: 'Email settings', me: null, csrf, body: `
+  <h1>Email from your club</h1>
+  ${changed ? `<div class="good">${optedOut
+    ? 'Done. You will no longer get announcements.' : 'Done. Announcements are back on.'}</div>` : ''}
+  <p>${first ? `${esc(first)}, ` : ''}announcements ${optedOut ? 'are <strong>off</strong>' : 'are <strong>on</strong>'}.
+    Messages about an event you entered still reach you.</p>
+  <form method="post" action="/unsubscribe/${esc(token)}">
+    <input type="hidden" name="_csrf" value="${esc(csrf ?? '')}">
+    <input type="hidden" name="optOut" value="${optedOut ? '0' : '1'}">
+    <div class="actions"><button class="btn" type="submit">${optedOut
+      ? 'Turn announcements back on' : 'Stop announcements'}</button></div>
   </form>` });

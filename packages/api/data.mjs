@@ -12,6 +12,9 @@ export { pool } from '../infrastructure/postgres/pool.mjs';
 import { pool } from '../infrastructure/postgres/pool.mjs';
 import { problemsWithPerson, problemsWithMembership }
   from '../core/domain/people.mjs';
+import { problemsWithMessage, senderFor, chooseRecipients, renderBody }
+  from '../core/domain/messaging.mjs';
+import crypto from 'node:crypto';
 
 const q = async (text, params = []) => (await pool.query(text, params)).rows;
 const one = async (text, params = []) => (await q(text, params))[0] ?? null;
@@ -2964,5 +2967,257 @@ export const clubPages = {
       gaps: readinessGaps(r, Array.from({ length: r.sessions }, () => ({})))
         .map((g) => g.short),
     }));
+  },
+};
+
+
+// ---------------------------------------------------------------------------
+// messages
+//
+// A club writes to its own people, as the club. Only an administrator of the
+// organisation (or of one above it) may. Everything sent is recorded against
+// the people it reached, so "did they get it?" has an answer afterwards.
+// ---------------------------------------------------------------------------
+
+const peopleIn = async (org, audience, { eventId, personId }) => {
+  if (audience === 'person') {
+    const r = await q(`
+      select distinct a.person_id as id from affiliation a
+      join organisation o on o.id = a.organisation_id
+      where a.person_id = $2 and a.ends is null and o.path <@ $1::ltree`,
+      [org.path, personId]);
+    if (!r.length) throw new NotFound('Person');
+    return r.map((x) => x.id);
+  }
+  if (audience === 'event') {
+    const r = await q(`
+      select distinct en.person_id as id from event_entry en
+      join event e on e.id = en.event_id
+      join organisation o on o.id = e.organisation_id
+      where e.id = $2 and o.path <@ $1::ltree and en.person_id is not null`,
+      [org.path, eventId]);
+    return r.map((x) => x.id);
+  }
+  const roles = audience === 'instructors' ? ['instructor'] : ['member', 'instructor', 'assistant', 'official'];
+  const r = await q(`
+    select distinct a.person_id as id from affiliation a
+    join organisation o on o.id = a.organisation_id
+    where o.path <@ $1::ltree and a.ends is null and a.status = 'active'
+      and a.role = any($2::text[])`, [org.path, roles]);
+  return r.map((x) => x.id);
+};
+
+export const messages = {
+  /** What the compose screen offers, and what a message would be sent as. */
+  async options(actor, orgId, { baseFrom }) {
+    await assertRole(actor, orgId, MANAGE);
+    const org = await one('select * from organisation where id=$1', [orgId]);
+    if (!org) throw new NotFound('Organisation');
+    const events = await q(`
+      select e.id, e.title, to_char(e.starts_at at time zone o.timezone,'YYYY-MM-DD') as day
+      from event e join organisation o on o.id = e.organisation_id
+      where o.path <@ $1::ltree and e.status = 'published'
+        and e.starts_at > now() - interval '60 days'
+      order by e.starts_at desc limit 40`, [org.path]);
+    const contact = org.type === 'club'
+      ? (await one('select email from dojo_profile where organisation_id=$1', [orgId]))?.email : null;
+    const me = await one('select email from account where id=$1', [actor]);
+    const sender = senderFor({ club: org, baseFrom, contactEmail: contact, actorEmail: me?.email });
+    return { org, events, sender, contactEmail: contact };
+  },
+
+  async history(actor, orgId, { limit = 50 } = {}) {
+    await assertRole(actor, orgId, MANAGE);
+    return q(`
+      select m.id, m.subject, m.audience, m.kind, m.created_at,
+        count(r.*)::int as total,
+        count(*) filter (where r.status = 'sent')::int as sent,
+        count(*) filter (where r.status = 'failed')::int as failed,
+        count(*) filter (where r.status in ('queued','sending'))::int as waiting,
+        count(*) filter (where r.status in ('opted_out','no_email'))::int as skipped
+      from message m left join message_recipient r on r.message_id = m.id
+      where m.organisation_id = $1
+      group by m.id order by m.created_at desc limit $2`, [orgId, limit]);
+  },
+
+  /** One message and who it went to. Scoped to the organisation asked about. */
+  async get(actor, orgId, messageId) {
+    await assertRole(actor, orgId, MANAGE);
+    const message = await one(`select m.*, e.title as event_title from message m
+      left join event e on e.id = m.event_id
+      where m.id = $1 and m.organisation_id = $2`, [messageId, orgId]);
+    if (!message) throw new NotFound('Message');
+    const recipients = await q(`
+      select r.id, r.email, r.status, r.error, r.sent_at,
+        nullif(trim(concat_ws(' ', p.first_name, p.last_name)), '') as name,
+        nullif(trim(concat_ws(' ', c.first_name, c.last_name)), '') as about
+      from message_recipient r
+      left join person p on p.id = r.person_id
+      left join person c on c.id = r.about_id
+      where r.message_id = $1
+      order by r.status, p.last_name, p.first_name`, [messageId]);
+    return { message, recipients };
+  },
+
+  /**
+   * Work out who this reaches and write the message down, every recipient
+   * queued. Nothing is sent here.
+   */
+  async prepare(actor, orgId, input, { baseFrom }) {
+    await assertRole(actor, orgId, MANAGE);
+    const problems = problemsWithMessage(input);
+    if (problems.length) throw new Invalid(problems.join(' '));
+
+    const { org, sender } = await messages.options(actor, orgId, { baseFrom });
+    if (!sender)
+      throw new Invalid('Email is not set up to send from this system yet — ask whoever installed it to add a sending address.');
+    if (!sender.replyTo)
+      throw new Invalid('Add a contact email on the club\'s page first, so replies have somewhere to go.');
+
+    let personId = null;
+    if (input.audience === 'person') {
+      personId = (await one('select id from person where upper(display_number) = upper($1)',
+        [input.personNumber]))?.id;
+      if (!personId) throw new Invalid(`There is no member numbered ${input.personNumber}.`);
+    }
+    const ids = await peopleIn(org, input.audience, { ...input, personId });
+    const candidates = ids.length ? (await q(`
+      select p.id as "personId", p.email,
+        (p.date_of_birth is not null and p.date_of_birth > current_date - interval '18 years') as "isMinor",
+        coalesce(ep.opted_out, false) as "optedOut",
+        coalesce((select json_agg(json_build_object('personId', g.id, 'email', g.email,
+                                                    'optedOut', coalesce(gp.opted_out, false)))
+                  from guardian_link gl join person g on g.id = gl.guardian_id
+                  left join email_preference gp on gp.person_id = g.id
+                  where gl.child_id = p.id and gl.ended_on is null), '[]'::json) as guardians
+      from person p left join email_preference ep on ep.person_id = p.id
+      where p.id = any($1::uuid[])`, [ids])) : [];
+
+    const { recipients, skipped } = chooseRecipients(candidates,
+      { honourOptOut: input.kind !== 'event' });
+    if (!recipients.length)
+      throw new Invalid(ids.length
+        ? 'Nobody here can be emailed — they have no address on file, or have opted out.'
+        : 'That group has nobody in it.');
+
+    const message = await one(`
+      insert into message (organisation_id, sent_by, kind, audience, event_id, subject, body,
+                           sender_name, sender_address, reply_to)
+      values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) returning *`,
+      [orgId, actor, input.kind, input.audience,
+       input.audience === 'event' ? input.eventId : null,
+       input.subject, input.body, sender.name, sender.address, sender.replyTo]);
+
+    const rows = [
+      ...recipients.map((r) => ({ ...r, status: 'queued' })),
+      ...skipped.map((r) => ({ personId: r.personId, email: r.email ?? null,
+                               status: r.reason, via: null })),
+    ];
+    await pool.query(`
+      insert into message_recipient (message_id, person_id, email, about_id, status)
+      select $1, x.p, x.e, x.a, x.s
+      from unnest($2::uuid[], $3::text[], $4::uuid[], $5::text[]) as x(p, e, a, s)`,
+      [message.id, rows.map((r) => r.personId), rows.map((r) => r.email),
+       rows.map((r) => r.via ?? null), rows.map((r) => r.status)]);
+
+    // A way out for each person we are about to write to.
+    const who = [...new Set(recipients.map((r) => r.personId))];
+    await pool.query(`
+      insert into email_preference (person_id, token)
+      select x.p, x.t from unnest($1::uuid[], $2::text[]) as x(p, t)
+      on conflict (person_id) do nothing`,
+      [who, who.map(() => crypto.randomBytes(18).toString('base64url'))]);
+
+    await pool.query(`
+      insert into audit_log (account_id, organisation_id, action, entity, entity_id, before, after)
+      values ($1,$2,'message_sent','message',$3,null,$4)`,
+      [actor, orgId, message.id, JSON.stringify({
+        subject: input.subject, audience: input.audience, kind: input.kind,
+        recipients: recipients.length, skipped: skipped.length })]);
+
+    return { message, recipients: recipients.length, skipped: skipped.length };
+  },
+
+  /**
+   * Send what is still queued, until the time budget runs out. Safe to call
+   * again: a recipient is claimed before it is sent, so two presses of the
+   * button do not write to anybody twice.
+   */
+  async sendBatch(actor, orgId, messageId, { messenger, origin, budgetMs = 6000, concurrency = 5 }) {
+    await assertRole(actor, orgId, MANAGE);
+    const message = await one('select * from message where id=$1 and organisation_id=$2',
+      [messageId, orgId]);
+    if (!message) throw new NotFound('Message');
+    const org = await one('select name from organisation where id=$1', [orgId]);
+    const started = Date.now();
+    const sender = { name: message.sender_name, address: message.sender_address,
+                     replyTo: message.reply_to };
+    let sent = 0, failed = 0;
+
+    const claim = () => q(`
+      update message_recipient set status = 'sending', sent_at = now()
+      where id in (select id from message_recipient
+                   where message_id = $1
+                     and (status = 'queued'
+                          or (status = 'sending' and sent_at < now() - interval '3 minutes'))
+                   order by id limit $2 for update skip locked)
+      returning id, person_id, email`, [messageId, concurrency]);
+
+    while (Date.now() - started < budgetMs) {
+      const batch = await claim();
+      if (!batch.length) break;
+      const tokens = new Map((await q(
+        'select person_id, token from email_preference where person_id = any($1::uuid[])',
+        [batch.map((b) => b.person_id)])).map((t) => [t.person_id, t.token]));
+      await Promise.all(batch.map(async (r) => {
+        const token = tokens.get(r.person_id);
+        const url = token && origin ? `${origin}/unsubscribe/${token}` : null;
+        try {
+          const res = await messenger.send({
+            to: r.email, subject: message.subject, kind: 'message', sender,
+            text: renderBody({ text: message.body, club: org, unsubscribeUrl: url,
+                               optOutHonoured: message.kind !== 'event' }),
+            headers: url && message.kind !== 'event' ? { 'List-Unsubscribe': `<${url}>` } : null,
+          });
+          await pool.query(`update message_recipient set status='sent', sent_at=now(),
+            provider_id=$2, error=null where id=$1`, [r.id, res?.id ?? null]);
+          sent++;
+        } catch (e) {
+          await pool.query(`update message_recipient set status='failed', error=$2 where id=$1`,
+            [r.id, String(e.message ?? e).slice(0, 300)]);
+          failed++;
+        }
+      }));
+    }
+    const left = await one(`select count(*)::int as n from message_recipient
+      where message_id=$1 and status in ('queued','sending')`, [messageId]);
+    return { sent, failed, waiting: left.n };
+  },
+
+  /** Put failed ones back in the queue. */
+  async retryFailed(actor, orgId, messageId) {
+    await assertRole(actor, orgId, MANAGE);
+    const m = await one('select id from message where id=$1 and organisation_id=$2', [messageId, orgId]);
+    if (!m) throw new NotFound('Message');
+    await pool.query(`update message_recipient set status='queued', error=null
+      where message_id=$1 and status='failed'`, [messageId]);
+  },
+};
+
+/** The way out. The token is the authority, so it is looked up by nothing else. */
+export const emailPreferences = {
+  async byToken(token) {
+    return one(`select ep.opted_out, p.first_name from email_preference ep
+      join person p on p.id = ep.person_id where ep.token = $1`, [String(token)]);
+  },
+  async setOptOut(token, optedOut) {
+    const row = await one(`update email_preference set opted_out=$2, updated_at=now()
+      where token=$1 returning person_id`, [String(token), !!optedOut]);
+    if (row) await pool.query(`
+      insert into audit_log (account_id, organisation_id, action, entity, entity_id, before, after)
+      select null::uuid, a.organisation_id, 'email_preference', 'person', $1::uuid, null::jsonb, $2::jsonb
+      from affiliation a where a.person_id = $1 and a.ends is null limit 1`,
+      [row.person_id, JSON.stringify({ optedOut: !!optedOut })]);
+    return !!row;
   },
 };

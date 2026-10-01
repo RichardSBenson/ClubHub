@@ -29,6 +29,10 @@
       "destination": "/api/index"
     },
     {
+      "source": "/unsubscribe/:path*",
+      "destination": "/api/index"
+    },
+    {
       "source": "/me",
       "destination": "/api/index"
     },

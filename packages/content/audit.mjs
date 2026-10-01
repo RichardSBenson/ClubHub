@@ -141,6 +141,16 @@ export function describe(entry) {
       return bits.length ? bits.join(' and ') : `updated the club's details`;
     }
 
+    case 'message_sent': {
+      const who = { members: 'the members', instructors: 'the instructors',
+                    event: 'people entered in an event', person: 'one person' }[a.audience] ?? 'people';
+      return `wrote ${a.subject ? quote(a.subject) : 'a message'} to ${who} (${a.recipients ?? 0} `
+        + `address${a.recipients === 1 ? '' : 'es'}${a.skipped ? `, ${a.skipped} skipped` : ''})`;
+    }
+    case 'email_preference':
+      return a.optedOut ? 'a member stopped getting announcement emails'
+                        : 'a member started getting announcement emails again';
+
     case 'club_added':
       return `added the club ${a.name ? quote(a.name) : ''}`.trim();
 
@@ -219,6 +229,8 @@ export const ACTIONS = Object.freeze([
   ['guardian_unlink', 'Guardian link ended'],
   ['self_update', 'Member updated their own details'],
   ['club_profile_saved', 'Club details changed'],
+  ['message_sent', 'Message sent'],
+  ['email_preference', 'Email preference changed'],
   ['event_publish_up_asked', 'Event listing requested'],
   ['event_publish_up', 'Event listing decided'],
   ['theme_apply', 'Website look changed'],

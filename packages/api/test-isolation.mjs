@@ -83,6 +83,8 @@ const PUBLIC = new Map([
   ['GET /try/:slug', 'the demonstration; refuses any federation not marked demo'],
   ['POST /signout', 'leaving must always work'],
   ['GET /dashboard', 'shows only what the signer-in may see'],
+  ['GET /unsubscribe/:token', 'the link in an email; the token is the authorisation and it shows only a setting'],
+  ['POST /unsubscribe/:token', 'turning off announcements; the token is the authorisation'],
 ]);
 
 // ---------------------------------------------------------------------------
@@ -104,6 +106,10 @@ const theirPage = await one(`
   values ($1,'private-notes','Private notes',
     '{"blocks":[{"type":"paragraph","text":"Committee only."}]}'::jsonb,'draft')
   returning *`, [theirs.id]);
+const theirMessage = await one(`
+  insert into message (organisation_id, kind, audience, subject, body, sender_name, sender_address, reply_to)
+  values ($1,'announcement','members','Private committee notice','Not for anyone else.',
+          'Whanganui','whanganui@example.nz','w@example.nz') returning *`, [theirs.id]);
 const theirPerson = await one(`
   select p.* from affiliation a join person p on p.id = a.person_id
   where a.organisation_id = $1 and a.ends is null limit 1`, [theirs.id]);
@@ -181,6 +187,7 @@ function pathFor(pattern) {
     // exactly the kind of thing this probe exists to refuse.
     assetId: theirAsset.id,
     articleId: theirArticle.id,
+    messageId: theirMessage.id,
     clubId: theirs.id,
     token: 'not-a-real-token',
     secret: 'not-a-real-secret',
@@ -210,6 +217,7 @@ const THEIR_WORDS = [
   theirPage.title,
   theirPerson && `${theirPerson.first_name} ${theirPerson.last_name}`,
   theirEvent && theirEvent.title,
+  theirMessage.subject,
 ].filter(Boolean);
 
 /**

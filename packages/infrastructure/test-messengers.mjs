@@ -157,5 +157,25 @@ console.log('\nCHOSEN BY ENVIRONMENT, READ AT CALL TIME');
     preferred.apiKey === 're_new');
 }
 
+console.log('\nA CLUB SENDS AS ITSELF');
+{
+  const real = globalThis.fetch;
+  let body = null;
+  globalThis.fetch = async (_u, init) => { body = JSON.parse(init.body);
+    return new Response(JSON.stringify({ id: 'abc', MessageID: 'abc' }), { status: 200 }); };
+  const sender = { name: 'Whanganui', address: 'whanganui@mail.moknz.nz', replyTo: 'club@w.nz' };
+  const r = new HttpMessenger({ provider: 'resend', apiKey: 'k', from: 'noreply@mail.moknz.nz' });
+  await r.send({ to: 'a@b.nz', subject: 's', text: 't', sender, headers: { 'List-Unsubscribe': '<https://x>' } });
+  ok('resend: from is the club', body.from === 'Whanganui <whanganui@mail.moknz.nz>', body.from);
+  ok('resend: replies go to the club', body.reply_to === 'club@w.nz');
+  ok('resend: the unsubscribe header is sent', body.headers['List-Unsubscribe'] === '<https://x>');
+  await r.send({ to: 'a@b.nz', subject: 's', text: 't' });
+  ok('with no sender it is the federation as before', body.from === 'noreply@mail.moknz.nz' && !body.reply_to);
+  const p = new HttpMessenger({ provider: 'postmark', apiKey: 'k', from: 'noreply@mail.moknz.nz' });
+  await p.send({ to: 'a@b.nz', subject: 's', text: 't', sender, headers: { 'List-Unsubscribe': '<https://x>' } });
+  ok('postmark: reply-to and headers', body.ReplyTo === 'club@w.nz' && body.Headers[0].Name === 'List-Unsubscribe');
+  globalThis.fetch = real;
+}
+
 console.log(`\n${pass} passed, ${fail} failed\n`);
 process.exit(fail ? 1 : 0);

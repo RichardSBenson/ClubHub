@@ -82,3 +82,30 @@ receiving mail while sending kept working — a failure in the direction nobody
 tests.
 
 Write the current MX records down first.
+
+## Clubs writing to their people
+
+Administrators write to their club from **Messages** in the admin. Every club
+sends as itself: the name shown is the club's, the address is
+`<club-slug>@<your sending domain>`, and replies go to the club's contact email
+(its page's contact address, or failing that the administrator who sent it).
+
+**One step is yours, once.** `MESSENGER_FROM` supplies the sending domain
+(`noreply@mail.moknz.nz` → clubs send from `whanganui@mail.moknz.nz`). Resend or
+Postmark will only send from a domain you have verified with them — add the DNS
+records they give you. Until that is done, sends to people outside your own
+account will be refused and show as *failed* on the message, with the reason.
+
+With SMTP the mailbox can only be itself, so a club lends its *name* and its
+*reply address* but not its sending address.
+
+- Audiences: the whole club, instructors, people entered in an event, one person.
+  A federation administrator writing from the federation reaches every club.
+- A child with a linked parent or guardian is written to through them; one
+  address gets one copy.
+- Every message carries an unsubscribe link. It opens a page and changes nothing
+  until the button is pressed. Announcements honour it; a message *about an
+  event they entered* does not, and says so.
+- Sending is in batches, with the first sent immediately and the rest behind a
+  **Send the next batch** button, because a serverless function has seconds.
+  Every recipient is on the record with sent, failed, opted out, or no address.

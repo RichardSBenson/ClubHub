@@ -95,9 +95,11 @@ const PROVIDERS = {
     url: 'https://api.postmarkapp.com/email',
     headers: (key) => ({ 'X-Postmark-Server-Token': key,
                          Accept: 'application/json' }),
-    body: ({ from, to, subject, text, stream }) => ({
+    body: ({ from, to, subject, text, stream, replyTo, headers }) => ({
       From: from, To: to, Subject: subject, TextBody: text,
       MessageStream: stream ?? 'outbound',
+      ...(replyTo ? { ReplyTo: replyTo } : {}),
+      ...(headers ? { Headers: Object.entries(headers).map(([Name, Value]) => ({ Name, Value })) } : {}),
     }),
     id: (r) => r.MessageID,
     error: (r) => r.Message,
@@ -105,7 +107,11 @@ const PROVIDERS = {
   resend: {
     url: 'https://api.resend.com/emails',
     headers: (key) => ({ Authorization: `Bearer ${key}` }),
-    body: ({ from, to, subject, text }) => ({ from, to, subject, text }),
+    body: ({ from, to, subject, text, replyTo, headers }) => ({
+      from, to, subject, text,
+      ...(replyTo ? { reply_to: replyTo } : {}),
+      ...(headers ? { headers } : {}),
+    }),
     id: (r) => r.id,
     error: (r) => r.message ?? r.name,
   },
@@ -126,8 +132,16 @@ export class HttpMessenger {
     this.timeoutMs = timeoutMs;
   }
 
-  async send({ to, subject, text }) {
+  /**
+   * `sender` is optional: { name, address, replyTo }. A club's message says it
+   * is from the club. The address must be on the domain the provider has
+   * verified; the caller builds it from this messenger's own `from`, so it is.
+   */
+  async send({ to, subject, text, sender = null, headers = null }) {
     const { spec } = this;
+    const from = sender?.address
+      ? `${String(sender.name ?? '').replace(/["\r\n<>]/g, '')} <${sender.address}>`.trim()
+      : this.from;
 
     // A hung provider must not hold a serverless function until it times out.
     const abort = AbortSignal.timeout(this.timeoutMs);
@@ -140,7 +154,8 @@ export class HttpMessenger {
         headers: { 'content-type': 'application/json',
                    ...spec.headers(this.apiKey) },
         body: JSON.stringify(spec.body({
-          from: this.from, to, subject, text, stream: this.stream })),
+          from, to, subject, text, stream: this.stream,
+          replyTo: sender?.replyTo ?? null, headers })),
       });
     } catch (e) {
       throw new MessengerError(
