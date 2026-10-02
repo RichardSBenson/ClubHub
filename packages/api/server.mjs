@@ -37,6 +37,7 @@ import { pool, orgs, people, rank, events, competition, pages, assets, news,
          Forbidden, NotFound, Invalid } from './data.mjs';
 import * as auth from './auth.mjs';
 import * as V from './views.mjs';
+import { repeatFromLast, decideQuick } from '../core/domain/repeat-entry.mjs';
 import { readEnquiry, looksLikeRobot, sameSite } from '../core/domain/enquiry.mjs';
 import { readSelfEdit } from '../core/domain/family.mjs';
 import { readClubProfile } from '../core/domain/club-profile.mjs';
@@ -429,7 +430,20 @@ get('/me/events', async (ctx) => {
   const { self, dependants } = await family.mine(ctx.me.accountId);
   const groups = [];
   for (const person of [self, ...dependants].filter(Boolean)) {
-    groups.push({ person, open: await memberEvents.openFor(person.id),
+    const open = await memberEvents.openFor(person.id);
+    // For each thing on offer, would it be one click? A declaration still has
+    // to be read, so those open the one-click screen rather than posting.
+    for (const e of open) {
+      try {
+        const plan = await memberEntryPlan({ me: ctx.me, params: { eventId: e.id, personId: person.id } }, {}, { fromLast: true });
+        if (plan.quick.ok) {
+          e.direct = !plan.event.consentVersion;
+          e.sameAs = plan.setup.disciplines.length
+            ? `Same as last time: ${plan.placements.map((p) => p.discipline.name).join(', ')}, ${plan.weightKg} kg` : null;
+        }
+      } catch { /* the plain link still works */ }
+    }
+    groups.push({ person, open,
                   entries: await memberEvents.entriesOf(person.id),
                   how: person.id === self?.id ? 'self' : 'guardian' });
   }
@@ -438,7 +452,7 @@ get('/me/events', async (ctx) => {
 });
 
 /** Everything the form and the confirm step both need, worked out once. */
-async function memberEntryPlan(ctx, form = {}) {
+async function memberEntryPlan(ctx, form = {}, { fromLast = false } = {}) {
   const { eventId, personId } = ctx.params;
   if (!UUID_RE.test(eventId) || !UUID_RE.test(personId)) throw new NotFound('Event');
   const how = await family.assertMayActFor(ctx.me.accountId, personId);
@@ -454,6 +468,22 @@ async function memberEntryPlan(ctx, form = {}) {
   const { dependants } = await family.mine(ctx.me.accountId);
   const relationship = dependants.find((d) => d.id === personId)?.relationship ?? null;
 
+  // Entering again: what they said last time stands in for the form. Age,
+  // grade and experience are never carried; they are worked out below.
+  let last = null, repeat = null;
+  if (fromLast) {
+    last = await memberEvents.lastEntry(personId);
+    const today = new Date().toLocaleDateString('en-CA', { timeZone: open.host_timezone });
+    repeat = repeatFromLast(last, setup.disciplines, today);
+    form = { ...form,
+      ...Object.fromEntries(repeat.chosen.map((id) => [`disc_${id}`, '1'])),
+      weight: repeat.weightKg ?? '', height: repeat.heightCm ?? '',
+      // Pressing the button on the one-click screen is the agreement; the
+      // signed-in person is who agreed.
+      accepted: '1', acceptedName: ctx.me.name };
+  }
+  const experience = await memberEvents.experience(personId);
+
   const chosen = setup.disciplines.filter((d) => form[`disc_${d.id}`]).map((d) => d.id);
   const weightKg = String(form.weight ?? '').trim() || null;
   const heightCm = String(form.height ?? '').trim() || null;
@@ -462,6 +492,7 @@ async function memberEntryPlan(ctx, form = {}) {
     personId, name: `${mine.person.first_name} ${mine.person.last_name}`,
     dateOfBirth: mine.person.date_of_birth, gender: mine.person.gender,
     rankOrder: mine.grade?.rank_order ?? null, weightKg, heightCm,
+    yearsTraining: experience.yearsTraining, priorEvents: experience.priorEvents,
     clubName: open.home_name, isMember: true });
   const need = consentNeeded(competitor, { eventDate, guardianUnder: event.guardianUnder ?? null });
 
@@ -491,9 +522,11 @@ async function memberEntryPlan(ctx, form = {}) {
   }
   if (!ready) problems.push(...reasons);
 
-  return { how, open, event, setup, mine, eventDate, relationship, competitor, need,
-           chosen, weightKg, heightCm, placements, amountCents, problems,
-           currency: setup.prices[0]?.currency ?? 'NZD' };
+  const plan = { how, open, event, setup, mine, eventDate, relationship, competitor, need,
+           chosen, weightKg, heightCm, placements, amountCents, problems, form, last, repeat,
+           experience, currency: setup.prices[0]?.currency ?? 'NZD' };
+  if (repeat) plan.quick = decideQuick({ repeat, last, placements, ready, problems });
+  return plan;
 }
 
 const memberEntryView = (ctx, plan, extra = {}) => V.memberEntryForm({
@@ -501,8 +534,29 @@ const memberEntryView = (ctx, plan, extra = {}) => V.memberEntryForm({
 
 get('/me/events/:eventId/:personId', async (ctx) => {
   ctx.requireActor();
-  const plan = await memberEntryPlan(ctx, {});
-  return ctx.send(200, memberEntryView(ctx, plan, { problems: [] }));
+  const plan = await memberEntryPlan(ctx, {}, { fromLast: true });
+  if (plan.open.already_entered)
+    return ctx.redirect(`/me/events?done=${encodeURIComponent('Already entered.')}`);
+  // Nothing different from last time: one button. Otherwise the form, with
+  // last time's answers in it and the reason it is being shown.
+  if (plan.quick.ok && ctx.url.searchParams.get('edit') !== '1')
+    return ctx.send(200, V.memberQuickEntry({ me: ctx.me, csrf: ctx.csrf, ...plan }));
+  const values = { weight: plan.weightKg ?? '', height: plan.heightCm ?? '',
+    ...Object.fromEntries(plan.chosen.map((id) => [`disc_${id}`, '1'])) };
+  return ctx.send(200, memberEntryView(ctx, plan,
+    { problems: [], values, reasons: plan.quick.reasons, changed: plan.quick.changed }));
+});
+
+/** One press. Refuses, and sends them to the form, if anything is different from last time. */
+post('/me/events/:eventId/:personId/quick', async (ctx) => {
+  ctx.requireActor();
+  await ctx.form();
+  const plan = await memberEntryPlan(ctx, {}, { fromLast: true });
+  if (plan.open.already_entered)
+    return ctx.redirect(`/me/events?done=${encodeURIComponent('Already entered.')}`);
+  if (!plan.quick.ok)
+    return ctx.redirect(`/me/events/${ctx.params.eventId}/${ctx.params.personId}?edit=1`);
+  return commitMemberEntry(ctx, plan);
 });
 
 post('/me/events/:eventId/:personId', async (ctx) => {
@@ -519,11 +573,17 @@ post('/me/events/:eventId/:personId', async (ctx) => {
     return ctx.send(200, V.memberEntryPreview({ me: ctx.me, csrf: ctx.csrf, ...plan,
       text: Object.fromEntries(Object.entries(form).filter(([k]) => k !== '_csrf' && k !== 'confirm')) }));
 
+  return commitMemberEntry(ctx, plan, form);
+});
+
+/** Writes the entry the plan describes, then goes to pay for it if it has a fee. */
+async function commitMemberEntry(ctx, plan, form = plan.form) {
   try {
     await competition.enterCompetitor(ctx.me.accountId, plan.event.id, {
       personId: ctx.params.personId, byFamily: true,
       allowNoPlacements: !plan.setup.disciplines.length,
       weightKg: plan.weightKg, heightCm: plan.heightCm, clubName: plan.open.home_name,
+      yearsTraining: plan.experience.yearsTraining, priorEvents: plan.experience.priorEvents,
       amountCents: plan.amountCents, currency: plan.currency,
       placements: plan.placements.map((p) => ({
         disciplineId: p.discipline.id, divisionId: p.division?.id ?? null,
@@ -549,7 +609,7 @@ post('/me/events/:eventId/:personId', async (ctx) => {
   }
   return ctx.redirect(`/me/events?done=${encodeURIComponent(
     `${plan.mine.person.first_name} is entered in ${plan.event.title}.`)}`);
-});
+}
 
 // ---- paying ------------------------------------------------------------------
 //

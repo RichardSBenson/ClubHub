@@ -1,0 +1,32 @@
+import { repeatFromLast, decideQuick, daysBetween, WEIGHT_VALID_DAYS } from './domain/repeat-entry.mjs';
+let pass = 0, fail = 0;
+const ok = (n, c) => c ? (pass++, console.log(`  ✓ ${n}`)) : (fail++, console.log(`  ✗ ${n}`));
+const D = [{ id: 'k', name: 'Kumite' }, { id: 't', name: 'Kata' }];
+const last = { weightKg: 74, heightCm: 178, enteredOn: '2026-09-01', picks: [{ discipline: 'Kumite', division: 'Adult M 70-75' }] };
+
+console.log('\nDAYS'); ok('counts days', daysBetween('2026-09-01', '2026-09-11') === 10);
+console.log('\nNOTHING TO CHOOSE');
+ok('a grading is always one click', repeatFromLast(null, [], '2026-10-02').oneClick);
+console.log('\nREPEATING');
+const fresh = repeatFromLast(last, D, '2026-10-02');
+ok('recent weight: one click, same disciplines', fresh.oneClick && fresh.chosen.join() === 'k' && fresh.weightKg === 74);
+ok('exactly at the limit is still fine', repeatFromLast(last, D, '2026-10-31').oneClick);
+ok('past the limit asks again', repeatFromLast(last, D, '2026-11-02').reasons.includes('weight_old'));
+ok('the limit is 60 days', WEIGHT_VALID_DAYS === 60);
+ok('can be changed', repeatFromLast(last, D, '2026-09-20', { validDays: 14 }).reasons.includes('weight_old'));
+ok('first time asks', repeatFromLast(null, D, '2026-10-02').reasons.includes('first_time'));
+ok('no weight asks', repeatFromLast({ ...last, weightKg: null }, D, '2026-10-02').reasons.includes('no_weight'));
+ok('different disciplines ask', repeatFromLast({ ...last, picks: [{ discipline: 'Sparring' }] }, D, '2026-10-02').reasons.includes('no_matching_discipline'));
+ok('one gone missing asks', repeatFromLast({ ...last, picks: [{ discipline: 'Kumite' }, { discipline: 'Weapons' }] }, D, '2026-10-02').reasons.includes('discipline_missing'));
+ok('names match without case', repeatFromLast({ ...last, picks: [{ discipline: ' KUMITE ' }] }, D, '2026-10-02').oneClick);
+
+console.log('\nDECIDING');
+const same = [{ discipline: { name: 'Kumite' }, division: { label: 'Adult M 70-75' } }];
+ok('same division: ok', decideQuick({ repeat: fresh, last, placements: same }).ok);
+const moved = [{ discipline: { name: 'Kumite' }, division: { label: 'Adult M 75-80' } }];
+const d = decideQuick({ repeat: fresh, last, placements: moved });
+ok('different division is shown, not assumed', !d.ok && d.changed[0].was === 'Adult M 70-75' && d.changed[0].now === 'Adult M 75-80');
+ok('not placed blocks', !decideQuick({ repeat: fresh, last, placements: same, ready: false }).ok);
+ok('other problems block', !decideQuick({ repeat: fresh, last, placements: same, problems: ['x'] }).ok);
+ok('a grading with nothing to place is ok', decideQuick({ repeat: repeatFromLast(null, [], '2026-10-02'), last: null }).ok);
+console.log(`\n${pass} passed, ${fail} failed`); process.exit(fail ? 1 : 0);

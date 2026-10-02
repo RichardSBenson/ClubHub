@@ -2367,6 +2367,36 @@ export const memberEvents = {
     return (await memberEventsQuery(personId, eventId))[0] ?? null;
   },
 
+  /**
+   * What this person gave the last time they entered something with a weight,
+   * for reuse. Only what they TOLD us; age, grade and experience are never
+   * stored for reuse, they are worked out each time.
+   */
+  async lastEntry(personId) {
+    const row = await one(`
+      select x.weight_kg::float8 as weight_kg, x.height_cm,
+             to_char(x.created_at at time zone 'Pacific/Auckland','YYYY-MM-DD') as entered_on,
+             coalesce((select json_agg(json_build_object('discipline', d.name, 'division', v.label) order by d.sort_order)
+                         from entry_selection s join event_discipline d on d.id = s.discipline_id
+                         left join event_division v on v.id = s.division_id
+                        where s.entry_id = x.id), '[]'::json) as picks
+      from event_entry x
+      where x.person_id = $1 and x.status in ('entered','confirmed') and x.weight_kg is not null
+      order by x.created_at desc limit 1`, [personId]);
+    return row ? { weightKg: row.weight_kg, heightCm: row.height_cm, enteredOn: row.entered_on, picks: row.picks } : null;
+  },
+
+  /** Experience, derived from the record rather than asked: past fights and years on the roll. */
+  async experience(personId) {
+    const row = await one(`
+      select (select count(*)::int from event_entry x join event e on e.id = x.event_id
+               where x.person_id = $1 and x.status in ('entered','confirmed')
+                 and e.kind in ('tournament','fight_night') and e.starts_at < now()) as prior_events,
+             (select floor(extract(year from age(now(), min(a.starts))))::int
+                from affiliation a where a.person_id = $1 and a.role = 'member') as years_training`, [personId]);
+    return { priorEvents: row?.prior_events ?? 0, yearsTraining: row?.years_training ?? null };
+  },
+
   /** What they have already entered. */
   async entriesOf(personId) {
     const { rows } = await pool.query(`

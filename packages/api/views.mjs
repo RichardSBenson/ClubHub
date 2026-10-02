@@ -3,6 +3,7 @@ import { describe as auditDescribe, weight as auditWeight }
   from '../content/audit.mjs';
 import { highlight as searchHighlight, linkTo as searchLinkTo }
   from '../content/search.mjs';
+import { REASON_WORDS } from '../core/domain/repeat-entry.mjs';
 import { WRITING_HELP } from '../content/document-text.mjs';
 import path from 'node:path';
 import { BLOCKS } from '../content/blocks.mjs';
@@ -3028,8 +3029,12 @@ export const myEvents = ({ me, csrf, groups = [], done }) => page({
       <td><strong>${esc(e.title)}</strong>
         <div class="muted">${esc(e.host_name)}${e.venue_name ? ' · ' + esc(e.venue_name) : ''}${
           e.entries_close ? ` · entries close ${esc(when(e.entries_close, e.host_timezone))}` : ''}</div></td>
-      <td><a class="btn" href="/me/events/${esc(e.id)}/${esc(g.person.id)}">Enter${
-        g.how === 'self' ? '' : ` ${esc(g.person.first_name)}`}</a></td></tr>`).join('')
+      <td>${e.direct ? `<form method="post" action="/me/events/${esc(e.id)}/${esc(g.person.id)}/quick">
+          <input type="hidden" name="_csrf" value="${esc(csrf ?? '')}">
+          <button class="btn" type="submit">Enter${g.how === 'self' ? '' : ` ${esc(g.person.first_name)}`}</button>
+          ${e.sameAs ? `<div class="muted">${esc(e.sameAs)}</div>` : ''}</form>`
+        : `<a class="btn" href="/me/events/${esc(e.id)}/${esc(g.person.id)}">Enter${
+        g.how === 'self' ? '' : ` ${esc(g.person.first_name)}`}</a>${e.sameAs ? `<div class="muted">${esc(e.sameAs)}</div>` : ''}`}</td></tr>`).join('')
   }</tbody></table>` : '<p class="muted">Nothing is open for entries right now.</p>'}
   ${g.entries.length ? `<h3>Already entered</h3><ul class="plain">${g.entries.map((x) => `<li>
     <strong>${esc(x.title)}</strong> — ${esc(when(x.starts_at, x.host_timezone))}${
@@ -3050,7 +3055,7 @@ const consentBlock = ({ event, need, how, values = {} }) => event.consentVersion
   </fieldset>` : '';
 
 export const memberEntryForm = ({ me, csrf, how, open, event, setup, mine, eventDate,
-                                  need, problems = [], values = {} }) => page({
+                                  need, problems = [], values = {}, reasons = [], changed = [] }) => page({
   title: `Enter — ${event.title}`, me, csrf, body: `
   <h1>${esc(event.title)}</h1>
   <p class="sub">${esc(when(open.starts_at, open.host_timezone))} · ${esc(open.host_name)} ·
@@ -3058,6 +3063,9 @@ export const memberEntryForm = ({ me, csrf, how, open, event, setup, mine, event
   <p>Entering <strong>${esc(mine.person.first_name)} ${esc(mine.person.last_name)}</strong>${
     mine.grade ? ` (${esc(mine.grade.label)})` : ''}. Their age and grade come from the register.</p>
   ${problems.length ? `<div class="bad"><ul>${problems.map((p) => `<li>${esc(p)}</li>`).join('')}</ul></div>` : ''}
+  ${reasons.filter((r) => r !== 'problems').length ? `<div class="note"><ul>${reasons.filter((r) => r !== 'problems').map((r) => `<li>${esc(REASON_WORDS[r] ?? r)}${
+    r === 'division_changed' ? ' ' + changed.map((c) => `${esc(c.discipline)}: ${esc(c.was ?? 'none')} → ${esc(c.now ?? 'none')}.`).join(' ') : ''}</li>`).join('')}</ul>
+    What you gave last time is filled in below.</div>` : ''}
 
   <form method="post" action="/me/events/${esc(event.id)}/${esc(mine.person.id)}">
     <input type="hidden" name="_csrf" value="${esc(csrf ?? '')}">
@@ -3073,6 +3081,32 @@ export const memberEntryForm = ({ me, csrf, how, open, event, setup, mine, event
       </div></fieldset>` : '<p class="muted">There is nothing to choose for this event — entering puts them on the list.</p>'}
     ${consentBlock({ event, need, how, values })}
     <div class="actions"><button class="btn" type="submit">Check my entry</button></div>
+  </form>` });
+
+/** The whole entry, already worked out, and one button. */
+export const memberQuickEntry = ({ me, csrf, how, open, event, mine, competitor, need, placements = [],
+                                   amountCents, currency, last, weightKg, heightCm, relationship }) => page({
+  title: `Enter — ${event.title}`, me, csrf, body: `
+  <h1>${esc(event.title)}</h1>
+  <p class="sub">${esc(when(open.starts_at, open.host_timezone))} · ${esc(open.host_name)} ·
+    <a href="/me/events">Back</a></p>
+  <p>Entering <strong>${esc(mine.person.first_name)} ${esc(mine.person.last_name)}</strong>${
+    mine.grade ? ` (${esc(mine.grade.label)})` : ''}.</p>
+  <table><tbody>
+    ${placements.length ? placements.map((p) => `<tr><th>${esc(p.discipline.name)}</th>
+      <td>${p.division ? `<span class="tag ok">${esc(p.division.label)}</span>` : '<span class="muted">no division yet</span>'}</td></tr>`).join('') : ''}
+    ${weightKg ? `<tr><th>Weight</th><td>${esc(weightKg)} kg <span class="muted">as given on ${esc(last?.enteredOn ?? '')}</span></td></tr>` : ''}
+    ${heightCm ? `<tr><th>Height</th><td>${esc(heightCm)} cm</td></tr>` : ''}
+    ${amountCents != null ? `<tr><th>Entry fee</th><td>${esc(cents(amountCents, currency))}</td></tr>` : ''}
+  </tbody></table>
+  <p class="muted">Their grade, age on the day and experience come from the register, not from what was typed last time.</p>
+  ${event.consentVersion ? `<fieldset><legend>${need.guardian ? 'A parent or guardian agrees' : 'Declaration'}</legend>
+    <div class="note" style="white-space:pre-wrap">${esc(event.consentText ?? '')}</div></fieldset>` : ''}
+  <form method="post" action="/me/events/${esc(event.id)}/${esc(mine.person.id)}/quick">
+    <input type="hidden" name="_csrf" value="${esc(csrf ?? '')}">
+    <div class="actions"><button class="btn" type="submit">${
+      event.consentVersion ? `I agree${need.guardian ? ' as their parent or guardian' : ''} — enter` : 'Enter'}</button>
+      <a class="btn quiet" href="/me/events/${esc(event.id)}/${esc(mine.person.id)}?edit=1">Something has changed</a></div>
   </form>` });
 
 export const memberEntryPreview = ({ me, csrf, how, open, event, mine, placements = [],
