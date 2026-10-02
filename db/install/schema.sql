@@ -1757,3 +1757,6 @@ create table certificate_counter (
 
 create unique index grading_record_certificate_no_key
   on grading_record (certificate_no) where certificate_no is not null;
+
+alter table person add constraint person_gender_m_f check (gender is null or gender in ('M','F'));
+alter table event_division add constraint event_division_gender_m_f check (gender is null or gender in ('M','F'));

@@ -10,7 +10,7 @@
 // plenty of adapter code already imports it from this module.
 export { pool } from '../infrastructure/postgres/pool.mjs';
 import { pool } from '../infrastructure/postgres/pool.mjs';
-import { problemsWithPerson, problemsWithMembership }
+import { problemsWithPerson, problemsWithMembership, normaliseGender }
   from '../core/domain/people.mjs';
 import { payeeFor, groupByPayee, problemsWithPaymentRequest, problemsWithPayment, KINDS as PAY_KINDS }
   from '../core/domain/payments.mjs';
@@ -286,7 +286,7 @@ export const people = {
     // The same rules the import applies, so a row typed into the form and a
     // row read out of a spreadsheet are judged identically.
     const problems = [
-      ...problemsWithPerson({ firstName, lastName, dateOfBirth, email }),
+      ...problemsWithPerson({ firstName, lastName, dateOfBirth, email, gender }),
       ...problemsWithMembership({ role, starts, paidUntil }),
     ];
     if (problems.length) throw new Invalid(problems.join('; '));
@@ -315,7 +315,7 @@ export const people = {
                             date_of_birth, gender, email, phone)
         values ($1,$2,$3,$4,$5,$6,$7,$8) returning *`,
         [number, firstName.trim(), lastName.trim(), preferredName || null,
-         dateOfBirth || null, gender || null, email || null, phone || null]);
+         dateOfBirth || null, normaliseGender(gender) ?? null, email || null, phone || null]);
 
       if (emergencyName || emergencyPhone) {
         await client.query(`
@@ -525,7 +525,7 @@ export const people = {
             preferred_name, date_of_birth, gender, email, phone)
           values ($1,$2,$3,$4,$5,$6,$7,$8) returning id, display_number`,
           [number, v.firstName.trim(), v.lastName.trim(),
-           v.preferredName || null, v.dateOfBirth || null, v.gender || null,
+           v.preferredName || null, v.dateOfBirth || null, normaliseGender(v.gender) ?? null,
            v.email || null, v.phone || null]);
 
         if (v.emergencyName || v.emergencyPhone) {
@@ -611,7 +611,8 @@ export const people = {
     const allowed = {
       first_name: fields.firstName, last_name: fields.lastName,
       preferred_name: fields.preferredName, date_of_birth: fields.dateOfBirth,
-      gender: fields.gender, email: fields.email, phone: fields.phone,
+      gender: fields.gender === undefined ? undefined : (normaliseGender(fields.gender) ?? null),
+      email: fields.email, phone: fields.phone,
     };
     const sets = Object.entries(allowed).filter(([, v]) => v !== undefined);
 
@@ -635,6 +636,7 @@ export const people = {
         lastName: fields.lastName ?? 'unchanged',
         dateOfBirth: fields.dateOfBirth,
         email: fields.email,
+        gender: fields.gender,
       }),
       ...problemsWithMembership({ status: fields.status, paidUntil: fields.paidUntil }),
     ];
@@ -1076,7 +1078,7 @@ export const competition = {
        blank(fields.minRankOrder), blank(fields.maxRankOrder),
        blank(fields.minAge), blank(fields.maxAge),
        blank(fields.minWeightKg), blank(fields.maxWeightKg),
-       fields.gender || null,
+       divisionGender(fields.gender),
        blank(fields.minYearsTraining), blank(fields.maxYearsTraining),
        blank(fields.minPriorEvents), blank(fields.maxPriorEvents),
        JSON.stringify(fields.options ?? {}),
@@ -1289,6 +1291,11 @@ export const competition = {
 };
 
 const blank = (v) => (v === '' || v === undefined ? null : v);
+const divisionGender = (g) => {
+  const n = normaliseGender(g);
+  if (n === undefined) throw new Invalid('A division is for M or F, or left blank for any.');
+  return n;
+};
 
 export const billing = {
   /**

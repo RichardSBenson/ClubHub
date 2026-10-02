@@ -61,7 +61,7 @@ const wh = await one(`select id from organisation where slug='whanganui'`);
 const macron = await one(`
   insert into person (first_name, last_name, date_of_birth, gender,
                       display_number)
-  values ('Tāmati','Ngāti','1988-02-11','m','MOK-0451') returning id`);
+  values ('Tāmati','Ngāti','1988-02-11','M','MOK-0451') returning id`);
 await pool.query(`
   insert into affiliation (person_id, organisation_id, role, status, starts)
   values ($1,$2,'member','active',current_date)`, [macron.id, wh.id]);

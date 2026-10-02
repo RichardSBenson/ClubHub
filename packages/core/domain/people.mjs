@@ -19,6 +19,22 @@
  */
 
 /** A person's own details. Everything here is optional except the name. */
+/**
+ * Gender is M or F, nothing else: it exists to place people in divisions that
+ * are men's and women's. Spreadsheets and old records say "male", "Female",
+ * "m" — all of those are read, and everything is stored as a single letter.
+ * Blank is allowed (not everybody's roll has it). Anything else is not
+ * guessed at: it is reported so a registrar can fix it.
+ */
+export const GENDERS = Object.freeze({ M: 'M', F: 'F' });
+export function normaliseGender(value) {
+  const s = String(value ?? '').trim().toLowerCase();
+  if (!s) return null;
+  if (['m', 'male', 'man', 'men', 'boy', 'boys'].includes(s)) return 'M';
+  if (['f', 'female', 'woman', 'women', 'girl', 'girls'].includes(s)) return 'F';
+  return undefined;   // present but not understood
+}
+
 export function problemsWithPerson(fields = {}, { today = null } = {}) {
   const out = [];
   const now = today ?? new Date().toISOString().slice(0, 10);
@@ -41,6 +57,9 @@ export function problemsWithPerson(fields = {}, { today = null } = {}) {
       out.push(`the date of birth ${born} is before 1900`);
     }
   }
+
+  if (normaliseGender(fields.gender) === undefined)
+    out.push(`gender should be M or F, not "${String(fields.gender).trim()}"`);
 
   const email = String(fields.email ?? '').trim();
   // Deliberately loose. The only address that is definitely wrong is one that

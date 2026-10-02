@@ -1,0 +1,14 @@
+import { normaliseGender, problemsWithPerson } from './domain/people.mjs';
+let pass = 0, fail = 0;
+const ok = (n, c) => c ? (pass++, console.log(`  ✓ ${n}`)) : (fail++, console.log(`  ✗ ${n}`));
+console.log('\nGENDER IS M OR F');
+ok('male, Male, m are M', ['male', 'Male', ' m '].every((g) => normaliseGender(g) === 'M'));
+ok('female, FEMALE, f are F', ['female', 'FEMALE', 'f'].every((g) => normaliseGender(g) === 'F'));
+ok('blank is allowed', normaliseGender('') === null && normaliseGender(undefined) === null);
+ok('anything else is not understood', normaliseGender('x') === undefined && normaliseGender('other') === undefined);
+const base = { firstName: 'A', lastName: 'B' };
+ok('a person with M or F is fine', problemsWithPerson({ ...base, gender: 'M' }).length === 0 && problemsWithPerson({ ...base, gender: 'F' }).length === 0);
+ok('a person with no gender is fine', problemsWithPerson(base).length === 0);
+ok('a bad value is reported with the value', problemsWithPerson({ ...base, gender: 'x' }).some((p) => /M or F, not "x"/.test(p)));
+console.log(`\n${pass} passed, ${fail} failed`);
+process.exit(fail ? 1 : 0);

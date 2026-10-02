@@ -618,8 +618,8 @@ export const memberForm = ({ me, csrf, org, values = {}, error, isNew = true,
         </div>
       </div>
       <label for="gender">Gender
-        <span class="hint">Free text. Used for divisions where a federation has them.</span></label>
-      <input id="gender" name="gender" maxlength="50" value="${esc(v('gender'))}">
+        <span class="hint">Used for men's and women's divisions.</span></label>
+      <select id="gender" name="gender">${genderOptions(values?.gender ?? person?.gender, 'Not given')}</select>
     </fieldset>
 
     <fieldset>
@@ -1330,8 +1330,8 @@ export const eventSetup = ({ me, csrf, org, event, disciplines = [],
               <input name="minAge" type="number" min="0" max="120"></div>
             <div><label>Oldest age</label>
               <input name="maxAge" type="number" min="0" max="120"></div>
-            <div><label>Gender <span class="hint">Blank for any.</span></label>
-              <input name="gender" maxlength="30" placeholder="male"></div>
+            <div><label for="divGender">Gender</label>
+              <select id="divGender" name="gender">${genderOptions('', 'Any')}</select></div>
           </div>
           <div class="row">
             <div><label>Lightest (kg)</label>
@@ -3422,6 +3422,13 @@ export const renewalsScreen = ({ me, csrf, org, today, rows = [], prices = [], c
 // ---------------------------------------------------------------------------
 // classes and attendance
 // ---------------------------------------------------------------------------
+
+/** M or F only. Older records that say "male" or "Female" show as M and F. */
+const genderOptions = (current, blank) => {
+  const c = ['m', 'male'].includes(String(current ?? '').trim().toLowerCase()) ? 'M'
+    : ['f', 'female'].includes(String(current ?? '').trim().toLowerCase()) ? 'F' : '';
+  return [['', blank], ['M', 'M'], ['F', 'F']].map(([v, l]) => `<option value="${v}"${c === v ? ' selected' : ''}>${l}</option>`).join('');
+};
 
 const DAY_NAMES = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 
