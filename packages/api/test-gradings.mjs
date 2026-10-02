@@ -38,6 +38,8 @@ const doug = (await one(`select id from account where email='doug@example.nz'`))
 const tane = (await one(`select id from account where email='tane@example.nz'`)).id;
 await pool.query(`update affiliation set ends='2020-01-01', status='resigned' where organisation_id in ($1,$2)`, [whanganui.id, wellington.id]);
 const today = (await one(`select to_char((now() at time zone 'Pacific/Auckland')::date,'YYYY-MM-DD') as d`)).d;
+// This test is about gradings; the demo seed's qualification rules have their own test.
+await pool.query('delete from qualification_award'); await pool.query('delete from qualification');
 const grade = async (label) => (await one('select * from grade where organisation_id=$1 and label=$2', [root.id, label]));
 
 let seq = 0;

@@ -9,8 +9,12 @@
  */
 
 const DATE = /^\d{4}-\d{2}-\d{2}$/;
-export const isDate = (s) => DATE.test(s ?? '')
-  && new Date(`${s}T00:00:00Z`).toISOString().slice(0, 10) === s;
+export const isDate = (s) => {
+  if (!DATE.test(s ?? '')) return false;
+  const d = new Date(`${s}T00:00:00Z`);
+  // Month 13 or day 40 is an Invalid Date, whose toISOString throws.
+  return !Number.isNaN(d.getTime()) && d.toISOString().slice(0, 10) === s;
+};
 
 /** 0 = Sunday … 6 = Saturday, the same numbering the timetable uses. */
 export const weekdayOf = (day) => new Date(`${day}T00:00:00Z`).getUTCDay();

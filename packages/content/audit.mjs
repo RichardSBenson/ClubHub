@@ -183,6 +183,16 @@ export function describe(entry) {
       return `entered somebody for ${a.grade ? quote(a.grade) : 'a grade'} at ${a.event ? quote(a.event) : 'a grading'}`;
     case 'grading_finalised':
       return `finalised the grading ${a.title ? quote(a.title) : ''}: ${a.passed ?? 0} of ${a.entered ?? 0} awarded`.replace('  ', ' ');
+    case 'qualification_defined':
+      return `started tracking ${a.label ? quote(a.label) : 'a qualification'}`;
+    case 'qualification_removed':
+      return `stopped tracking ${a.label ? quote(a.label) : 'a qualification'}`;
+    case 'qualification_recorded':
+      return `recorded ${a.qualification ? quote(a.qualification) : 'a qualification'} (issued ${a.awarded_on ?? '?'}, until ${a.expires_on ?? 'n/a'})`;
+    case 'qualification_deleted':
+      return `deleted a record of ${a.qualification ? quote(a.qualification) : 'a qualification'}`;
+    case 'qualification_reminders_setting':
+      return a.enabled ? 'switched qualification reminders on' : 'switched qualification reminders off';
     case 'roll_taken':
       return `took the roll for ${a.label ? quote(a.label) : 'a class'} on ${a.date ?? 'a day'}: ${a.came ?? 0} came`
         + (b?.came != null && b.came !== a.came ? ` (was ${b.came})` : '');
@@ -270,6 +280,11 @@ export const ACTIONS = Object.freeze([
   ['club_profile_saved', 'Club details changed'],
   ['message_sent', 'Message sent'],
   ['roll_taken', 'Roll taken'],
+  ['qualification_defined', 'Qualification tracked'],
+  ['qualification_removed', 'Qualification untracked'],
+  ['qualification_recorded', 'Qualification recorded'],
+  ['qualification_deleted', 'Qualification record deleted'],
+  ['qualification_reminders_setting', 'Qualification reminders changed'],
   ['grading_fee_set', 'Grading fee set'],
   ['grading_entered', 'Entered for grading'],
   ['grading_finalised', 'Grading finalised'],

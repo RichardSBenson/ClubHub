@@ -32,6 +32,7 @@ export const REPORTS = Object.freeze({
   payments:   { label: 'Payments received',  needs: 'manage',   dates: true  },
   attendance: { label: 'Attendance',         needs: 'teach',    dates: true  },
   gradings:   { label: 'Grading history',    needs: 'register', dates: true  },
+  compliance: { label: 'Qualifications and compliance', needs: 'register', dates: false },
 });
 
 /** A date range from a query string: both ends optional, bad input ignored. */

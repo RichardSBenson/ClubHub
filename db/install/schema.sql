@@ -1760,3 +1760,12 @@ create unique index grading_record_certificate_no_key
 
 alter table person add constraint person_gender_m_f check (gender is null or gender in ('M','F'));
 alter table event_division add constraint event_division_gender_m_f check (gender is null or gender in ('M','F'));
+create table qualification_reminder (
+  award_id uuid not null references qualification_award(id) on delete cascade,
+  stage    text not null check (stage in ('expiring','expired')),
+  sent_on  date not null default current_date,
+  primary key (award_id, stage)
+);
+
+-- Who recorded an award, for the audit trail.
+alter table qualification_award add column if not exists recorded_by uuid references account(id);

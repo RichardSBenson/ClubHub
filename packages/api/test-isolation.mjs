@@ -172,6 +172,9 @@ const theirFee = await one(`insert into fee_schedule (organisation_id, label, am
   values ($1,'Private committee price',9900,'annual','adult','2026-01-01') returning *`, [theirs.id]);
 const theirRecord = await one(`insert into grading_record (person_id, grade_id, awarded_on, awarded_by_org, result, certificate_no)
   values ($1,(select id from grade order by rank_order limit 1),'2024-01-01',$2,'pass','ISO-PRIVATE-1') returning *`, [theirPerson.id, theirs.id]);
+const theirQual = await one(`insert into qualification (organisation_id, code, label, category, valid_months, required_for)
+  values ($1,'private-qual','Private qualification','other',12,'{instruct}') returning *`, [theirs.id]);
+const theirAward = await one(`insert into qualification_award (person_id, qualification_id, awarded_on) values ($1,$2,'2024-01-01') returning *`, [theirPerson.id, theirQual.id]);
 const theirPayment = await one(`
   insert into payment (organisation_id, person_id, amount_cents, status)
   values ($1,$2,5000,'pending') returning *`, [theirs.id, theirPerson.id]);
@@ -208,6 +211,7 @@ function pathFor(pattern) {
     sessionId: theirSession.id,
     feeId: theirFee.id,
     recordId: theirRecord.id,
+    awardId: theirAward.id,
     entryId: '00000000-0000-0000-0000-000000000000',
     name: 'members',
     clubId: theirs.id,
@@ -242,6 +246,7 @@ const THEIR_WORDS = [
   theirMessage.subject,
   'Private uniform order',
   'Private committee price',
+  'Private qualification',
 ].filter(Boolean);
 
 /**

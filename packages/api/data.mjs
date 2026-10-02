@@ -2262,7 +2262,10 @@ export const myself = {
       from grading_record gr join grade g on g.id = gr.grade_id
       where gr.person_id = $1 and gr.certificate_no is not null and gr.result in ('pass','provisional')
       order by gr.awarded_on desc`, [personId]);
-    return { how, person, private: priv, grade, memberships, certificates };
+    const home = (await homesOf(personId))[0];
+    const today = home ? await qualToday(home) : null;
+    const quals = today ? describeAwards(await q(`${AWARD_SELECT} where qa.person_id = $1`, [personId]), today).filter((a) => a.counts) : [];
+    return { how, person, private: priv, grade, memberships, certificates, qualifications: quals };
   },
 
   /** Only the fields a person may change about themselves. */
@@ -3627,8 +3630,8 @@ export const renewals = {
   async setReminders(actor, orgId, enabled) {
     await assertRole(actor, orgId, MANAGE);
     await clubOnly(orgId);
-    await pool.query(`update organisation set settings = jsonb_set(coalesce(settings,'{}'::jsonb),
-      '{reminders}', jsonb_build_object('enabled', $2::boolean), true), updated_at = now() where id = $1`, [orgId, !!enabled]);
+    await pool.query(`update organisation set settings = coalesce(settings,'{}'::jsonb) || jsonb_build_object('reminders',
+      coalesce(settings->'reminders','{}'::jsonb) || jsonb_build_object('enabled', $2::boolean)), updated_at = now() where id = $1`, [orgId, !!enabled]);
     await pool.query(`insert into audit_log (account_id, organisation_id, action, entity, entity_id, after)
       values ($1,$2,'reminders_setting','organisation',$2,$3)`, [actor, orgId, JSON.stringify({ enabled: !!enabled })]);
   },
@@ -4157,6 +4160,18 @@ export const reports = {
       ['classes', 'Classes'], ['days', 'Days'], ['last_trained', 'Last trained']].map(([key, label]) => ({ key, label })), rows };
   },
 
+  async _compliance(orgId) {
+    const c = await complianceData(orgId);
+    const rows = [];
+    for (const r of c.rows) for (const i of r.items)
+      rows.push({ club: r.club, number: r.display_number, name: r.name, role: r.role, qualification: i.label,
+        state: STATE_WORDS[i.state], expires_on: i.expires_on, cleared: r.cleared ? 'Yes' : 'No' });
+    for (const e of c.expiring) rows.push({ club: e.club, number: '', name: e.name, role: '', qualification: e.label,
+      state: STATE_WORDS[e.state], expires_on: e.expires_on, cleared: '' });
+    return { columns: [['club', 'Club'], ['number', 'Member number'], ['name', 'Name'], ['role', 'Role'], ['qualification', 'Qualification'],
+      ['state', 'Status'], ['expires_on', 'Runs out'], ['cleared', 'Cleared to teach']].map(([key, label]) => ({ key, label })), rows };
+  },
+
   async _gradings(orgId, _today, { from, to }) {
     const rows = await q(`
       select to_char(gr.awarded_on,'YYYY-MM-DD') as date, p.display_number as number, p.first_name, p.last_name,
@@ -4374,6 +4389,9 @@ export const gradings = {
     if (unknown.length) throw new Invalid(`No member found for ${unknown.join(', ')}.`);
     const problems = problemsWithResults({ entries, results, panel: panelNumbers, date }, today);
     if (problems.length) throw new Invalid(problems.join(' '));
+    // A qualification the federation requires of examiners is enforced, not just recorded.
+    const unqualified = await qualifications.lacking(panel, 'panel', ev.organisation_id);
+    if (unqualified.length) throw new Invalid(`${unqualified.map((u) => `${u.name} (${u.barred.map((b) => `${b.label}: ${b.state === 'missing' ? 'not recorded' : 'expired'}`).join(', ')})`).join('; ')} cannot sit on the panel.`);
 
     const root = await one(`select r.id, coalesce(r.short_name, r.slug) as prefix from organisation o
       join organisation r on r.parent_id is null and o.path <@ r.path where o.id = $1`, [ev.organisation_id]);
@@ -4435,5 +4453,250 @@ export const gradings = {
       from person p left join person_current_grade cg on cg.person_id = p.id where p.id = any($1::uuid[]) order by cg.rank_order desc nulls last`,
       [r.panel.map((x) => x.person_id)]) : [];
     return { ...r, examiners };
+  },
+};
+
+
+// ---------------------------------------------------------------------------
+// qualifications and compliance
+//
+// What a federation requires of the people who teach and judge, and who has it
+// right now. The catalogue is the federation's (clubs inherit it); the awards
+// are each person's. See core/domain/qualification.mjs for the rules.
+// ---------------------------------------------------------------------------
+
+import { CATEGORIES as QUAL_CATEGORIES, REQUIRED_FOR, STARTERS, readQualification, problemsWithQualification,
+         problemsWithAward, statusOf, daysLeft, latestPerQualification, clearance, remindersDue,
+         reminderText as qualReminderText, STATE_WORDS } from '../core/domain/qualification.mjs';
+
+const CATALOGUE_FROM = `from organisation me join organisation a on me.path <@ a.path
+  join qualification q on q.organisation_id = a.id where me.id = $1`;
+
+const qualToday = async (orgId) => {
+  const o = await one('select timezone from organisation where id=$1', [orgId]);
+  return (await one(`select to_char((now() at time zone $1)::date,'YYYY-MM-DD') as d`, [o?.timezone ?? 'Pacific/Auckland'])).d;
+};
+
+const AWARD_SELECT = `
+  select qa.id, qa.person_id, qa.qualification_id, to_char(qa.awarded_on,'YYYY-MM-DD') as awarded_on,
+         to_char(qa.expires_on,'YYYY-MM-DD') as expires_on, qa.issued_by_other, qa.reference,
+         q.label, q.code, q.category, q.required_for
+  from qualification_award qa join qualification q on q.id = qa.qualification_id`;
+
+/** An award with its state, newest-counting first. Superseded awards are flagged. */
+function describeAwards(rows, today) {
+  const latest = new Set(latestPerQualification(rows).map((a) => a.id));
+  return rows.map((a) => ({ ...a, state: statusOf(a.expires_on, today), days_left: daysLeft(a.expires_on, today),
+    counts: latest.has(a.id) })).sort((x, y) => (y.counts - x.counts) || String(y.awarded_on).localeCompare(x.awarded_on));
+}
+
+async function complianceData(orgId) {
+  const org = await one('select * from organisation where id=$1', [orgId]);
+  const today = await qualToday(orgId);
+  const required = await q(`select q.id, q.label ${CATALOGUE_FROM} and 'instruct' = any(q.required_for) order by q.label`, [orgId]);
+  const people = await q(`
+    select p.id as person_id, p.display_number, nullif(trim(concat_ws(' ', p.first_name, p.last_name)), '') as name,
+           a.role, o.name as club
+    from organisation root join organisation o on o.path <@ root.path and o.type = 'club'
+    join affiliation a on a.organisation_id = o.id and a.ends is null and a.status = 'active'
+      and a.role in ('instructor','assistant')
+    join person p on p.id = a.person_id
+    where root.id = $1 order by o.name, p.last_name, p.first_name`, [orgId]);
+  const awards = people.length ? await q(`${AWARD_SELECT} where qa.person_id = any($1::uuid[])`, [people.map((p) => p.person_id)]) : [];
+  const rows = people.map((p) => {
+    const c = clearance(required, awards.filter((a) => a.person_id === p.person_id), today);
+    return { ...p, ...c };
+  });
+  // Anything lapsing among everybody, instructor or not.
+  const soon = await q(`
+    select p.id as person_id, nullif(trim(concat_ws(' ', p.first_name, p.last_name)), '') as name, o.name as club,
+           qa.id, qa.qualification_id, to_char(qa.awarded_on,'YYYY-MM-DD') as awarded_on, to_char(qa.expires_on,'YYYY-MM-DD') as expires_on, q.label
+    from organisation root join organisation o on o.path <@ root.path and o.type = 'club'
+    join affiliation a on a.organisation_id = o.id and a.ends is null and a.status = 'active'
+    join person p on p.id = a.person_id
+    join qualification_award qa on qa.person_id = p.id join qualification q on q.id = qa.qualification_id
+    where root.id = $1 and qa.expires_on is not null and qa.expires_on < current_date + $2::int + 1
+    order by qa.expires_on`, [orgId, 60]);
+  const expiring = latestPerQualification(soon).map((a) => ({ ...a, state: statusOf(a.expires_on, today), days_left: daysLeft(a.expires_on, today) }))
+    .filter((a) => ['expiring', 'expired'].includes(a.state)).sort((a, b) => a.expires_on.localeCompare(b.expires_on));
+  return { org, today, required, rows, notCleared: rows.filter((r) => !r.cleared), expiring,
+    reminders: org.type === 'club' ? (await one(`select coalesce((settings->'reminders'->>'qualifications')::boolean,false) as on from organisation where id=$1`, [orgId])).on : null };
+}
+
+export const qualifications = {
+  STATE_WORDS, QUAL_CATEGORIES, REQUIRED_FOR,
+
+  /** What this organisation (and the federation above it) requires, plus starters not yet added. */
+  async catalogue(actor, orgId) {
+    await assertRole(actor, orgId, REGISTER);
+    const rows = await q(`select q.id, q.code, q.label, q.category, q.valid_months, q.required_for, a.name as owner,
+        (a.id = me.id) as own, (select count(*)::int from qualification_award qa where qa.qualification_id = q.id) as awards
+      ${CATALOGUE_FROM} order by q.category, q.label`, [orgId]);
+    const have = new Set(rows.map((r) => r.code));
+    return { catalogue: rows, starters: STARTERS.filter((s) => !have.has(s.code)) };
+  },
+
+  async define(actor, orgId, input) {
+    await assertRole(actor, orgId, MANAGE);
+    const problems = problemsWithQualification(input);
+    if (problems.length) throw new Invalid(problems.join(' '));
+    try {
+      await q(`insert into qualification (organisation_id, code, label, category, valid_months, required_for)
+        values ($1,$2,$3,$4,$5,$6)`, [orgId, input.code, input.label, input.category,
+        input.validMonths === '' || input.validMonths == null ? null : Number(input.validMonths), input.requiredFor]);
+    } catch (e) {
+      if (e.code === '23505') throw new Invalid('There is already a qualification with that name.');
+      throw e;
+    }
+    await q(`insert into audit_log (account_id, organisation_id, action, entity, after)
+      values ($1,$2,'qualification_defined','qualification',$3)`, [actor, orgId, JSON.stringify({ label: input.label, requiredFor: input.requiredFor })]);
+  },
+
+  async addStarter(actor, orgId, code) {
+    const s = STARTERS.find((x) => x.code === code);
+    if (!s) throw new NotFound('Qualification');
+    return qualifications.define(actor, orgId, { ...s, validMonths: s.validMonths ? String(s.validMonths) : '' });
+  },
+
+  async retire(actor, orgId, qualificationId) {
+    await assertRole(actor, orgId, MANAGE);
+    const row = await one('select label from qualification where id=$1 and organisation_id=$2', [qualificationId, orgId]);
+    if (!row) throw new NotFound('Qualification');
+    try { await q('delete from qualification where id=$1', [qualificationId]); }
+    catch (e) { if (e.code === '23503') throw new Invalid('Somebody holds this qualification, so it cannot be removed.'); throw e; }
+    await q(`insert into audit_log (account_id, organisation_id, action, entity, after)
+      values ($1,$2,'qualification_removed','qualification',$3)`, [actor, orgId, JSON.stringify({ label: row.label })]);
+  },
+
+  /** A person's own record: for them, their guardian, or their club's registrar. */
+  async forPerson(actor, personId, { staffOnly = false } = {}) {
+    const homes = await homesOf(personId);
+    let mayEdit = false;
+    for (const h of homes) if ((await one('select has_role_at($1,$2,$3) as ok', [actor, h, REGISTER]))?.ok) { mayEdit = true; break; }
+    if (!mayEdit) { if (staffOnly || !(await family.mayActFor(actor, personId))) throw new Forbidden(); }
+    const home = homes[0];
+    const today = await qualToday(home);
+    const awards = describeAwards(await q(`${AWARD_SELECT} where qa.person_id = $1`, [personId]), today);
+    const available = home ? (await q(`select q.id, q.label ${CATALOGUE_FROM} order by q.label`, [home])) : [];
+    return { awards, available, mayEdit, today };
+  },
+
+  async record(actor, personId, input) {
+    const homes = await homesOf(personId);
+    let home = null;
+    for (const h of homes) if ((await one('select has_role_at($1,$2,$3) as ok', [actor, h, REGISTER]))?.ok) { home = h; break; }
+    if (!home) throw new Forbidden();
+    const today = await qualToday(home);
+    const problems = problemsWithAward(input, today);
+    if (problems.length) throw new Invalid(problems.join(' '));
+    const qual = await one(`select q.id, q.label ${CATALOGUE_FROM} and q.id = $2`, [home, input.qualificationId]);
+    if (!qual) throw new Invalid('That qualification is not one this organisation uses.');
+    await q(`insert into qualification_award (person_id, qualification_id, awarded_on, expires_on, issued_by_other, reference, recorded_by)
+      values ($1,$2,$3,$4,$5,$6,$7)`, [personId, qual.id, input.awardedOn, input.expiresOn || null,
+      input.issuedBy || null, input.reference || null, actor]);
+    await q(`insert into audit_log (account_id, organisation_id, action, entity, entity_id, after)
+      values ($1,$2,'qualification_recorded','person',$3,$4)`, [actor, home, personId,
+      JSON.stringify({ qualification: qual.label, awarded_on: input.awardedOn, expires_on: input.expiresOn || 'by default' })]);
+    return { qualification: qual.label };
+  },
+
+  async removeAward(actor, personId, awardId) {
+    const homes = await homesOf(personId);
+    let home = null;
+    for (const h of homes) if ((await one('select has_role_at($1,$2,$3) as ok', [actor, h, REGISTER]))?.ok) { home = h; break; }
+    if (!home) throw new Forbidden();
+    const row = await one(`select q.label from qualification_award qa join qualification q on q.id = qa.qualification_id
+      where qa.id=$1 and qa.person_id=$2`, [awardId, personId]);
+    if (!row) throw new NotFound('Record');
+    await q('delete from qualification_award where id=$1', [awardId]);
+    await q(`insert into audit_log (account_id, organisation_id, action, entity, entity_id, after)
+      values ($1,$2,'qualification_deleted','person',$3,$4)`, [actor, home, personId, JSON.stringify({ qualification: row.label })]);
+  },
+
+  /**
+   * Who may not instruct right now, and what is about to lapse — for a club,
+   * or for everybody beneath a federation or region.
+   */
+  async compliance(actor, orgId) {
+    await assertRole(actor, orgId, REGISTER);
+    return complianceData(orgId);
+  },
+
+  async setReminders(actor, orgId, enabled) {
+    await assertRole(actor, orgId, MANAGE);
+    const org = await one('select type from organisation where id=$1', [orgId]);
+    if (org?.type !== 'club') throw new Invalid('Reminders are set by each club.');
+    await q(`update organisation set settings = coalesce(settings,'{}'::jsonb) || jsonb_build_object('reminders',
+      coalesce(settings->'reminders','{}'::jsonb) || jsonb_build_object('qualifications', $2::boolean)), updated_at = now() where id = $1`, [orgId, !!enabled]);
+    await q(`insert into audit_log (account_id, organisation_id, action, entity, entity_id, after)
+      values ($1,$2,'qualification_reminders_setting','organisation',$2,$3)`, [actor, orgId, JSON.stringify({ enabled: !!enabled })]);
+  },
+
+  /** Does everybody named hold every qualification this organisation requires for `gate`? Returns who does not. */
+  async lacking(personIds, gate, orgId) {
+    if (!personIds.length) return [];
+    const today = await qualToday(orgId);
+    const required = await q(`select q.id, q.label ${CATALOGUE_FROM} and $2 = any(q.required_for)`, [orgId, gate]);
+    if (!required.length) return [];
+    const awards = await q(`${AWARD_SELECT} where qa.person_id = any($1::uuid[])`, [personIds]);
+    const names = await q(`select id, nullif(trim(concat_ws(' ', first_name, last_name)), '') as name from person where id = any($1::uuid[])`, [personIds]);
+    return personIds.map((id) => ({ id, name: names.find((n) => n.id === id)?.name ?? 'Somebody',
+      ...clearance(required, awards.filter((a) => a.person_id === id), today) })).filter((r) => !r.cleared);
+  },
+
+  /**
+   * The daily run: tell people (and their club's administrators) when a
+   * qualification is about to lapse or has. Opt-in per club. Each award is
+   * reminded about once per stage, whatever the number of runs.
+   */
+  async remind({ messenger, origin, baseFrom, budgetMs = 9000 }) {
+    const started = Date.now();
+    const clubs = await q(`select id, name, slug from organisation where type='club' and status='active'
+      and (settings->'reminders'->>'qualifications')::boolean is true order by name`);
+    const report = [];
+    for (const club of clubs) {
+      const line = { club: club.slug, written: 0, skipped: null };
+      try {
+        const today = await qualToday(club.id);
+        const awards = await q(`select qa.id, qa.person_id, qa.qualification_id, to_char(qa.awarded_on,'YYYY-MM-DD') as awarded_on,
+            to_char(qa.expires_on,'YYYY-MM-DD') as expires_on, q.label
+          from affiliation a join qualification_award qa on qa.person_id = a.person_id
+          join qualification q on q.id = qa.qualification_id
+          where a.organisation_id = $1 and a.ends is null and a.status = 'active'`, [club.id]);
+        const done = new Set((await q(`select award_id || '|' || stage as k from qualification_reminder
+          where award_id = any($1::uuid[])`, [awards.map((a) => a.id)])).map((r) => r.k));
+        const latest = latestPerQualification(awards);
+        const due = remindersDue(latest, today, done).slice(0, 100);
+        const digest = [];
+        for (const d of due) {
+          if (Date.now() - started > budgetMs) break;
+          const a = latest.find((x) => x.id === d.awardId);
+          const text = qualReminderText(d.stage, { label: a.label, expiresOn: a.expires_on });
+          const made = await messages.prepare(null, club.id, { audience: 'selected', kind: 'renewal', personIds: [a.person_id],
+            subject: text.subject, body: text.body, eventId: null, personNumber: null }, { baseFrom, trusted: true });
+          line.written += made.recipients;
+          await messages.sendBatch(null, club.id, made.message.id, { messenger, origin, trusted: true,
+            budgetMs: Math.max(1000, budgetMs - (Date.now() - started)) });
+          await q(`insert into qualification_reminder (award_id, stage, sent_on) values ($1,$2,$3::date) on conflict do nothing`, [a.id, d.stage, today]);
+          digest.push({ person: a.person_id, label: a.label, stage: d.stage, expires_on: a.expires_on });
+        }
+        if (digest.length) {
+          const names = await q(`select id, nullif(trim(concat_ws(' ', first_name, last_name)), '') as name from person where id = any($1::uuid[])`,
+            [digest.map((x) => x.person)]);
+          const staff = await q(`select distinct acc.person_id from grant_role gr join account acc on acc.id = gr.account_id
+            where gr.organisation_id = $1 and gr.role in ('owner','administrator','registrar') and acc.person_id is not null`, [club.id]);
+          if (staff.length) {
+            const lines = digest.map((x) => `- ${names.find((n) => n.id === x.person)?.name ?? 'Somebody'}: ${x.label} ${x.stage === 'expired' ? 'ran out' : 'runs out'} ${x.expires_on}`);
+            const made = await messages.prepare(null, club.id, { audience: 'selected', kind: 'renewal', personIds: staff.map((s) => s.person_id),
+              subject: `Qualifications to renew at ${club.name}`, body: `Kia ora,\n\nThese qualifications need attention:\n\n${lines.join('\n')}\n\nRecord the renewed ones under Compliance.\n\n{club}`,
+              eventId: null, personNumber: null }, { baseFrom, trusted: true });
+            await messages.sendBatch(null, club.id, made.message.id, { messenger, origin, trusted: true,
+              budgetMs: Math.max(1000, budgetMs - (Date.now() - started)) });
+          }
+        }
+      } catch (e) { line.skipped = String(e.message ?? e).slice(0, 200); }
+      report.push(line);
+    }
+    return report;
   },
 };

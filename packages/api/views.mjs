@@ -139,6 +139,7 @@ legend{font-size:12px;letter-spacing:.07em;text-transform:uppercase;
 .tag.no{background:var(--soft);color:var(--muted)}
 .tag.dan{background:var(--ink);color:#fff}
 .tag.wait{background:var(--warn-wash);color:var(--warn)}
+.tag.bad{background:var(--bad-wash);color:var(--bad)}
 
 /* ---- messages ------------------------------------------------------- */
 .note,.bad,.good{padding:12px 16px;margin:16px 0;border-radius:var(--radius);
@@ -283,6 +284,7 @@ export function rail({ org, vocabulary = {}, can = {}, path = '' }) {
     can.register && link(`${base}/members/new`, 'Add a member'),
     can.register && link(`${base}/members/import`, 'Import a roll'),
     can.register && link(`${base}/gradings`, 'Grading events'),
+    can.register && link(`${base}/compliance`, 'Compliance'),
     can.register && link(`${base}/grading`, vocabulary.grading ?? 'Grading'),
     isClub && can.teach && link(`${base}/attendance`, 'Attendance'),
     isClub && can.teach && link(`${base}/newcomers`, 'Newcomers'),
@@ -456,6 +458,8 @@ export const person = ({ me, csrf, person, history, affiliations, eligibility,
       <td>${esc(auditDescribe(c))}</td>
     </tr>`).join('')}</tbody>
   </table>` : ''}
+
+  <p><a href="/p/${esc(person.id)}/qualifications">Qualifications and checks</a></p>
 
   <h2>Grading history</h2>
   ${history.length ? `<table>
@@ -2933,7 +2937,7 @@ export const myHome = ({ me, csrf, self, dependants = [] }) => page({
     nothing to show here. Ask your club to link it.</div>`}` });
 
 /** One person, as they and their guardians may see and change it. */
-export const myPerson = ({ me, csrf, how, person, private: priv = {}, grade, memberships = [], certificates = [],
+export const myPerson = ({ me, csrf, how, person, private: priv = {}, grade, memberships = [], certificates = [], qualifications = [],
                            values = null, error, done }) => {
   const v = (k, fallback) => esc(values?.[k] ?? fallback ?? '');
   const mine = how === 'self';
@@ -2946,6 +2950,9 @@ export const myPerson = ({ me, csrf, how, person, private: priv = {}, grade, mem
 
   <h2>Their place in the club</h2>
   <p>${grade ? `Current grade: <strong>${esc(grade.label)}</strong>` : '<span class="muted">No grade recorded yet.</span>'}</p>
+  ${qualifications.length ? `<h2>Qualifications</h2><table><tbody>${qualifications.map((a) => `<tr><td>${esc(a.label)}</td>
+    <td>${esc(QUAL_WORDS[a.state])}${a.expires_on ? ` · until ${esc(a.expires_on)}` : ''}</td></tr>`).join('')}</tbody></table>
+    <p class="muted">Send new certificates to your club to be recorded.</p>` : ''}
   ${certificates.length ? `<p>Certificates: ${certificates.map((c) => `<a href="/p/${esc(person.id)}/certificate/${esc(c.id)}">${esc(c.label)} (${esc(c.awarded_on)})</a>`).join(' · ')}</p>` : ''}
   ${memberships.length ? `<ul class="plain">${memberships.map((m) => `<li>
     <strong>${esc(m.name)}</strong> — ${esc(m.role)}, ${esc(m.status)}${
@@ -3698,3 +3705,84 @@ export const certificate = ({ cert }) => `<!doctype html><html lang="en"><head><
     `${esc(x.name)}${x.grade ? `, ${esc(x.grade)}` : ''}`).join('<br>')}</div>` : ''}
   <div class="no">Member ${esc(cert.display_number)} · Certificate ${esc(cert.certificate_no)}</div>
 </div></body></html>`;
+
+
+// ---------------------------------------------------------------------------
+// qualifications and compliance
+// ---------------------------------------------------------------------------
+
+const QUAL_WORDS = { permanent: 'Does not expire', current: 'Current', expiring: 'Expiring soon', expired: 'Expired', missing: 'Not recorded' };
+const QUAL_CATEGORIES = { instructing: 'Instructing', officiating: 'Officiating', safety: 'Safety',
+  safeguarding: 'Safeguarding', medical: 'Medical', other: 'Other' };
+const QUAL_FOR = { instruct: 'Teaching a class', judge: 'Judging or refereeing', panel: 'Sitting on a grading panel' };
+const stateTag = (s) => `<span class="tag ${s === 'expired' || s === 'missing' ? 'bad' : s === 'expiring' ? 'wait' : 'ok'}">${esc(QUAL_WORDS[s] ?? s)}</span>`;
+
+export const complianceScreen = ({ me, csrf, org, today, required = [], rows = [], notCleared = [], expiring = [],
+                                   catalogue = [], starters = [], canDefine = false, reminders = null, done, error }) => {
+  const tok = `<input type="hidden" name="_csrf" value="${esc(csrf ?? '')}">`;
+  const base = `/o/${esc(org.slug)}`;
+  return page({ title: `${org.name} — compliance`, me, csrf, body: `
+  <h1>Compliance</h1>
+  <p class="sub">Who is cleared to teach, and what is about to run out. Records hold the fact and dates of a check — never what it found.</p>
+  ${done ? `<div class="good">${esc(done)}</div>` : ''}
+  ${error ? `<div class="bad">${esc(error)}</div>` : ''}
+
+  <h2>${notCleared.length ? `Not cleared to teach (${notCleared.length})` : 'Everybody who teaches is cleared'}</h2>
+  ${!required.length ? `<p class="muted">Nothing is required of instructors yet. Add the qualifications below and tick "Teaching a class" on the ones that must be current.</p>` : ''}
+  ${notCleared.length ? `<table><thead><tr><th>Name</th><th>Club</th><th>Problem</th><th></th></tr></thead><tbody>
+  ${notCleared.map((r) => `<tr><td><a href="/p/${esc(r.person_id)}/qualifications">${esc(r.name)}</a></td><td>${esc(r.club)}</td>
+    <td>${r.barred.map((b) => `${esc(b.label)}: ${stateTag(b.state)}${b.expires_on ? ` ${esc(b.expires_on)}` : ''}`).join('<br>')}</td>
+    <td><a href="/p/${esc(r.person_id)}/qualifications">Record</a></td></tr>`).join('')}</tbody></table>` : ''}
+
+  <h2>Running out or run out</h2>
+  ${expiring.length ? `<table><thead><tr><th>Name</th><th>Club</th><th>Qualification</th><th>When</th></tr></thead><tbody>
+  ${expiring.map((a) => `<tr><td><a href="/p/${esc(a.person_id)}/qualifications">${esc(a.name)}</a></td><td>${esc(a.club)}</td><td>${esc(a.label)}</td>
+    <td>${stateTag(a.state)} ${esc(a.expires_on)}${a.days_left != null ? ` <span class="muted">(${a.days_left < 0 ? `${-a.days_left} days ago` : `${a.days_left} days`})</span>` : ''}</td></tr>`).join('')}</tbody></table>`
+    : '<p class="muted">Nothing is due in the next 60 days.</p>'}
+
+  ${reminders !== null ? `<form method="post" action="${base}/compliance/reminders">${tok}
+    <label class="check"><input type="checkbox" name="enabled" value="1"${reminders ? ' checked' : ''}> Remind people automatically when a qualification is about to run out or has (and tell the club's administrators)</label>
+    <button class="btn secondary" type="submit">Save</button></form>` : ''}
+
+  <h2>What is tracked</h2>
+  ${catalogue.length ? `<table><thead><tr><th>Qualification</th><th>Valid for</th><th>Required for</th><th>Held by</th><th></th></tr></thead><tbody>
+  ${catalogue.map((c) => `<tr><td>${esc(c.label)} <span class="muted">${esc(QUAL_CATEGORIES[c.category] ?? c.category)}${c.own ? '' : ` · from ${esc(c.owner)}`}</span></td>
+    <td>${c.valid_months ? `${c.valid_months} months` : 'Does not expire'}</td>
+    <td>${esc((c.required_for ?? []).map((k) => QUAL_FOR[k]).join(', ') || '—')}</td><td>${c.awards}</td>
+    <td>${canDefine && c.own ? `<form method="post" action="${base}/compliance/qualifications/${esc(c.id)}/remove" style="display:inline">${tok}<button class="btn quiet" type="submit">Remove</button></form>` : ''}</td></tr>`).join('')}</tbody></table>`
+    : '<p class="muted">Nothing is tracked yet.</p>'}
+  ${canDefine ? `
+    ${starters.length ? `<form method="post" action="${base}/compliance/qualifications">${tok}<p>Start with the usual ones:
+      ${starters.map((s) => `<button class="btn secondary" name="starter" value="${esc(s.code)}" type="submit">${esc(s.label)}</button>`).join(' ')}</p>
+      <p class="muted">Validity periods are suggestions — change them to match your federation's rules by adding your own below.</p></form>` : ''}
+    <form method="post" action="${base}/compliance/qualifications">${tok}<h3>Add your own</h3>
+    <label for="label">Name</label><input id="label" name="label" maxlength="80" required>
+    <label for="category">Kind</label><select id="category" name="category">${Object.entries(QUAL_CATEGORIES).map(([k, v]) => `<option value="${k}">${v}</option>`).join('')}</select>
+    <label for="validMonths">Valid for (months — blank if it never expires)</label><input id="validMonths" name="validMonths" inputmode="numeric" maxlength="3">
+    <fieldset><legend>Must be current for</legend>${Object.entries(QUAL_FOR).map(([k, v]) => `<label class="check"><input type="checkbox" name="for_${k}" value="1"> ${v}</label>`).join('')}</fieldset>
+    <button class="btn" type="submit">Add</button></form>` : '<p class="muted">An owner or administrator can change what is tracked.</p>'}` });
+};
+
+export const personQualifications = ({ me, csrf, person, awards = [], available = [], mayEdit, today, values = {}, done, error }) => {
+  const tok = `<input type="hidden" name="_csrf" value="${esc(csrf ?? '')}">`;
+  const name = [person.first_name, person.last_name].filter(Boolean).join(' ');
+  return page({ title: `${name} — qualifications`, me, csrf, body: `
+  <p><a href="/p/${esc(person.id)}">← ${esc(name)}</a></p>
+  <h1>Qualifications and checks</h1>
+  ${done ? `<div class="good">${esc(done)}</div>` : ''}
+  ${error ? `<div class="bad">${esc(error)}</div>` : ''}
+  ${awards.length ? `<table><thead><tr><th>Qualification</th><th>Issued</th><th>Until</th><th>Status</th><th>Reference</th><th></th></tr></thead><tbody>
+  ${awards.map((a) => `<tr${a.counts ? '' : ' class="muted"'}><td>${esc(a.label)}${a.counts ? '' : ' <span class="muted">(replaced)</span>'}</td>
+    <td>${esc(a.awarded_on)}</td><td>${esc(a.expires_on ?? '—')}</td><td>${a.counts ? stateTag(a.state) : ''}</td>
+    <td>${esc([a.issued_by_other, a.reference].filter(Boolean).join(' · '))}</td>
+    <td>${mayEdit ? `<form method="post" action="/p/${esc(person.id)}/qualifications/${esc(a.id)}/remove" style="display:inline">${tok}<button class="btn quiet" type="submit">Delete</button></form>` : ''}</td></tr>`).join('')}</tbody></table>`
+    : '<p class="muted">Nothing recorded.</p>'}
+  ${mayEdit ? (available.length ? `<h2>Record one</h2><form method="post" action="/p/${esc(person.id)}/qualifications">${tok}
+    <label for="qualificationId">Qualification</label><select id="qualificationId" name="qualificationId">${available.map((q) => `<option value="${esc(q.id)}"${values.qualificationId === q.id ? ' selected' : ''}>${esc(q.label)}</option>`).join('')}</select>
+    <label for="awardedOn">Issued on <span class="muted">(2026-03-14)</span></label><input id="awardedOn" name="awardedOn" maxlength="10" value="${esc(values.awardedOn ?? '')}" required>
+    <label for="expiresOn">Runs out on <span class="muted">(leave blank to use the usual period)</span></label><input id="expiresOn" name="expiresOn" maxlength="10" value="${esc(values.expiresOn ?? '')}">
+    <label for="issuedBy">Issued by <span class="muted">(e.g. NZ Red Cross)</span></label><input id="issuedBy" name="issuedBy" maxlength="100" value="${esc(values.issuedBy ?? '')}">
+    <label for="reference">Certificate or reference number</label><input id="reference" name="reference" maxlength="100" value="${esc(values.reference ?? '')}">
+    <p class="muted">Record only that it was done and when. Do not enter what a check found.</p>
+    <button class="btn" type="submit">Record</button></form>` : '<p class="muted">Nothing is tracked yet — add qualifications under Compliance first.</p>') : ''}` });
+};

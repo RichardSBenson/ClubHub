@@ -49,16 +49,8 @@ const ACCOUNTED_FOR = {
   'invoice.due_on': 'affiliation invoices between levels are not built',
   'invoice.paid_on': 'affiliation invoices between levels are not built',
 
-  'qualification.valid_months': 'qualifications are schema-only so far',
-  'qualification.required_for': 'qualifications are schema-only so far',
-  'qualification_award.qualification_id': 'qualifications are schema-only so far',
-  'qualification_award.expires_on': 'qualifications are schema-only so far',
   'qualification_award.issued_by_org': 'qualifications are schema-only so far',
-  'qualification_award.issued_by_other': 'qualifications are schema-only so far',
   'qualification_award.document_asset_id': 'qualifications are schema-only so far',
-  'qualification_status.required_for': 'a view over the above',
-  'qualification_status.expires_on': 'a view over the above',
-  'qualification_status.days_left': 'a view over the above',
 
   'internal_link.from_kind': 'link checking is not built; section 13',
   'internal_link.from_id': 'link checking is not built',
