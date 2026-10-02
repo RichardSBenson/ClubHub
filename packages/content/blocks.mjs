@@ -35,6 +35,10 @@ export const BLOCKS = {
   dojoList:  { fields: { heading: 'string' } },
   eventList: { fields: { heading: 'string', kind: 'string', limit: 'number' } },
   honours:   { fields: { heading: 'string', award: 'string' } },
+  // Questions and answers, as a no-JavaScript accordion and as FAQPage data.
+  faq:       { fields: { heading: 'string', items: 'faq[]' } },
+  // A form that writes to the organisation's enquiries inbox.
+  contactForm: { fields: { heading: 'string', intro: 'string', kind: 'enum:contact,trial' } },
 };
 
 const MARKS = new Set(['strong', 'em', 'link']);
@@ -117,6 +121,13 @@ export function validate(doc) {
 
       if (kind === 'rich') block[field] = cleanRich(v);
       else if (kind === 'rich[]') block[field] = (Array.isArray(v) ? v : []).map(cleanRich);
+      else if (kind === 'faq[]') {
+        block[field] = (Array.isArray(v) ? v : []).slice(0, 60).flatMap((it) => {
+          const q = String(it?.q ?? '').replace(/\s+/g, ' ').trim().slice(0, 300);
+          const a = cleanRich(it?.a);
+          return q && a.some((r) => r.text.trim()) ? [{ q, a }] : [];
+        });
+      }
       else if (kind === 'string') block[field] = String(v).slice(0, 2000);
       else if (kind === 'number') block[field] = Number(v) || 0;
       else if (kind === 'boolean') block[field] = !!v;
@@ -134,6 +145,9 @@ export function validate(doc) {
 
     if (block.type === 'heading')
       block.level = Math.min(4, Math.max(2, block.level ?? 2));   // never h1
+    if (block.type === 'faq' && !block.items?.length) {
+      dropped.push(`block ${i}: a FAQ with no complete question and answer`); continue;
+    }
     if (block.type === 'paragraph' && !block.text?.length) {
       dropped.push(`block ${i}: empty paragraph`); continue;
     }
@@ -227,6 +241,43 @@ export function renderBlocks(doc, data = {}, { origin = '' } = {}) {
             `<td>${esc(String(r.year))}</td></tr>`).join('')}</tbody></table>`;
       }
 
+      case 'faq': {
+        const items = (Array.isArray(b.items) ? b.items : []).filter((it) => it?.q);
+        if (!items.length) return '';
+        // <details> is an accordion with no script, and works with a screen reader.
+        // The same questions go out as FAQPage data for search engines; '<' is
+        // escaped so a question cannot close the script element.
+        const ld = JSON.stringify({ '@context': 'https://schema.org', '@type': 'FAQPage',
+          mainEntity: items.map((it) => ({ '@type': 'Question', name: it.q,
+            acceptedAnswer: { '@type': 'Answer', text: wordsOf(it.a) } })) }).replace(/</g, '\\u003c');
+        return (b.heading ? `<h2>${esc(b.heading)}</h2>` : '') +
+          `<div class="faq">${items.map((it) => `<details><summary>${esc(it.q)}</summary>` +
+            `<p>${renderRich(it.a, origin)}</p></details>`).join('')}</div>` +
+          `<script type="application/ld+json">${ld}</script>`;
+      }
+
+      case 'contactForm': {
+        // The form posts to the server (the site itself is static). Without
+        // somewhere to post to, nothing is shown rather than a dead form.
+        const action = data.enquiryAction;
+        if (!action) return '';
+        const trial = b.kind === 'trial';
+        return `<form class="enquiry" method="post" action="${esc(action)}">` +
+          (b.heading ? `<h2>${esc(b.heading)}</h2>` : '') +
+          (b.intro ? `<p>${esc(b.intro)}</p>` : '') +
+          `<input type="hidden" name="kind" value="${trial ? 'trial' : 'contact'}">` +
+          `<label for="enq-name">Your name</label><input id="enq-name" name="name" maxlength="100" required autocomplete="name">` +
+          `<label for="enq-email">Email</label><input id="enq-email" name="email" type="email" maxlength="120" required autocomplete="email">` +
+          `<label for="enq-phone">Phone <span>(optional)</span></label><input id="enq-phone" name="phone" maxlength="30" autocomplete="tel">` +
+          (trial ? `<label for="enq-who">Who is it for, and how old? <span>(for example: my son, 9)</span></label><input id="enq-who" name="who" maxlength="100">` : '') +
+          `<label for="enq-message">${trial ? 'Anything we should know (experience, injuries)?' : 'Your message'}</label>` +
+          `<textarea id="enq-message" name="message" rows="5" maxlength="2000"${trial ? '' : ' required'}></textarea>` +
+          // A box people never see. Anything that fills it in is not a person.
+          `<div style="position:absolute;left:-9999px" aria-hidden="true"><label>Leave this empty` +
+          `<input name="website" tabindex="-1" autocomplete="off"></label></div>` +
+          `<button type="submit">${trial ? 'Ask about a free class' : 'Send'}</button></form>`;
+      }
+
       default:
         return '';
     }
@@ -273,6 +324,8 @@ export function toText(doc) {
       return wordsOf(b.text);
     if (b.type === 'list')
       return (b.items ?? []).map(wordsOf).join(' ');
+    if (b.type === 'faq')
+      return (b.items ?? []).map((it) => `${it.q ?? ''} ${wordsOf(it.a)}`).join('\n');
     return '';
   }).filter(Boolean).join('\n');
 }

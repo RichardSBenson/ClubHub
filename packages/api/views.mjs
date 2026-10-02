@@ -283,6 +283,7 @@ export function rail({ org, vocabulary = {}, can = {}, path = '' }) {
     link(`${base}/roster`, 'Roll'),
     can.register && link(`${base}/members/new`, 'Add a member'),
     can.register && link(`${base}/members/import`, 'Import a roll'),
+    can.register && link(`${base}/enquiries`, 'Enquiries'),
     can.register && link(`${base}/gradings`, 'Grading events'),
     can.register && link(`${base}/compliance`, 'Compliance'),
     can.register && link(`${base}/grading`, vocabulary.grading ?? 'Grading'),
@@ -1797,9 +1798,23 @@ const BLOCK_NAMES = Object.fromEntries(BLOCK_MENU);
  * a script to load is an editor that does not work where the people using it
  * are. It also means every change leaves a revision.
  */
+import { SCHEDULE_NOTE } from '../core/domain/scheduling.mjs';
+/** Date field and buttons to put a draft live on a morning of the author's choosing. */
+const scheduleControls = ({ canPublish, isNew, status, scheduledFor, today }) => {
+  if (isNew || !canPublish || status === 'published') return '';
+  return `<fieldset class="schedule"><legend>Or put it live on a date</legend>
+    ${scheduledFor ? `<p><span class="tag wait">Scheduled</span> It goes live on ${esc(scheduledFor)}.</p>` : ''}
+    <label for="publishOn">Date</label>
+    <input id="publishOn" name="publishOn" type="date" value="${esc(scheduledFor ?? '')}"${today ? ` min="${esc(today)}"` : ''}>
+    <p class="muted">${esc(SCHEDULE_NOTE)}</p>
+    <button class="btn secondary" type="submit" name="op" value="schedule">${scheduledFor ? 'Change the date' : 'Save and schedule'}</button>
+    ${scheduledFor ? '<button class="btn quiet" type="submit" name="op" value="unschedule">Cancel the schedule</button>' : ''}
+  </fieldset>`;
+};
+
 export const pageEditor = ({ me, csrf, org, page: pg, values = {},
                              dropped = [], revisions = [], images = [],
-                             canPublish = false, done, error, warning }) => {
+                             canPublish = false, scheduledFor = null, today = null, done, error, warning }) => {
   const isNew = !pg;
   const action = isNew
     ? `/o/${org.slug}/pages/new`
@@ -1860,6 +1875,7 @@ export const pageEditor = ({ me, csrf, org, page: pg, values = {},
             Save and put it live</button>`)}
       <a class="btn quiet" href="/o/${esc(org.slug)}/pages">Cancel</a>
     </div>
+    ${scheduleControls({ canPublish, isNew, status: pg?.status, scheduledFor, today })}
   </form>
 
   ${revisions.length ? `<h2>Earlier versions</h2>
@@ -2313,7 +2329,7 @@ export const newsList = ({ me, csrf, org, articles = [], waiting = [],
  */
 export const articleEditor = ({ me, csrf, org, article: a = null, values = {},
                                 dropped = [], images = [],
-                                canPublish = false, done, error }) => {
+                                canPublish = false, scheduledFor = null, today = null, done, error }) => {
   const isNew = !a;
   const action = isNew
     ? `/o/${org.slug}/news/new`
@@ -2399,6 +2415,7 @@ export const articleEditor = ({ me, csrf, org, article: a = null, values = {},
             Save and put it live</button>`)}
       <a class="btn quiet" href="/o/${esc(org.slug)}/news">Cancel</a>
     </div>
+    ${scheduleControls({ canPublish, isNew, status: a?.status, scheduledFor, today })}
   </form>` });
 };
 
@@ -3786,3 +3803,45 @@ export const personQualifications = ({ me, csrf, person, awards = [], available 
     <p class="muted">Record only that it was done and when. Do not enter what a check found.</p>
     <button class="btn" type="submit">Record</button></form>` : '<p class="muted">Nothing is tracked yet — add qualifications under Compliance first.</p>') : ''}` });
 };
+
+
+// ---- website enquiries ---------------------------------------------------------
+
+export const enquiriesScreen = ({ me, csrf, org, rows = [], waiting = 0, done, error }) => {
+  const tok = `<input type="hidden" name="_csrf" value="${esc(csrf ?? '')}">`;
+  const base = `/o/${esc(org.slug)}/enquiries`;
+  return page({ title: `${org.name} — enquiries`, me, csrf, body: `
+  <h1>Enquiries</h1>
+  <p class="sub">Messages and free-class requests from your website's forms. ${waiting ? `${waiting} waiting.` : 'Nothing waiting.'}
+    Each one is also emailed to your club's contact address; replying to that email answers the visitor.</p>
+  ${done ? `<div class="good">${esc(done)}</div>` : ''}
+  ${error ? `<div class="bad">${esc(error)}</div>` : ''}
+  ${rows.length ? `<table><thead><tr><th>Received</th><th>From</th><th>About</th><th></th></tr></thead><tbody>
+  ${rows.map((r) => `<tr><td>${esc(r.received)}<br>${r.status === 'new' ? '<span class="tag wait">New</span>' : '<span class="tag ok">Handled</span>'}</td>
+    <td>${esc(r.name)}<br><a href="mailto:${esc(r.email)}">${esc(r.email)}</a>${r.phone ? `<br>${esc(r.phone)}` : ''}</td>
+    <td>${r.kind === 'trial' ? '<strong>Free class</strong>' : 'Message'}${r.who ? ` for ${esc(r.who)}` : ''}
+      ${r.message ? `<br><span style="white-space:pre-wrap">${esc(r.message)}</span>` : ''}</td>
+    <td><form method="post" action="${base}/${esc(r.id)}/handled" style="display:inline">${tok}
+        <input type="hidden" name="handled" value="${r.status === 'new' ? '1' : '0'}">
+        <button class="btn secondary" type="submit">${r.status === 'new' ? 'Mark handled' : 'Reopen'}</button></form>
+      <form method="post" action="${base}/${esc(r.id)}/delete" style="display:inline">${tok}<button class="btn quiet" type="submit">Delete</button></form></td></tr>`).join('')}
+  </tbody></table>` : '<p class="muted">No enquiries yet. Add a contact form to a page from the page editor.</p>'}
+  <p class="muted">Enquiries are kept for a year, then deleted.</p>` });
+};
+
+/** The form on its own address — for a link in a poster or a social post. */
+export const enquiryPage = ({ csrf, club, kind = 'contact', action, values = {}, error, sent = false }) => page({
+  title: `${club} — get in touch`, me: null, csrf, body: `
+  <h1>${esc(club)}</h1>
+  ${sent ? '<div class="good">Thank you — your message has been sent. They will be in touch.</div>' : `
+  ${error ? `<div class="bad">${esc(error)}</div>` : ''}
+  <form method="post" action="${esc(action)}">
+    <input type="hidden" name="kind" value="${kind === 'trial' ? 'trial' : 'contact'}">
+    <div style="position:absolute;left:-9999px" aria-hidden="true"><label>Leave this empty <input name="website" tabindex="-1" autocomplete="off"></label></div>
+    <label for="name">Your name</label><input id="name" name="name" maxlength="100" required value="${esc(values.name ?? '')}">
+    <label for="email">Email</label><input id="email" name="email" type="email" maxlength="120" required value="${esc(values.email ?? '')}">
+    <label for="phone">Phone (optional)</label><input id="phone" name="phone" maxlength="30" value="${esc(values.phone ?? '')}">
+    ${kind === 'trial' ? `<label for="who">Who is it for?</label><input id="who" name="who" maxlength="100" value="${esc(values.who ?? '')}">` : ''}
+    <label for="message">Message</label><textarea id="message" name="message" rows="5" maxlength="2000">${esc(values.message ?? '')}</textarea>
+    <button class="btn" type="submit">Send</button>
+  </form>`}` });

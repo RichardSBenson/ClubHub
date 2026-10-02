@@ -258,6 +258,18 @@ blockquote cite{font-style:normal;font-size:15px;color:var(--muted)}
   background:var(--canvas-alt)}
 .callout.warning{border-left-color:var(--accent)}
 .callout.success{border-left-color:var(--primary-hover)}
+.faq{margin:20px 0}
+.faq details{border-bottom:1px solid var(--line,#ddd);padding:14px 0}
+.faq summary{cursor:pointer;font-weight:600;list-style:none;padding-right:28px;position:relative}
+.faq summary::-webkit-details-marker{display:none}
+.faq summary::after{content:'+';position:absolute;right:4px;top:0;font-size:22px;line-height:1}
+.faq details[open] summary::after{content:'\\2212'}
+.faq details p{margin:10px 0 0}
+.enquiry{position:relative;margin:28px 0;max-width:560px}
+.enquiry label{display:block;margin:14px 0 4px;font-weight:600}
+.enquiry label span{font-weight:400;color:var(--muted)}
+.enquiry input,.enquiry textarea{width:100%;box-sizing:border-box;padding:10px 12px;font:inherit;border:1px solid var(--line,#bbb);border-radius:4px}
+.enquiry button{margin-top:18px;padding:12px 22px;font:inherit;font-weight:600;border:0;border-radius:4px;background:var(--primary);color:#fff;cursor:pointer}
 figure{margin:24px 0}
 figcaption{font-size:14px;color:var(--muted);margin-top:8px}
 figure.video{position:relative;padding-bottom:56.25%;height:0;overflow:hidden}

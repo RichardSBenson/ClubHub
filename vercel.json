@@ -9,6 +9,14 @@
   },
   "rewrites": [
     {
+      "source": "/enquire/:path*",
+      "destination": "/api/index"
+    },
+    {
+      "source": "/cron/publish",
+      "destination": "/api/index"
+    },
+    {
       "source": "/admin",
       "destination": "/api/index"
     },
@@ -73,6 +81,10 @@
     {
       "path": "/cron/renewals",
       "schedule": "0 18 * * *"
+    },
+    {
+      "path": "/cron/publish",
+      "schedule": "0 17 * * *"
     }
   ]
 }

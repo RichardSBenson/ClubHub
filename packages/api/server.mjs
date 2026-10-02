@@ -33,10 +33,11 @@
 import crypto from 'node:crypto';
 import { URL } from 'node:url';
 import { pool, orgs, people, rank, events, competition, pages, assets, news,
-         instructors, navigation, audit, search, clubPages, appearance, clubs, clubProfile, family, myself, memberEvents, messages, emailPreferences, payments, fees, renewals, reminders, attendance, newcomers, reports, gradings, qualifications,
+         instructors, navigation, audit, search, clubPages, appearance, clubs, clubProfile, family, myself, memberEvents, messages, emailPreferences, payments, fees, renewals, reminders, attendance, newcomers, reports, gradings, qualifications, enquiries, scheduledPublishing, TooMany,
          Forbidden, NotFound, Invalid } from './data.mjs';
 import * as auth from './auth.mjs';
 import * as V from './views.mjs';
+import { readEnquiry, looksLikeRobot, sameSite } from '../core/domain/enquiry.mjs';
 import { readSelfEdit } from '../core/domain/family.mjs';
 import { readClubProfile } from '../core/domain/club-profile.mjs';
 import { readNewClub } from '../core/domain/new-club.mjs';
@@ -750,8 +751,10 @@ async function editorPost(ctx, { org, page = null }) {
   const title = String(form.title ?? '').trim();
   const slug = slugify(form.slug || title);
 
-  const render = (extra = {}) => ctx.send(extra.status ?? 200, V.pageEditor({
+  const render = async (extra = {}) => ctx.send(extra.status ?? 200, V.pageEditor({
     me: ctx.me, org, page, csrf: ctx.csrf, canPublish, images,
+    scheduledFor: page ? await pages.scheduledFor(page.id) : null,
+    today: new Date().toISOString().slice(0, 10),
     values: { body, title, slug,
               metaDescription: form.metaDescription ?? '' },
     ...extra,
@@ -801,6 +804,15 @@ async function editorPost(ctx, { org, page = null }) {
         + '&rebuild=' + encodeURIComponent(rebuild.detail));
     }
 
+    if (op === 'schedule' || op === 'unschedule') {
+      if (!canPublish) return render({ status: 403, page: saved,
+        error: 'Your changes are saved. Scheduling needs an owner or administrator.' });
+      if (op === 'schedule') await pages.schedule(ctx.me.accountId, saved.id, String(form.publishOn ?? ''));
+      else await pages.unschedule(ctx.me.accountId, saved.id);
+      return ctx.redirect(`/o/${org.slug}/pages/${saved.id}?done=`
+        + encodeURIComponent(op === 'schedule' ? `Scheduled for ${String(form.publishOn)}.` : 'No longer scheduled.'));
+    }
+
     if (dropped.length) {
       return render({ page: saved, dropped,
         done: 'Saved as a draft.' });
@@ -825,6 +837,7 @@ get('/o/:slug/pages/:pageId', async (ctx) => {
   const images = await assets.list(ctx.me.accountId, org.id);
   return ctx.send(200, V.pageEditor({
     me: ctx.me, org, page: pg, csrf: ctx.csrf, images,
+    scheduledFor: await pages.scheduledFor(pg.id), today: new Date().toISOString().slice(0, 10),
     values: { body: textFromDocument(doc, { images }),
               title: pg.title, slug: pg.slug,
               metaDescription: pg.meta_description ?? '' },
@@ -897,7 +910,7 @@ get('/o/:slug/pages/:pageId/preview', async (ctx) => {
   const previewAssets = Object.fromEntries(
     (await assets.list(ctx.me.accountId, org.id)).map((a) => [a.id, `/a/${a.id}`]));
 
-  const html = renderBlocks(pg.body, { dojos, events: evs, assets: previewAssets },
+  const html = renderBlocks(pg.body, { dojos, events: evs, assets: previewAssets, enquiryAction: `/enquire/${org.slug}` },
     { origin });
 
   const body = R.authoredPage({
@@ -1554,6 +1567,90 @@ post('/p/:id/qualifications/:awardId/remove', async (ctx) => {
   return ctx.redirect(`/p/${ctx.params.id}/qualifications?done=${encodeURIComponent('Removed.')}`);
 });
 
+
+// ---- website enquiries -----------------------------------------------------------
+//
+// The public door is /enquire/:slug. Anybody may post to it; it is protected
+// by a same-site check, a hidden honeypot box, rate limits and length limits.
+
+const ipHash = (ip) => crypto.createHmac('sha256', process.env.ENQUIRY_SALT ?? process.env.CRON_SECRET ?? 'honbu')
+  .update(String(ip ?? '')).digest('hex').slice(0, 32);
+
+async function enquiryClub(slug) {
+  const { rows: [org] } = await pool.query(
+    `select name, slug from organisation where slug = $1 and status = 'active'`, [slug]);
+  if (!org) throw new NotFound('Organisation');
+  return org;
+}
+
+get('/enquire/:slug/thanks', async (ctx) => {
+  const org = await enquiryClub(ctx.params.slug);
+  return ctx.send(200, V.enquiryPage({ csrf: ctx.csrf, club: org.name, sent: true }));
+});
+
+get('/enquire/:slug', async (ctx) => {
+  const org = await enquiryClub(ctx.params.slug);
+  const kind = ctx.url.searchParams.get('kind') === 'trial' ? 'trial' : 'contact';
+  return ctx.send(200, V.enquiryPage({ csrf: ctx.csrf, club: org.name, kind, action: `/enquire/${org.slug}` }));
+});
+
+post('/enquire/:slug', async (ctx) => {
+  const form = await ctx.publicForm();
+  const org = await enquiryClub(ctx.params.slug);
+  // A robot filled the hidden box. Say thank you and keep nothing.
+  if (looksLikeRobot(form)) return ctx.redirect(`/enquire/${org.slug}/thanks`);
+  const input = readEnquiry(form);
+  try {
+    await enquiries.submit({ slug: org.slug, input, ipHash: ipHash(ctx.ip),
+      messenger: messengerFrom(), baseFrom: sendingAddress() });
+    return ctx.redirect(`/enquire/${org.slug}/thanks`);
+  } catch (e) {
+    if (e instanceof Invalid || e instanceof TooMany)
+      return ctx.send(e.status ?? 422, V.enquiryPage({ csrf: ctx.csrf, club: org.name, kind: input.kind,
+        action: `/enquire/${org.slug}`, values: input, error: e.message }));
+    throw e;
+  }
+});
+
+async function enquiriesScreen(ctx, org, extra = {}) {
+  return ctx.send(extra.status ?? 200, V.enquiriesScreen({ me: ctx.me, org, csrf: ctx.csrf,
+    ...(await enquiries.inbox(ctx.me.accountId, org.id)),
+    done: ctx.url.searchParams.get('done'), ...extra }));
+}
+
+get('/o/:slug/enquiries', async (ctx) => {
+  const org = await organisationFor(ctx, { toRegister: true });
+  return enquiriesScreen(ctx, org);
+});
+
+post('/o/:slug/enquiries/:id/handled', async (ctx) => {
+  const org = await organisationFor(ctx, { toRegister: true });
+  const form = await ctx.form();
+  if (!UUID_RE.test(ctx.params.id)) throw new NotFound('Enquiry');
+  await enquiries.mark(ctx.me.accountId, org.id, ctx.params.id, form.handled === '1');
+  return ctx.redirect(`/o/${org.slug}/enquiries`);
+});
+
+post('/o/:slug/enquiries/:id/delete', async (ctx) => {
+  const org = await organisationFor(ctx, { toRegister: true });
+  await ctx.form();
+  if (!UUID_RE.test(ctx.params.id)) throw new NotFound('Enquiry');
+  await enquiries.remove(ctx.me.accountId, org.id, ctx.params.id);
+  return ctx.redirect(`/o/${org.slug}/enquiries?done=${encodeURIComponent('Deleted.')}`);
+});
+
+// Scheduled publishing. Same lock as the renewals door.
+get('/cron/publish', async (ctx) => {
+  const secret = process.env.CRON_SECRET;
+  const given = String(ctx.req.headers.authorization ?? '').replace(/^Bearer /, '');
+  const a = Buffer.from(given), b = Buffer.from(secret ?? '');
+  if (!secret || a.length !== b.length || !crypto.timingSafeEqual(a, b))
+    throw new Forbidden('Not permitted');
+  const made = await scheduledPublishing.run();
+  const rebuild = made.length ? await requestRebuild({ reason: `scheduled: ${made.length} item(s)` }) : null;
+  return ctx.send(200, `<pre>${JSON.stringify({ published: made, rebuild: rebuild?.detail ?? null }, null, 1).replace(/</g, '&lt;')}</pre>`);
+});
+
 // The scheduler's door. Open to nobody without the shared secret, and shut
 // entirely when none is configured — "no secret set" must never mean "no lock".
 get('/cron/renewals', async (ctx) => {
@@ -1563,12 +1660,13 @@ get('/cron/renewals', async (ctx) => {
   if (!secret || a.length !== b.length || !crypto.timingSafeEqual(a, b))
     throw new Forbidden('Not permitted');
   const forgotten = await newcomers.purgeStale();
+  const enquiriesDeleted = await enquiries.tidy();
   const qualReport = await qualifications.remind({ messenger: messengerFrom(), baseFrom: sendingAddress(),
     origin: process.env.VERCEL_PROJECT_PRODUCTION_URL ? `https://${process.env.VERCEL_PROJECT_PRODUCTION_URL}` : originOf(ctx) });
   const report = await reminders.run({ messenger: messengerFrom(), baseFrom: sendingAddress(),
     origin: process.env.VERCEL_PROJECT_PRODUCTION_URL
       ? `https://${process.env.VERCEL_PROJECT_PRODUCTION_URL}` : originOf(ctx) });
-  return ctx.send(200, `<pre>${JSON.stringify({ report, qualifications: qualReport, newcomersForgotten: forgotten }, null, 1).replace(/</g, '&lt;')}</pre>`);
+  return ctx.send(200, `<pre>${JSON.stringify({ report, qualifications: qualReport, newcomersForgotten: forgotten, enquiriesDeleted }, null, 1).replace(/</g, '&lt;')}</pre>`);
 });
 
 post('/o/:slug/renewals/fees', async (ctx) => {
@@ -2015,6 +2113,7 @@ get('/o/:slug/news/:articleId', async (ctx) => {
   const images = await assets.list(ctx.me.accountId, org.id);
   return ctx.send(200, V.articleEditor({
     me: ctx.me, org, article: a, csrf: ctx.csrf, images,
+    scheduledFor: await news.scheduledFor(a.id), today: new Date().toISOString().slice(0, 10),
     values: { body: textFromDocument(doc, { images }),
               title: a.title, slug: a.slug,
               summary: a.summary ?? '', heroAssetId: a.hero_asset_id ?? '',
@@ -2124,6 +2223,8 @@ async function articlePost(ctx, { org, article = null }) {
   const render = async (extra = {}) => ctx.send(extra.status ?? 200,
     V.articleEditor({
       me: ctx.me, org, article, csrf: ctx.csrf, canPublish, images,
+      scheduledFor: article ? await news.scheduledFor(article.id) : null,
+      today: new Date().toISOString().slice(0, 10),
       values: { body, title, slug, summary,
                 heroAssetId: heroAssetId ?? '', heroAlt: form.heroAlt ?? '',
                 tags: form.tags ?? '' },
@@ -2158,6 +2259,15 @@ async function articlePost(ctx, { org, article = null }) {
         + encodeURIComponent(op === 'publish'
           ? `"${saved.title}" is published.` : `"${saved.title}" is off the site.`)
         + '&rebuild=' + encodeURIComponent(rebuild.detail));
+    }
+
+    if (op === 'schedule' || op === 'unschedule') {
+      if (!canPublish) return render({ status: 403, article: saved,
+        error: 'Your changes are saved. Scheduling needs an owner or administrator.' });
+      if (op === 'schedule') await news.schedule(ctx.me.accountId, saved.id, String(form.publishOn ?? ''));
+      else await news.unschedule(ctx.me.accountId, saved.id);
+      return ctx.redirect(`/o/${org.slug}/news/${saved.id}?done=`
+        + encodeURIComponent(op === 'schedule' ? `Scheduled for ${String(form.publishOn)}.` : 'No longer scheduled.'));
     }
 
     if (dropped.length) return render({ article: saved, dropped,
@@ -3166,6 +3276,16 @@ export async function handler(req, res) {
       const f = await readForm(req);
       assertCsrf(cookies[CSRF_COOKIE], f._csrf);
       return f;
+    },
+
+    /**
+     * A form anybody on the web may post — the website's contact form.
+     * There is no session to forge, so no CSRF token; what stands in for it
+     * is that the post must come from this site's own pages.
+     */
+    async publicForm() {
+      if (!sameSite(req.headers)) throw new Forbidden('That form must be sent from this site.');
+      return readForm(req);
     },
 
     /**

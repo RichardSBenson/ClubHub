@@ -1464,7 +1464,7 @@ export const pages = {
     const page = await one('select * from page where id=$1', [pageId]);
     if (!page) throw new NotFound('Page');
     await assertRole(actor, page.organisation_id, MANAGE);
-    return one(`update page set status='published', published_at=now()
+    return one(`update page set status='published', published_at=now(), publish_at=null
       where id=$1 returning *`, [pageId]);
   },
 
@@ -1778,7 +1778,7 @@ export const news = {
   async publish(actor, id) {
     const a = await this.byId(actor, id);
     await assertRole(actor, a.organisation_id, MANAGE);
-    return one(`update article set status='published',
+    return one(`update article set status='published', publish_at = null,
                   published_at = coalesce(published_at, now())
                 where id=$1 returning *`, [id]);
   },
@@ -4698,5 +4698,153 @@ export const qualifications = {
       report.push(line);
     }
     return report;
+  },
+};
+
+
+// ---------------------------------------------------------------------------
+// scheduled publishing
+//
+// A draft with a date goes live on that morning's run. Authority is checked
+// when it is SCHEDULED (an owner or administrator), because nobody is present
+// when it runs.
+// ---------------------------------------------------------------------------
+
+import { problemsWithScheduleDate } from '../core/domain/scheduling.mjs';
+
+const schedulable = (table, label) => ({
+  async schedule(actor, id, date) {
+    const row = await one(`select t.id, t.organisation_id, t.title, t.status, o.timezone from ${table} t
+      join organisation o on o.id = t.organisation_id where t.id = $1`, [id]);
+    if (!row) throw new NotFound(label);
+    await assertRole(actor, row.organisation_id, MANAGE);
+    if (row.status === 'published') throw new Invalid('It is already live.');
+    const today = (await one(`select to_char((now() at time zone $1)::date,'YYYY-MM-DD') as d`, [row.timezone])).d;
+    const problems = problemsWithScheduleDate(date, today);
+    if (problems.length) throw new Invalid(problems.join(' '));
+    await q(`update ${table} set publish_at = ($2::date)::timestamp at time zone $3 where id = $1`, [id, date, row.timezone]);
+    await q(`insert into audit_log (account_id, organisation_id, action, entity, entity_id, after)
+      values ($1,$2,'publish_scheduled',$3,$4,$5)`, [actor, row.organisation_id, table, id, JSON.stringify({ title: row.title, date })]);
+    return { date };
+  },
+
+  async unschedule(actor, id) {
+    const row = await one(`select organisation_id, title from ${table} where id=$1`, [id]);
+    if (!row) throw new NotFound(label);
+    await assertRole(actor, row.organisation_id, MANAGE);
+    await q(`update ${table} set publish_at = null where id=$1`, [id]);
+    await q(`insert into audit_log (account_id, organisation_id, action, entity, entity_id, after)
+      values ($1,$2,'publish_unscheduled',$3,$4,$5)`, [actor, row.organisation_id, table, id, JSON.stringify({ title: row.title })]);
+  },
+
+  async scheduledFor(id) {
+    return (await one(`select to_char(publish_at at time zone o.timezone,'YYYY-MM-DD') as d from ${table} t
+      join organisation o on o.id = t.organisation_id where t.id=$1 and t.status='draft' and t.publish_at is not null`, [id]))?.d ?? null;
+  },
+});
+Object.assign(pages, schedulable('page', 'Page'));
+Object.assign(news, schedulable('article', 'Article'));
+
+export const scheduledPublishing = {
+  /** Bring everything that is due live. Returns what went live, so the caller can rebuild the site once. */
+  async run() {
+    const made = [];
+    for (const [table, label] of [['page', 'page'], ['article', 'article']]) {
+      const rows = await q(`update ${table} set status='published', publish_at = null,
+          published_at = coalesce(published_at, now())
+        where status = 'draft' and publish_at is not null and publish_at <= now()
+        returning id, organisation_id, title`);
+      for (const r of rows) {
+        await q(`insert into audit_log (account_id, organisation_id, action, entity, entity_id, after)
+          values (null,$1,'published_on_schedule',$2,$3,$4)`, [r.organisation_id, table, r.id, JSON.stringify({ title: r.title })]);
+        made.push({ kind: label, id: r.id, title: r.title });
+      }
+    }
+    return made;
+  },
+};
+
+// ---------------------------------------------------------------------------
+// enquiries from the website's forms
+// ---------------------------------------------------------------------------
+
+import { readEnquiry, problemsWithEnquiry, emailBody, PER_VISITOR_PER_HOUR, PER_ORGANISATION_PER_DAY, RETAIN_DAYS as ENQUIRY_RETAIN_DAYS }
+  from '../core/domain/enquiry.mjs';
+
+export class TooMany extends Error {
+  constructor(message) { super(message); this.status = 429; this.name = 'TooMany'; }
+}
+
+export const enquiries = {
+  /**
+   * A visitor writes. Stored first; emailed second; refused politely when one
+   * visitor or one organisation is writing too often.
+   */
+  async submit({ slug, input, ipHash, messenger, baseFrom }) {
+    const org = await one(`select id, name, slug, type from organisation where slug = $1 and status = 'active'`, [slug]);
+    if (!org) throw new NotFound('Organisation');
+    const problems = problemsWithEnquiry(input);
+    if (problems.length) throw new Invalid(problems.join(' '));
+
+    if (ipHash) {
+      const n = (await one(`select count(*)::int as n from enquiry where ip_hash = $1 and created_at > now() - interval '1 hour'`, [ipHash])).n;
+      if (n >= PER_VISITOR_PER_HOUR) throw new TooMany('You have sent several messages already. Please try again later.');
+    }
+    const day = (await one(`select count(*)::int as n from enquiry where organisation_id = $1 and created_at > now() - interval '1 day'`, [org.id])).n;
+    if (day >= PER_ORGANISATION_PER_DAY) throw new TooMany('This form is very busy at the moment. Please try again tomorrow.');
+
+    const row = await one(`insert into enquiry (organisation_id, kind, name, email, phone, who, message, ip_hash)
+      values ($1,$2,$3,$4,$5,$6,$7,$8) returning id`, [org.id, input.kind, input.name, input.email,
+      input.phone || null, input.who || null, input.message || null, ipHash || null]);
+
+    // Delivery is best-effort. The enquiry is already safe in the inbox.
+    let emailed = false;
+    try {
+      const contact = (await one('select email from dojo_profile where organisation_id=$1', [org.id]))?.email ?? null;
+      const to = contact ? [contact] : (await q(`select distinct a.email from grant_role g join account a on a.id = g.account_id
+        where g.organisation_id = $1 and g.role in ('owner','administrator') order by a.email limit 3`, [org.id])).map((r) => r.email);
+      const sender = senderFor({ club: org, baseFrom, contactEmail: null });
+      if (messenger && sender && to.length) {
+        for (const addr of to) {
+          await messenger.send({ to: addr, subject: `${input.kind === 'trial' ? 'Free class enquiry' : 'Website message'} from ${input.name}`.slice(0, 150),
+            text: emailBody(input, org.name), kind: 'enquiry', sender: { ...sender, replyTo: input.email } });
+        }
+        emailed = true;
+      }
+    } catch { /* stored; the inbox has it */ }
+    if (emailed) await q('update enquiry set emailed = true where id = $1', [row.id]);
+    return { id: row.id, emailed };
+  },
+
+  async inbox(actor, orgId, { status = null } = {}) {
+    await assertRole(actor, orgId, REGISTER);
+    const rows = await q(`select e.id, e.kind, e.name, e.email, e.phone, e.who, e.message, e.status, e.emailed,
+        to_char(e.created_at at time zone o.timezone, 'YYYY-MM-DD HH24:MI') as received
+      from enquiry e join organisation o on o.id = e.organisation_id
+      where e.organisation_id = $1 and ($2::text is null or e.status = $2)
+      order by (e.status = 'new') desc, e.created_at desc limit 200`, [orgId, status]);
+    return { rows, waiting: rows.filter((r) => r.status === 'new').length };
+  },
+
+  async mark(actor, orgId, id, handled) {
+    await assertRole(actor, orgId, REGISTER);
+    const row = await one(`update enquiry set status = $3, handled_at = case when $3 = 'handled' then now() end,
+        handled_by = case when $3 = 'handled' then $4::uuid end where id = $1 and organisation_id = $2 returning id`,
+      [id, orgId, handled ? 'handled' : 'new', actor]);
+    if (!row) throw new NotFound('Enquiry');
+  },
+
+  async remove(actor, orgId, id) {
+    await assertRole(actor, orgId, REGISTER);
+    const row = await one('delete from enquiry where id=$1 and organisation_id=$2 returning kind', [id, orgId]);
+    if (!row) throw new NotFound('Enquiry');
+    await q(`insert into audit_log (account_id, organisation_id, action, entity, after)
+      values ($1,$2,'enquiry_deleted','enquiry',$3)`, [actor, orgId, JSON.stringify({ kind: row.kind })]);
+  },
+
+  /** Daily: forget visitor addresses after two days, and old enquiries after a year. */
+  async tidy() {
+    await q(`update enquiry set ip_hash = null where ip_hash is not null and created_at < now() - interval '2 days'`);
+    return (await q(`delete from enquiry where created_at < now() - make_interval(days => $1) returning 1`, [ENQUIRY_RETAIN_DAYS])).length;
   },
 };

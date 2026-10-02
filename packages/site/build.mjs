@@ -422,7 +422,7 @@ for (const target of SITES) {
   await write('events/index.html', R.eventsPage({ events: evs, ...shared }));
 
   for (const pg of authored) {
-    const html = renderBlocks(pg.body, { dojos, events: evs, assets },
+    const html = renderBlocks(pg.body, { dojos, events: evs, assets, enquiryAction: `/enquire/${target.slug}` },
       { origin: ORIGIN + base });
     await write(`${pg.slug}/index.html`, R.authoredPage({
       // Only computed when the page has no description of its own, as it was
@@ -436,7 +436,7 @@ for (const target of SITES) {
   await write('news/index.html', R.newsPage({ articles, ...shared }));
   for (const article of articles) {
     const body = article.body
-      ? renderBlocks(article.body, { dojos, events: evs, assets },
+      ? renderBlocks(article.body, { dojos, events: evs, assets, enquiryAction: `/enquire/${target.slug}` },
                      { origin: ORIGIN + base })
       : '';
     await write(`news/${article.slug}/index.html`,

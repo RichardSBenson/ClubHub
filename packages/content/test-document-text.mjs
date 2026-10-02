@@ -8,7 +8,7 @@
  */
 import { textFromDocument, documentFromText, WRITING_HELP }
   from './document-text.mjs';
-import { validate } from './blocks.mjs';
+import { validate, renderBlocks, toText } from './blocks.mjs';
 
 let pass = 0, fail = 0;
 const ok = (n, c, d = '') => c ? (pass++, console.log(`  ✓ ${n}`))
@@ -40,6 +40,11 @@ const EVERYTHING = { blocks: [
   { type: 'dojoList', heading: 'Where we train' },
   { type: 'eventList', heading: 'Coming up', kind: 'grading', limit: 3 },
   { type: 'honours', heading: 'Honours', award: 'Kokoro' },
+  { type: 'faq', heading: 'Questions', items: [
+    { q: 'How much does it cost?', a: [{ text: 'It is ' }, { text: 'free', marks: ['strong'] }, { text: ' for the first class.' }] },
+    { q: 'Do I need a uniform?', a: rich('Not at first.\nWear loose clothes.') } ] },
+  { type: 'contactForm', heading: 'Get in touch', intro: 'We reply within a day.', kind: 'contact' },
+  { type: 'contactForm', heading: 'Try a class', intro: '', kind: 'trial' },
 ] };
 
 console.log('\nEVERY BLOCK TYPE SURVIVES THE ROUND TRIP');
@@ -233,6 +238,32 @@ console.log('\nTHE HELP IS SHORT ENOUGH TO READ');
   ok('nine lines at most', WRITING_HELP.length <= 9);
   ok('each one is an example and what it does',
     WRITING_HELP.every(([ex, what]) => ex.length && what.length));
+}
+
+console.log('\nFAQ AND CONTACT FORM');
+{
+  const b = documentFromText(textFromDocument(EVERYTHING)).blocks;
+  const faq = b.find((x) => x.type === 'faq');
+  ok('a FAQ keeps its questions and answers', faq.items.length === 2 && faq.items[0].q === 'How much does it cost?'
+    && faq.items[0].a.some((r) => r.marks?.includes('strong')) && faq.heading === 'Questions');
+  ok('a multi-line answer stays together', faq.items[1].a.map((r) => r.text).join('').includes('Wear loose clothes'));
+  const forms = b.filter((x) => x.type === 'contactForm');
+  ok('both kinds of form survive', forms.length === 2 && forms[0].kind === 'contact' && forms[1].kind === 'trial' && forms[0].intro === 'We reply within a day.');
+  const typed = documentFromText('Hello\n\n{{faq heading=FAQs}}\n? One?\nYes.\n\n? Two?\nNo.\n{{/faq}}\n\nAfter');
+  ok('typed by hand, a FAQ parses and the text after it is kept', typed.blocks.map((x) => x.type).join() === 'paragraph,faq,paragraph' && typed.blocks[1].items.length === 2);
+  ok('an unclosed FAQ does not eat the page forever', documentFromText('{{faq}}\n? Q\nA').blocks[0].items.length === 1);
+  const v = validate({ blocks: [{ type: 'faq', items: [{ q: 'Q', a: 'A' }, { q: '', a: 'x' }, { q: 'No answer', a: '' }] }, { type: 'faq', items: [] }] });
+  ok('validation keeps only complete questions, and drops an empty FAQ', v.doc.blocks.length === 1 && v.doc.blocks[0].items.length === 1 && v.dropped.length === 1);
+  const html = renderBlocks({ blocks: [faq] }, {});
+  ok('a FAQ renders as an accordion with no script', html.includes('<details><summary>How much does it cost?</summary>') && !/<script(?![^>]*ld\+json)/.test(html));
+  const hostile = renderBlocks({ blocks: [{ type: 'faq', items: [{ q: '</script><b>x', a: [{ text: 'a' }] }] }] }, {});
+  ok('a hostile question cannot close the data script', !hostile.includes('</script><b>') && hostile.split('</script>').length === 2);
+  ok('FAQPage data is included', /FAQPage/.test(html));
+  const form = renderBlocks({ blocks: [forms[0]] }, { enquiryAction: '/enquire/whanganui' });
+  ok('a contact form posts to the server and carries a hidden honeypot', /action="\/enquire\/whanganui"/.test(form) && /name="website"/.test(form) && /aria-hidden="true"/.test(form));
+  ok('the trial form asks who it is for', renderBlocks({ blocks: [forms[1]] }, { enquiryAction: '/enquire/x' }).includes('name="who"'));
+  ok('with nowhere to post, no dead form is shown', renderBlocks({ blocks: [forms[0]] }, {}) === '');
+  ok('the answers are searchable', toText({ blocks: [faq] }).includes('free for the first class'));
 }
 
 console.log(`\n${pass} passed, ${fail} failed\n`);

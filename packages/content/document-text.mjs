@@ -118,6 +118,15 @@ function blockToText(block, names) {
     case 'honours':
       return `{{honours${attrs({ heading: block.heading, award: block.award })}}}`;
 
+    case 'faq':
+      return `{{faq${attrs({ heading: block.heading })}}}\n`
+        + (block.items ?? []).map((it) => `? ${it.q}\n${textFromRich(it.a ?? [])}`).join('\n\n')
+        + '\n{{/faq}}';
+
+    case 'contactForm':
+      return `{{contact${attrs({ heading: block.heading, intro: block.intro,
+                                 kind: block.kind === 'trial' ? 'trial' : '' })}}}`;
+
     default:
       // A block type nobody taught this about must survive being edited in
       // the one-box editor. Losing it silently is exactly the failure this
@@ -170,6 +179,11 @@ function liveBlock(inner) {
     case 'honours':
       return { type: 'honours', heading: a.heading ?? '', award: a.award ?? '' };
 
+    case 'contact':
+    case 'enquiry':
+      return { type: 'contactForm', heading: a.heading ?? '', intro: a.intro ?? '',
+               kind: a.kind === 'trial' ? 'trial' : 'contact' };
+
     case 'video': {
       const provider = a.vimeo ? 'vimeo' : 'youtube';
       return { type: 'embed', provider,
@@ -210,6 +224,25 @@ export function documentFromText(text = '', { images = [] } = {}) {
     const line = lines[i];
 
     if (BLANK.test(line)) { i += 1; continue; }
+
+    // {{faq}} … {{/faq}}: questions start with "? ", answers follow.
+    if (/^\s*\{\{faq\b/.test(line)) {
+      const opener = line.trim().replace(/^\{\{/, '').replace(/\}\}$/, '');
+      const a = readAttrs(opener.replace(/^faq\s*/, ''));
+      const items = [];
+      let cur = null;
+      i += 1;
+      while (i < lines.length && !/^\s*\{\{\/faq\}\}\s*$/.test(lines[i])) {
+        const m = lines[i].match(/^\s*\?\s+(.*)$/);
+        if (m) { cur = { q: m[1].trim(), answer: [] }; items.push(cur); }
+        else if (cur) cur.answer.push(lines[i]);
+        i += 1;
+      }
+      i += 1;                       // past {{/faq}} (or the end)
+      push({ type: 'faq', heading: a.heading ?? '',
+             items: items.map((it) => ({ q: it.q, a: richFromText(it.answer.join('\n').trim()) })) });
+      continue;
+    }
 
     // {{...}} possibly spanning lines, because {{raw {...}}} is long.
     if (line.trimStart().startsWith('{{')) {
@@ -327,5 +360,5 @@ export const WRITING_HELP = [
   ['![description](image reference)', 'a picture'],
   ['!> Note', 'a note box'],
   ['---', 'a dividing line'],
-  ['{{clubs}}  {{events}}', 'live lists that keep themselves right'],
+  ['{{clubs}} {{events}} {{faq}} {{contact}}', 'live lists, questions and answers, a contact form'],
 ];

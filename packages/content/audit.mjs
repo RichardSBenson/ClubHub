@@ -183,6 +183,14 @@ export function describe(entry) {
       return `entered somebody for ${a.grade ? quote(a.grade) : 'a grade'} at ${a.event ? quote(a.event) : 'a grading'}`;
     case 'grading_finalised':
       return `finalised the grading ${a.title ? quote(a.title) : ''}: ${a.passed ?? 0} of ${a.entered ?? 0} awarded`.replace('  ', ' ');
+    case 'publish_scheduled':
+      return `scheduled ${a.title ? quote(a.title) : 'something'} to go live on ${a.date ?? '?'}`;
+    case 'publish_unscheduled':
+      return `cancelled the schedule for ${a.title ? quote(a.title) : 'something'}`;
+    case 'published_on_schedule':
+      return `${a.title ? quote(a.title) : 'Something'} went live on its scheduled date`;
+    case 'enquiry_deleted':
+      return 'deleted a website enquiry';
     case 'qualification_defined':
       return `started tracking ${a.label ? quote(a.label) : 'a qualification'}`;
     case 'qualification_removed':
@@ -280,6 +288,10 @@ export const ACTIONS = Object.freeze([
   ['club_profile_saved', 'Club details changed'],
   ['message_sent', 'Message sent'],
   ['roll_taken', 'Roll taken'],
+  ['publish_scheduled', 'Publishing scheduled'],
+  ['publish_unscheduled', 'Schedule cancelled'],
+  ['published_on_schedule', 'Published on schedule'],
+  ['enquiry_deleted', 'Enquiry deleted'],
   ['qualification_defined', 'Qualification tracked'],
   ['qualification_removed', 'Qualification untracked'],
   ['qualification_recorded', 'Qualification recorded'],
