@@ -3374,8 +3374,10 @@ async function renewMembership(affiliationId, months) {
   if (!a) return null;
   const until = extendedUntil(a.paid_until, a.today, months);
   await pool.query(`update affiliation set paid_until = $2::date,
-      status = case when status = 'lapsed' then 'active' else status end where id = $1`,
+      status = case when status in ('lapsed','trial') then 'active' else status end where id = $1`,
     [affiliationId, until]);
+  // Somebody's first payment makes them a member: a number, and the trial and any referral follow.
+  if (['trial', 'lapsed'].includes(a.status)) await becameMember(affiliationId);
   return until;
 }
 
@@ -3647,10 +3649,10 @@ async function rosterFor(orgId) {
                where m.kind = 'renewal' and mr.status = 'sent' and (mr.person_id = p.id or mr.about_id = p.id)) as last_reminded
       from affiliation a join person p on p.id = a.person_id
       where a.organisation_id = $1 and a.ends is null
-        and a.role in ('member','instructor','assistant') and a.status in ('active','lapsed','pending')
+        and a.role in ('member','instructor','assistant') and a.status in ('active','lapsed','pending','trial')
       order by p.last_name, p.first_name`, [orgId, org.timezone]);
     const today = (await one(`select to_char((now() at time zone $1)::date,'YYYY-MM-DD') as d`, [org.timezone])).d;
-    return { today, rows: rows.map((r) => ({ ...r, standing: standing({ paidUntil: r.paid_until, exempt: r.fee_exempt }, today) })) };
+    return { today, rows: rows.map((r) => ({ ...r, standing: r.status === 'trial' ? 'trial' : standing({ paidUntil: r.paid_until, exempt: r.fee_exempt }, today) })) };
 }
 
 export const renewals = {
@@ -3900,7 +3902,7 @@ export const attendance = {
              case when p.date_of_birth is null then null
                else date_part('year', age($2::date, p.date_of_birth))::int end as age
       from affiliation a join person p on p.id = a.person_id
-      where a.organisation_id = $1 and a.ends is null and a.status = 'active'
+      where a.organisation_id = $1 and a.ends is null and a.status in ('active','trial')
         and a.role in ('member','instructor','assistant')
       order by p.last_name, p.first_name`, [orgId, date]);
     const memberIds = new Set(members.map((m) => m.person_id));
@@ -5025,7 +5027,8 @@ export const portal = {
     const tz = memberships[0]?.timezone ?? 'Pacific/Auckland';
     const now = localNow(tz);
     for (const m of memberships)
-      m.standing = m.role === 'member' ? standing({ paidUntil: m.paid_until, exempt: m.fee_exempt }, localNow(m.timezone).date) : null;
+      m.standing = m.status === 'trial' ? 'trial'
+        : m.role === 'member' ? standing({ paidUntil: m.paid_until, exempt: m.fee_exempt }, localNow(m.timezone).date) : null;
 
     const grade = await one(`select label, rank_order, awarded_on::text as awarded_on
       from person_current_grade where person_id = $1`, [person.id]);
@@ -5036,7 +5039,7 @@ export const portal = {
       from training_session ts join organisation o on o.id = ts.organisation_id
       left join grade g on g.id = ts.min_grade_id
       where ts.organisation_id = any($1::uuid[])`,
-      [memberships.filter((m) => m.role === 'member' && m.status === 'active').map((m) => m.org_id)]) : [];
+      [memberships.filter((m) => m.role === 'member' && ['active', 'trial'].includes(m.status)).map((m) => m.org_id)]) : [];
     const next = nextSession(sessions, now, { ageYears: ageOnDate(person.date_of_birth, now.date), rankOrder: grade?.rank_order ?? null });
 
     const nextEvent = await one(`
@@ -5065,11 +5068,15 @@ export const portal = {
              (select count(*)::int from attendance where person_id = $1 and session_date > current_date - 90) as recent_classes,
              (select to_char(max(session_date),'YYYY-MM-DD') from attendance where person_id = $1) as last_trained`, [person.id]);
 
+    const trial = await trials.mine(actor, person.id);
+    const trialLeft = trial && trial.status !== 'converted'
+      ? Math.round((Date.parse(`${trial.ends}T00:00:00Z`) - Date.parse(`${now.date}T00:00:00Z`)) / 864e5) : null;
     const actions = actionsFor({ personId: person.id, owed, closing, qualifications: quals,
+      trial: trial ? { left: trialLeft } : null,
       memberships: memberships.filter((m) => m.standing).map((m) => ({ name: m.name, standing: m.standing, paid_until: m.paid_until })),
       details: { emergencyContact: !!(priv?.emergency_name && priv?.emergency_phone) } });
 
-    return { person, how, memberships, grade, next, nextEvent, openCount: open.length, closing: closing.length,
+    return { person, how, memberships, grade, next, nextEvent, trial: trial ? { ...trial, left: trialLeft } : null, openCount: open.length, closing: closing.length,
       owed, owedTotal: owed.reduce((n, p) => n + p.amount_cents, 0), currency: owed[0]?.currency ?? 'NZD',
       counts, qualifications: quals, actions };
   },
@@ -5178,7 +5185,7 @@ export const portal = {
     const out = [];
     for (const person of [self, ...dependants].filter(Boolean)) {
       const clubs = await q(`select o.id, o.name, o.timezone from affiliation a join organisation o on o.id = a.organisation_id
-        where a.person_id = $1 and a.ends is null and a.role = 'member' and a.status = 'active'`, [person.id]);
+        where a.person_id = $1 and a.ends is null and a.role = 'member' and a.status in ('active','trial')`, [person.id]);
       const grade = await one('select rank_order from person_current_grade where person_id = $1', [person.id]);
       for (const club of clubs) {
         const now = localNow(club.timezone);
@@ -5290,7 +5297,7 @@ export const checkin = {
     const folk = [];
     for (const p of [self, ...dependants].filter(Boolean)) {
       const member = !!(await one(`select 1 as x from affiliation where person_id=$1 and organisation_id=$2 and ends is null
-        and status='active' and role in ('member','instructor','assistant')`, [p.id, session.organisation_id]));
+        and status in ('active','trial') and role in ('member','instructor','assistant')`, [p.id, session.organisation_id]));
       const grade = await one('select rank_order from person_current_grade where person_id = $1', [p.id]);
       folk.push({ id: p.id, name: p.first_name, ageYears: ageOnDate(p.date_of_birth, today), rankOrder: grade?.rank_order ?? null, member });
     }
@@ -5320,5 +5327,435 @@ export const checkin = {
       await client.query('commit');
     } catch (e) { await client.query('rollback'); throw e; } finally { client.release(); }
     return { came: ok.map((p) => p.name), plan };
+  },
+};
+
+// ---------------------------------------------------------------------------
+// adult free trials and referrals
+//
+// A trial is a real person on a membership whose status is 'trial'. Joining is the club's first
+// membership payment (settle → renewMembership → becameMember): the same person gets a number,
+// the trial is marked converted and a referral that brought them in is looked at for its reward.
+// ---------------------------------------------------------------------------
+
+import { readGrowth, readGrowthForm, problemsWithGrowth, problemsWithTrialSignup, trialEnds, daysLeft as trialDaysLeft,
+  trialsDue, newCode, normaliseCode, referralVerdict, referralQualifies, rewardsFor, rewardText, AUTOMATIC }
+  from '../core/domain/growth.mjs';
+
+const TRIAL_RETAIN_DAYS = 180;
+const TRIALS_PER_VISITOR_PER_HOUR = 3;
+const TRIALS_PER_CLUB_PER_DAY = 30;
+
+const growthClub = async (slug) => {
+  const org = await one(`select id, name, slug, type, timezone, settings from organisation
+    where slug = $1 and type = 'club' and status = 'active'`, [slug]);
+  if (!org) return null;
+  return { ...org, growth: readGrowth(org.settings?.growth) };
+};
+
+/** The next number in the federation's own sequence. Inside the caller's transaction. */
+async function allocateNumber(client, orgId) {
+  const { rows: [fed] } = await client.query(`
+    select coalesce(f.short_name, f.slug) as prefix from organisation target
+    join organisation f on target.path <@ f.path and f.parent_id is null where target.id = $1`, [orgId]);
+  const prefix = (fed?.prefix ?? 'M').toUpperCase().replace(/[^A-Z]/g, '').slice(0, 5) || 'M';
+  const { rows: [seq] } = await client.query(`select coalesce(max(substring(display_number from '[0-9]+$')::int), 0) + 1 as next
+    from person where display_number like $1`, [`${prefix}-%`]);
+  return `${prefix}-${String(seq.next).padStart(4, '0')}`;
+}
+
+/** Best-effort email from the club. A message that cannot be sent never undoes what it was about. */
+async function clubMail(org, { messenger, baseFrom }, to, subject, text) {
+  try {
+    const contact = (await one('select email from dojo_profile where organisation_id=$1', [org.id]))?.email ?? null;
+    const sender = senderFor({ club: org, baseFrom, contactEmail: contact });
+    if (!messenger || !sender || !to) return false;
+    await messenger.send({ to, subject: String(subject).slice(0, 150), text, kind: 'trial', sender });
+    return true;
+  } catch { return false; }
+}
+
+export const clubMailer = clubMail;
+
+async function becameMember(affiliationId) {
+  const a = await one('select person_id, organisation_id from affiliation where id = $1', [affiliationId]);
+  if (!a) return;
+  const client = await pool.connect();
+  try {
+    await client.query('begin');
+    const { rows: [p] } = await client.query('select display_number from person where id = $1 for update', [a.person_id]);
+    if (p && !p.display_number)
+      await client.query('update person set display_number = $2 where id = $1', [a.person_id, await allocateNumber(client, a.organisation_id)]);
+    await client.query(`update member_trial set status = 'converted', converted_at = now()
+      where person_id = $1 and organisation_id = $2 and status <> 'converted'`, [a.person_id, a.organisation_id]);
+    await client.query(`update referral set status = 'member', converted_at = now() where referred_id = $1 and status = 'trial'`, [a.person_id]);
+    await client.query('commit');
+  } catch (e) { await client.query('rollback'); throw e; } finally { client.release(); }
+  const r = await one(`select id from referral where referred_id = $1 and status = 'member'`, [a.person_id]);
+  if (r) await referrals.qualify(r.id);
+}
+
+export const trials = {
+  /** The public sign-up page's facts: the club, and whether it offers a trial at all. */
+  async offer(slug) {
+    const org = await growthClub(slug);
+    if (!org || !org.growth.trial.enabled) return null;
+    return { name: org.name, slug: org.slug, days: org.growth.trial.days, minAge: org.growth.trial.minAge };
+  },
+
+  /**
+   * Start a trial. Somebody the register already knows (same email, same mobile, or same name and
+   * birthday) does not get a second record: the caller is told, and sends them a sign-in link.
+   */
+  async start({ slug, input, ipHash = null }) {
+    const org = await growthClub(slug);
+    if (!org || !org.growth.trial.enabled) throw new NotFound('Free trial');
+    const today = await todayAt(org);
+    const problems = problemsWithTrialSignup(input, { today, minAge: org.growth.trial.minAge });
+    if (problems.length) throw new Invalid(problems.join(' '));
+
+    if (ipHash && (await one(`select count(*)::int as n from member_trial where ip_hash = $1 and created_at > now() - interval '1 hour'`, [ipHash])).n
+        >= TRIALS_PER_VISITOR_PER_HOUR) throw new TooMany('Several trials have been started from here already. Please try again later.');
+    if ((await one(`select count(*)::int as n from member_trial where organisation_id = $1 and created_at > now() - interval '1 day'`, [org.id])).n
+        >= TRIALS_PER_CLUB_PER_DAY) throw new TooMany('This page is very busy at the moment. Please try again tomorrow.');
+
+    const known = await one(`select p.id, p.email::text as email from person p
+      where p.email = $1
+         or ($2::text is not null and right(regexp_replace(coalesce(p.phone,''), '\\D', '', 'g'), 8) = $2)
+         or (lower(p.first_name) = lower($3) and lower(p.last_name) = lower($4) and p.date_of_birth = $5::date)
+      order by (p.email = $1) desc limit 1`,
+      [input.email, phoneKey(input.phone), input.firstName, input.lastName, input.dateOfBirth]);
+    if (known) return { existing: true, email: known.email === input.email ? input.email : null, org };
+
+    const ends = trialEnds(today, org.growth.trial.days);
+    const client = await pool.connect();
+    let person, referralState = null, source = 'website';
+    try {
+      await client.query('begin');
+      ({ rows: [person] } = await client.query(`insert into person (first_name, last_name, date_of_birth, email, phone)
+        values ($1,$2,$3,$4,$5) returning id`, [input.firstName, input.lastName, input.dateOfBirth, input.email, input.phone]));
+      await client.query(`insert into person_private (person_id, emergency_name, emergency_phone, medical_notes) values ($1,$2,$3,$4)`,
+        [person.id, input.emergencyName, input.emergencyPhone, input.medical || null]);
+      await client.query(`insert into affiliation (person_id, organisation_id, role, starts, status, paid_until)
+        values ($1,$2,'member',$3::date,'trial',$4::date)`, [person.id, org.id, today, ends]);
+      await client.query(`insert into account (email, person_id) values ($1,$2) on conflict (email) do nothing`, [input.email, person.id]);
+
+      // Was somebody's code used, and does it count?
+      if (input.code) {
+        const ref = (await client.query(`select c.person_id, p.email::text as email, p.phone,
+            exists (select 1 from affiliation a where a.person_id = c.person_id and a.organisation_id = $2
+                      and a.role = 'member' and a.status = 'active' and a.ends is null) as active,
+            (select count(*)::int from referral r where r.referrer_id = c.person_id and r.created_at > now() - interval '1 day') as recent
+          from referral_code c join person p on p.id = c.person_id where c.code = $1`, [input.code, org.id])).rows[0];
+        if (ref) {
+          const verdict = referralVerdict({ referrer: ref, referred: input, recent: ref.recent, settings: org.growth });
+          await client.query(`insert into referral (organisation_id, referrer_id, referred_id, code, status, note)
+            values ($1,$2,$3,$4,$5,$6)`, [org.id, ref.person_id, person.id, input.code, verdict.ok ? 'trial' : 'void', verdict.reason]);
+          if (verdict.ok) source = 'referral';
+          referralState = verdict.ok ? 'counted' : 'not counted';
+        }
+      }
+      await client.query(`insert into member_trial (person_id, organisation_id, starts, ends, source, consent_by, ip_hash)
+        values ($1,$2,$3::date,$4::date,$5,$6,$7)`, [person.id, org.id, today, ends, source, `${input.firstName} ${input.lastName}`, ipHash]);
+      await client.query(`insert into audit_log (organisation_id, action, entity, entity_id, after)
+        values ($1,'trial_started','person',$2,$3)`, [org.id, person.id, JSON.stringify({ ends, source, referral: referralState })]);
+      await client.query('commit');
+    } catch (e) { await client.query('rollback'); throw e; } finally { client.release(); }
+    return { existing: false, personId: person.id, email: input.email, ends, org, source };
+  },
+
+  /** A person's own trial, for their home screen. Null when there is none. */
+  async mine(actor, personId) {
+    await family.assertMayActFor(actor, personId);
+    return one(`select t.id, t.status, to_char(t.starts,'YYYY-MM-DD') as starts, to_char(t.ends,'YYYY-MM-DD') as ends,
+        o.name as club, o.slug, o.timezone,
+        (select count(*)::int from attendance a where a.person_id = t.person_id and a.organisation_id = t.organisation_id
+          and a.session_date >= t.starts) as classes
+      from member_trial t join organisation o on o.id = t.organisation_id
+      where t.person_id = $1 and t.status <> 'converted' order by t.created_at desc limit 1`, [personId]);
+  },
+
+  /** The prices on offer to somebody joining, at their club. */
+  async prices(actor, personId) {
+    const t = await this.mine(actor, personId);
+    if (!t) throw new NotFound('Trial');
+    const org = await one('select id, timezone from organisation where slug = $1', [t.slug]);
+    const today = await todayAt(org);
+    const p = await one('select date_of_birth::text as dob from person where id = $1', [personId]);
+    const schedule = await feeRows(org.id);
+    const options = Object.entries(PERIODS).filter(([, v]) => v.months)
+      .map(([period, v]) => ({ period, label: v.label, fee: feeFor(schedule, { ageYears: ageOnDate(p.dob, today), period, today }) }))
+      .filter((o) => o.fee);
+    return { trial: t, options, orgId: org.id };
+  },
+
+  /**
+   * "Join now". Asks for the first membership payment at the club's own price. When it is paid, the
+   * membership starts from the day the trial ends (or today, if it already has).
+   */
+  async joinNow(actor, personId, period) {
+    const { trial, options, orgId } = await this.prices(actor, personId);
+    const choice = options.find((o) => o.period === period);
+    if (!choice) throw new Invalid('Choose how you would like to pay.');
+    const org = await one('select * from organisation where id=$1', [orgId]);
+
+    const client = await pool.connect();
+    try {
+      await client.query('begin');
+      let { rows: [a] } = await client.query(`select id, status from affiliation where person_id=$1 and organisation_id=$2
+        and role='member' and ends is null for update`, [personId, orgId]);
+      if (a?.status === 'active') throw new Invalid('You are already a member.');
+      if (!a) {
+        // The trial ran out. Joining now starts an ordinary membership that becomes active once it is paid.
+        ({ rows: [a] } = await client.query(`insert into affiliation (person_id, organisation_id, role, starts, status)
+          values ($1,$2,'member',$3::date,'lapsed') returning id, status`, [personId, orgId, await todayAt(org)]));
+      }
+      const open = (await client.query(`select py.id from payment py join payment_line l on l.payment_id = py.id
+        where l.renews_affiliation_id = $1 and py.status in ('pending','awaiting','failed')`, [a.id])).rows[0];
+      if (open) { await client.query('commit'); return { paymentId: open.id, existing: true }; }
+      const { rows: [pay] } = await client.query(`insert into payment (organisation_id, person_id, amount_cents, currency, status, requested_by)
+        values ($1,$2,$3,$4,'pending',$5) returning id`, [orgId, personId, choice.fee.amount_cents, choice.fee.currency ?? 'NZD', actor]);
+      await client.query(`insert into payment_line (payment_id, kind, description, amount_cents, renews_affiliation_id, renews_months)
+        values ($1,'dojo_fee',$2,$3,$4,$5)`, [pay.id, `${choice.fee.label} — membership ${choice.label.toLowerCase()}`,
+        choice.fee.amount_cents, a.id, PERIODS[period].months]);
+      await client.query(`insert into audit_log (account_id, organisation_id, action, entity, entity_id, after)
+        values ($1,$2,'trial_join_requested','payment',$3,$4)`, [actor, orgId, pay.id, JSON.stringify({ period, amountCents: choice.fee.amount_cents })]);
+      await client.query('commit');
+      return { paymentId: pay.id, existing: false };
+    } catch (e) { await client.query('rollback'); throw e; } finally { client.release(); }
+  },
+};
+
+export const referrals = {
+  /** A member's own code and what has come of it. Made the first time it is asked for. */
+  async mine(actor, personId) {
+    const how = await family.assertMayActFor(actor, personId);
+    if (how !== 'self') throw new Forbidden();
+    const home = await one(`select o.id, o.name, o.slug, o.settings from affiliation a join organisation o on o.id = a.organisation_id
+      where a.person_id = $1 and a.role = 'member' and a.status = 'active' and a.ends is null limit 1`, [personId]);
+    if (!home) return { eligible: false, reason: 'Only current members can refer a friend.' };
+    const settings = readGrowth(home.settings?.growth);
+    if (!settings.referral.enabled || !settings.trial.enabled) return { eligible: false, reason: `${home.name} is not running a referral offer at the moment.` };
+
+    let code = (await one('select code from referral_code where person_id = $1', [personId]))?.code;
+    for (let tries = 0; !code && tries < 8; tries++) {
+      const made = await one(`insert into referral_code (person_id, code) values ($1,$2) on conflict do nothing returning code`, [personId, newCode()]);
+      code = made?.code ?? (await one('select code from referral_code where person_id = $1', [personId]))?.code;
+    }
+    const rows = await q(`select r.id, r.status, r.note, p.first_name, to_char(r.created_at,'YYYY-MM-DD') as when
+      from referral r join person p on p.id = r.referred_id where r.referrer_id = $1 order by r.created_at desc`, [personId]);
+    const rewards = await q(`select w.id, w.kind, w.weeks, w.cents, w.note, w.status, to_char(w.created_at,'YYYY-MM-DD') as when
+      from referral_reward w where w.person_id = $1 order by w.created_at desc`, [personId]);
+    return { eligible: true, club: home.name, slug: home.slug, code, offer: rewardText(settings.referral.referrer), referred: rewardText(settings.referral.referred),
+      days: settings.trial.days, rows, rewards: rewards.map((w) => ({ ...w, text: rewardText({ kind: w.kind, weeks: w.weeks, cents: w.cents, note: w.note }) })) };
+  },
+
+  /** What somebody sees when they follow a code: who invited them, and where to sign up. */
+  async landing(code) {
+    const c = normaliseCode(code);
+    if (!c) return null;
+    const row = await one(`select p.first_name, o.slug, o.name, o.settings
+      from referral_code rc join person p on p.id = rc.person_id
+      join affiliation a on a.person_id = p.id and a.role = 'member' and a.status = 'active' and a.ends is null
+      join organisation o on o.id = a.organisation_id where rc.code = $1 limit 1`, [c]);
+    if (!row) return null;
+    const g = readGrowth(row.settings?.growth);
+    if (!g.trial.enabled || !g.referral.enabled) return null;
+    return { friend: row.first_name, club: row.name, slug: row.slug, days: g.trial.days, reward: rewardText(g.referral.referred), code: c };
+  },
+
+  /**
+   * Has this referral earned its reward? Called when the referred person joins, and again by the daily
+   * run while they are still working towards the club's conditions.
+   */
+  async qualify(referralId) {
+    const r = await one(`select r.*, o.settings, o.timezone, t.starts::text as trial_starts
+      from referral r join organisation o on o.id = r.organisation_id
+      left join member_trial t on t.person_id = r.referred_id and t.organisation_id = r.organisation_id
+      where r.id = $1`, [referralId]);
+    if (!r || r.status !== 'member') return null;
+    const settings = readGrowth(r.settings?.growth);
+    const classes = (await one(`select count(*)::int as n from attendance where person_id = $1 and organisation_id = $2 and session_date >= $3::date`,
+      [r.referred_id, r.organisation_id, r.trial_starts ?? r.created_at.toISOString().slice(0, 10)])).n;
+    const active = !!(await one(`select 1 as x from affiliation where person_id = $1 and organisation_id = $2
+      and role='member' and status='active' and ends is null`, [r.referrer_id, r.organisation_id]));
+    const rewardsThisYear = (await one(`select count(*)::int as n from referral where referrer_id = $1 and status = 'rewarded'
+      and rewarded_at > now() - interval '1 year'`, [r.referrer_id])).n;
+    const verdict = referralQualifies({ trialClasses: classes, referrerActive: active, rewardsThisYear, settings });
+
+    if (!verdict.ok) {
+      await pool.query(`update referral set note = $2, status = case when $3 then status else 'void' end where id = $1`, [referralId, verdict.reason, !!verdict.wait]);
+      return { rewarded: false, reason: verdict.reason };
+    }
+    const today = await todayAt({ timezone: r.timezone });
+    const client = await pool.connect();
+    try {
+      await client.query('begin');
+      await client.query(`update referral set status = 'rewarded', rewarded_at = now(), note = null where id = $1 and status = 'member'`, [referralId]);
+      for (const reward of rewardsFor(settings)) {
+        const to = reward.to === 'referrer' ? r.referrer_id : r.referred_id;
+        const auto = AUTOMATIC.includes(reward.kind);
+        await client.query(`insert into referral_reward (referral_id, person_id, kind, weeks, cents, note, status, given_at)
+          values ($1,$2,$3,$4,$5,$6,$7, case when $7 = 'given' then now() end)`,
+          [referralId, to, reward.kind, reward.weeks, reward.cents, reward.note || null, auto ? 'given' : 'owed']);
+        if (auto && reward.kind === 'free_weeks')
+          await client.query(`update affiliation set paid_until = greatest(coalesce(paid_until, $3::date), $3::date) + ($4::int * 7)
+            where person_id = $1 and organisation_id = $2 and role = 'member' and ends is null and status = 'active'`,
+            [to, r.organisation_id, today, reward.weeks]);
+      }
+      await client.query(`insert into audit_log (organisation_id, action, entity, entity_id, after)
+        values ($1,'referral_rewarded','referral',$2,$3)`, [r.organisation_id, referralId, JSON.stringify({ classes })]);
+      await client.query('commit');
+    } catch (e) { await client.query('rollback'); throw e; } finally { client.release(); }
+    return { rewarded: true };
+  },
+};
+
+export const growth = {
+  /** The club's trials, referrals and rewards, and how well it is all working. */
+  async overview(actor, orgId) {
+    await assertRole(actor, orgId, REGISTER);
+    const org = await clubOnly(orgId);
+    const today = await todayAt(org);
+    const settings = readGrowth(org.settings?.growth);
+    const trialRows = await q(`select t.id, p.id as person_id, trim(concat_ws(' ', p.first_name, p.last_name)) as name, p.email::text as email, p.phone,
+        t.status, t.source, to_char(t.starts,'YYYY-MM-DD') as starts, to_char(t.ends,'YYYY-MM-DD') as ends, p.display_number,
+        (select count(*)::int from attendance a where a.person_id = t.person_id and a.organisation_id = t.organisation_id and a.session_date >= t.starts) as classes
+      from member_trial t join person p on p.id = t.person_id where t.organisation_id = $1 order by t.created_at desc limit 200`, [orgId]);
+    const referralRows = await q(`select r.id, r.status, r.note, to_char(r.created_at,'YYYY-MM-DD') as when,
+        trim(concat_ws(' ', a.first_name, a.last_name)) as referrer, trim(concat_ws(' ', b.first_name, b.last_name)) as referred
+      from referral r join person a on a.id = r.referrer_id join person b on b.id = r.referred_id
+      where r.organisation_id = $1 order by r.created_at desc limit 200`, [orgId]);
+    const owed = await q(`select w.id, w.kind, w.weeks, w.cents, w.note, trim(concat_ws(' ', p.first_name, p.last_name)) as name, p.display_number
+      from referral_reward w join referral r on r.id = w.referral_id join person p on p.id = w.person_id
+      where r.organisation_id = $1 and w.status = 'owed' order by w.created_at`, [orgId]);
+    const c = (st) => trialRows.filter((t) => t.status === st).length;
+    const revenue = (await one(`select coalesce(sum(py.amount_cents),0)::int as cents from payment py join referral r on r.referred_id = py.person_id
+      where r.organisation_id = $1 and py.organisation_id = $1 and py.status = 'succeeded'`, [orgId])).cents;
+    const top = await q(`select trim(concat_ws(' ', p.first_name, p.last_name)) as name, count(*)::int as n,
+        count(*) filter (where r.status = 'rewarded')::int as rewarded
+      from referral r join person p on p.id = r.referrer_id where r.organisation_id = $1 and r.status <> 'void'
+      group by p.id, p.first_name, p.last_name order by n desc, name limit 5`, [orgId]);
+    return { org, today, settings, offer: rewardText(settings.referral.referrer),
+      trials: trialRows.map((t) => ({ ...t, left: t.status === 'trialling' ? trialDaysLeft(t.ends, today) : null })),
+      referrals: referralRows, owed: owed.map((w) => ({ ...w, text: rewardText(w) })), top,
+      report: { started: trialRows.length, trialling: c('trialling'), converted: c('converted'), ended: c('ended'),
+        conversion: trialRows.length - c('trialling') ? Math.round((c('converted') / (trialRows.length - c('trialling'))) * 100) : null,
+        referrals: referralRows.length, referralTrials: referralRows.filter((r) => r.status !== 'void').length,
+        referralMembers: referralRows.filter((r) => ['member', 'rewarded'].includes(r.status)).length,
+        rewarded: referralRows.filter((r) => r.status === 'rewarded').length, revenueCents: revenue } };
+  },
+
+  async save(actor, orgId, input) {
+    await assertRole(actor, orgId, MANAGE);
+    await clubOnly(orgId);
+    const settings = readGrowthForm(input);
+    const problems = problemsWithGrowth(settings);
+    if (problems.length) throw new Invalid(problems.join(' '));
+    await pool.query(`update organisation set settings = coalesce(settings,'{}'::jsonb) || jsonb_build_object('growth', $2::jsonb), updated_at = now() where id = $1`,
+      [orgId, JSON.stringify(settings)]);
+    await pool.query(`insert into audit_log (account_id, organisation_id, action, entity, entity_id, after)
+      values ($1,$2,'growth_settings','organisation',$2,$3)`, [actor, orgId, JSON.stringify(settings)]);
+  },
+
+  /** Somebody handed over a reward that the system cannot give itself. */
+  async markGiven(actor, orgId, rewardId) {
+    await assertRole(actor, orgId, REGISTER);
+    const row = await one(`update referral_reward w set status = 'given', given_at = now(), given_by = $3
+      from referral r where w.id = $1 and r.id = w.referral_id and r.organisation_id = $2 and w.status = 'owed' returning w.id`, [rewardId, orgId, actor]);
+    if (!row) throw new NotFound('Reward');
+    await pool.query(`insert into audit_log (account_id, organisation_id, action, entity, entity_id) values ($1,$2,'reward_given','referral_reward',$3)`, [actor, orgId, rewardId]);
+  },
+
+  /**
+   * The daily run: remind people their trial is ending, end the ones that have, look again at referrals
+   * still working towards their conditions, tell people about rewards, and forget trials nobody joined.
+   * `signInLink(email, redirectTo)` gives a one-use link; it lives in the server because it needs auth.
+   */
+  async run({ messenger, baseFrom, origin, signInLink }) {
+    const report = { reminded: 0, ended: 0, requalified: 0, told: 0, forgotten: 0 };
+    const clubs = await q(`select id, name, slug, timezone, settings from organisation where type = 'club' and status = 'active'
+      and (settings->'growth'->'trial'->>'enabled')::boolean is true`);
+    for (const org of clubs) {
+      const today = await todayAt(org);
+      const rows = await q(`select t.id, t.person_id, t.status, to_char(t.ends,'YYYY-MM-DD') as ends, t.sent_week is not null as sent7,
+          t.sent_last_days is not null as sent2, p.email::text as email, p.first_name
+        from member_trial t join person p on p.id = t.person_id where t.organisation_id = $1 and t.status = 'trialling'`, [org.id]);
+      const due = trialsDue(rows, today);
+      const link = async (r) => (signInLink && r.email ? await signInLink(r.email, `/me/${r.person_id}/join`) : `${origin}/signin`);
+      for (const [list, col, subject, text] of [
+        [due.week, 'sent_week', (r) => `Your free month at ${org.name}: a week to go`,
+          (r, url) => `Hi ${r.first_name},\n\nYour free month at ${org.name} ends on ${r.ends}. If you would like to carry on training, you can join online:\n${url}\n\nSee you in class.`],
+        [due.lastDays, 'sent_last_days', (r) => `Your free month at ${org.name} ends soon`,
+          (r, url) => `Hi ${r.first_name},\n\nYour free month at ${org.name} ends on ${r.ends}. To keep training without a gap, join here:\n${url}\n\nIf it is not for you, no need to do anything.`]]) {
+        for (const r of list) {
+          const sent = await clubMail(org, { messenger, baseFrom }, r.email, subject(r), text(r, await link(r)));
+          await pool.query(`update member_trial set ${col} = now() where id = $1`, [r.id]);   // marked even if the mail failed: do not nag daily
+          if (sent) report.reminded++;
+        }
+      }
+      for (const r of due.ended) {
+        const client = await pool.connect();
+        try {
+          await client.query('begin');
+          await client.query(`update member_trial set status = 'ended', ended_at = now() where id = $1 and status = 'trialling'`, [r.id]);
+          await client.query(`update affiliation set status = 'resigned', ends = $3::date where person_id = $1 and organisation_id = $2
+            and role = 'member' and status = 'trial' and ends is null`, [r.person_id, org.id, r.ends]);
+          await client.query('commit');
+        } catch (e) { await client.query('rollback'); throw e; } finally { client.release(); }
+        await clubMail(org, { messenger, baseFrom }, r.email, `Your free month at ${org.name} has ended`,
+          `Hi ${r.first_name},\n\nYour free month at ${org.name} has finished. Thank you for coming along. If you would like to join, sign in and choose how to pay:\n${await link(r)}\n\nWe will keep your details for ${TRIAL_RETAIN_DAYS} days in case you do, then remove them.`);
+        report.ended++;
+      }
+    }
+
+    // Referrals still working towards the club's conditions.
+    for (const r of await q(`select id from referral where status = 'member' and converted_at > now() - interval '60 days'`))
+      if ((await referrals.qualify(r.id))?.rewarded) report.requalified++;
+
+    // Tell people about rewards they have earned.
+    const fresh = await q(`select w.id, w.person_id, w.kind, w.weeks, w.cents, w.note, w.status, r.organisation_id, r.referrer_id, p.email::text as email, p.first_name,
+        o.name as club, o.slug, o.timezone
+      from referral_reward w join referral r on r.id = w.referral_id join person p on p.id = w.person_id
+      join organisation o on o.id = r.organisation_id where w.notified_at is null limit 100`);
+    for (const w of fresh) {
+      const what = rewardText(w);
+      const mine = w.person_id === w.referrer_id;
+      const sent = await clubMail({ id: w.organisation_id, name: w.club, slug: w.slug }, { messenger, baseFrom }, w.email,
+        mine ? 'A friend you invited has joined' : `Welcome to ${w.club}: your reward`,
+        `Hi ${w.first_name},\n\n${mine ? 'Somebody you invited has joined' : 'Thank you for joining'} ${w.club}, so there is a reward for you: ${what}.\n${
+          w.status === 'given' ? 'It has already been added to your membership.' : 'The club will arrange it with you.'}`);
+      await pool.query('update referral_reward set notified_at = now() where id = $1', [w.id]);
+      if (sent) report.told++;
+    }
+
+    // Forget trials nobody joined, after a while. A person with any other tie to the club is left alone.
+    const stale = (await q(`select p.id from person p join member_trial t on t.person_id = p.id
+      where t.status = 'ended' and t.ended_at < now() - make_interval(days => $1) and p.display_number is null
+        and not exists (select 1 from affiliation a where a.person_id = p.id and a.ends is null)
+        and not exists (select 1 from payment py where py.person_id = p.id)
+        and not exists (select 1 from event_entry x where x.person_id = p.id)
+        and not exists (select 1 from grading_record g where g.person_id = p.id)`, [TRIAL_RETAIN_DAYS])).map((r) => r.id);
+    if (stale.length) {
+      const client = await pool.connect();
+      try {
+        await client.query('begin');
+        // Their sign-in goes with them. The audit trail is append-only and points at the account row, so
+        // the row stays — emptied of the address and of the person — and the trail keeps what happened
+        // without saying who it happened to.
+        const { rows: gone } = await client.query(`select id, email::text as email from account where person_id = any($1::uuid[])`, [stale]);
+        const ids = gone.map((a) => a.id);
+        await client.query('delete from session where account_id = any($1::uuid[])', [ids]);
+        await client.query('delete from login_link where account_id = any($1::uuid[])', [ids]);
+        await client.query('delete from login_attempt where email = any($1::citext[])', [gone.map((a) => a.email)]);
+        await client.query(`update account set person_id = null, email = 'forgotten-' || id::text || '@invalid.example' where id = any($1::uuid[])`, [ids]);
+        await client.query('delete from person where id = any($1::uuid[])', [stale]);
+        await client.query('commit');
+      } catch (e) { await client.query('rollback'); throw e; } finally { client.release(); }
+    }
+    const gone = stale;
+    report.forgotten = gone.length;
+    await q(`update member_trial set ip_hash = null where ip_hash is not null and created_at < now() - interval '2 days'`);
+    return report;
   },
 };

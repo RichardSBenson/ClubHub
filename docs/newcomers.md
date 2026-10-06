@@ -7,4 +7,4 @@ Somebody walks in off the street to try a class. They are **not a member** and a
 - **On the roll:** a "Giving it a go" section ticks newcomers per class. After three classes the list says "ask about joining".
 - **Joining:** a registrar presses *Make a member*. A real member number is allocated, the medical note moves to the member, a child's parent becomes the emergency contact, and the classes already attended count toward their first grading. The trial record then keeps only the consent. (Link a parent through the member's guardian screen afterwards.)
 - **Not continuing:** their contact, medical and guardian details are wiped at once. The daily cron also deletes any trialling/not-continuing record untouched for 180 days.
-- **Not built yet:** an online "try a free class" enquiry form (needs spam protection).
+- **Online:** the website's "try a class" enquiry form lands in Enquiries. For adults, the one-month free trial (a real person, not a newcomer) is in `trials-and-referrals.md`.

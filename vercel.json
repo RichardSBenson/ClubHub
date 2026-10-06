@@ -13,6 +13,14 @@
       "destination": "/api/index"
     },
     {
+      "source": "/trial/:path*",
+      "destination": "/api/index"
+    },
+    {
+      "source": "/r/:path*",
+      "destination": "/api/index"
+    },
+    {
       "source": "/v/:path*",
       "destination": "/api/index"
     },

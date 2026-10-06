@@ -78,7 +78,7 @@ export function standing({ paidUntil, exempt = false }, today, soonDays = 30) {
 }
 
 export const STANDING_WORDS = Object.freeze({
-  exempt: 'Not charged', overdue: 'Overdue', due: 'Due soon', current: 'Paid up', unpaid: 'Never paid',
+  exempt: 'Not charged', overdue: 'Overdue', due: 'Due soon', current: 'Paid up', unpaid: 'Never paid', trial: 'Free trial',
 });
 
 /** Which of the dojo's prices applies to this person for this period. */

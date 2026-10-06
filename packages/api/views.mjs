@@ -285,6 +285,7 @@ export function rail({ org, vocabulary = {}, can = {}, path = '' }) {
     can.register && link(`${base}/members/new`, 'Add a member'),
     can.register && link(`${base}/members/import`, 'Import a roll'),
     can.register && link(`${base}/enquiries`, 'Enquiries'),
+    isClub && can.register && link(`${base}/growth`, 'Trials and referrals'),
     can.register && link(`${base}/gradings`, 'Grading events'),
     can.register && link(`${base}/compliance`, 'Compliance'),
     can.register && link(`${base}/grading`, vocabulary.grading ?? 'Grading'),
@@ -4005,6 +4006,7 @@ export const memberHome = ({ me, csrf, people = [], unread = 0, messages = [] })
   ${people.length ? `<h1>Kia ora, ${esc(people[0].person.preferred_name || people[0].person.first_name)}</h1>
   <p class="sub">${esc(people[0].person.display_number ?? '')}
     · <a href="/me/${esc(people[0].person.id)}">See and update my details</a>
+    · <a href="/me/refer">Refer a friend</a>
     · <a href="/me/messages">Messages${unread ? ` <span class="tag wait">${unread} new</span>` : ''}</a></p>
   ${people.length > 1 ? '<p class="muted">Children I look after are below.</p>' : ''}
   ${people.map((p) => personTiles(p, csrf)).join('')}
@@ -4186,3 +4188,148 @@ export const checkinScreen = ({ me, csrf, token, expired, session, date, people 
     <div class="actions"><button class="btn" type="submit">Check in</button></div></form>`
   : `<fieldset><legend>Who is here?</legend>${people.map((p) => `<p>${p.state === 'here' ? '✓ ' : ''}${esc(p.name)} <span class="muted">— ${esc(p.reason)}</span></p>`).join('')
       || '<p class="muted">Nobody on your account is on this club\'s roll.</p>'}</fieldset>`}` });
+
+
+// ---------------------------------------------------------------------------
+// adult free trials and referrals
+// ---------------------------------------------------------------------------
+
+const WAIVER = 'I have read and accept the club\'s waiver. I understand martial arts training involves physical contact and a risk of injury, I am fit to train, and the details I have given are true.';
+
+export const trialPage = ({ csrf, offer, values = {}, error, action, code = '', friend = '' }) => page({
+  title: `${offer.name} — free month`, me: null, csrf, body: `
+  <h1>${esc(offer.name)}</h1>
+  <p class="sub">${friend ? `${esc(friend)} thought you would enjoy this. ` : ''}Your first ${offer.days} days are free. Come to any class that suits you.</p>
+  ${error ? `<div class="bad">${esc(error)}</div>` : ''}
+  <form method="post" action="${esc(action)}">
+    <div style="position:absolute;left:-9999px" aria-hidden="true"><label>Leave this empty <input name="website" tabindex="-1" autocomplete="off"></label></div>
+    <label for="firstName">First name</label><input id="firstName" name="firstName" maxlength="60" required autocomplete="given-name" value="${esc(values.firstName ?? '')}">
+    <label for="lastName">Last name</label><input id="lastName" name="lastName" maxlength="60" required autocomplete="family-name" value="${esc(values.lastName ?? '')}">
+    <label for="email">Email</label><input id="email" name="email" type="email" maxlength="120" required autocomplete="email" value="${esc(values.email ?? '')}">
+    <label for="phone">Mobile</label><input id="phone" name="phone" maxlength="30" required autocomplete="tel" value="${esc(values.phone ?? '')}">
+    <label for="dateOfBirth">Date of birth <span class="muted">(1988-03-14)</span></label>
+    <input id="dateOfBirth" name="dateOfBirth" maxlength="10" required inputmode="numeric" value="${esc(values.dateOfBirth ?? '')}">
+    <fieldset><legend>In an emergency</legend>
+      <label for="emergencyName">Name</label><input id="emergencyName" name="emergencyName" maxlength="80" required value="${esc(values.emergencyName ?? '')}">
+      <label for="emergencyPhone">Phone</label><input id="emergencyPhone" name="emergencyPhone" maxlength="30" required value="${esc(values.emergencyPhone ?? '')}">
+    </fieldset>
+    <label for="medical">Anything the instructor should know — injuries, asthma, allergies <span class="muted">(optional)</span></label>
+    <textarea id="medical" name="medical" rows="3" maxlength="1000">${esc(values.medical ?? '')}</textarea>
+    <label for="code">Invited by a member? Their code <span class="muted">(optional)</span></label>
+    <input id="code" name="code" maxlength="12" value="${esc(values.code ?? code)}" autocomplete="off">
+    <label class="check"><input type="checkbox" name="accepted" value="1"${values.accepted ? ' checked' : ''}> ${esc(WAIVER)}</label>
+    <div class="actions"><button class="btn" type="submit">Start my free month</button></div>
+  </form>` });
+
+// The same words whether or not we already knew them, so this page cannot be used to find out who is on the register.
+export const trialThanks = ({ club, days }) => page({
+  title: `${club} — free month`, me: null, body: `
+  <h1>${esc(club)}</h1>
+  <div class="good"><strong>Check your email.</strong>
+    A sign-in link is on its way. Through it you can see the timetable and check in to classes${days ? `; your ${days} days start today if you are new to us` : ''}.</div>
+  <p class="muted">The link works once and expires in 15 minutes.</p>` });
+
+export const referralLanding = ({ friend, club, days, reward, code, slug }) => page({
+  title: `${club} — an invitation`, me: null, body: `
+  <h1>${esc(friend)} invited you to ${esc(club)}</h1>
+  <p class="sub">Try it free for ${days} days${reward ? ` — and when you join you get ${esc(reward)}` : ''}.</p>
+  <p><a class="btn" href="/trial/${esc(slug)}?ref=${esc(code)}">Start my free month</a></p>` });
+
+export const referPage = ({ me, csrf, eligible, reason, club, code, offer, referred, days, rows = [], rewards = [], svg, link }) => page({
+  title: 'Refer a friend', me, csrf, body: `${cardCss}
+  <h1>Refer a friend</h1>
+  <p class="sub"><a href="/me">Back</a></p>
+  ${!eligible ? `<div class="note">${esc(reason)}</div>` : `
+  <p>Friends you invite get ${days} days free at ${esc(club)}. When one of them joins${offer ? `, you receive <strong>${esc(offer)}</strong>` : ''}${referred ? ` and they receive ${esc(referred)}` : ''}.</p>
+  <div class="idcard"><div class="org">Your invitation</div>
+    <div class="qr">${svg}</div>
+    <p style="font-size:1.4rem;letter-spacing:.2em"><strong>${esc(code)}</strong></p>
+    <p class="muted" style="word-break:break-all">${esc(link)}</p></div>
+  <p class="muted">Show the code, or let them scan it. They can also type the code when they sign up.</p>
+  <h2>Who you have invited</h2>
+  ${rows.length ? `<table><tbody>${rows.map((r) => `<tr><td>${esc(r.first_name)}</td><td class="muted">${esc(r.when)}</td>
+    <td>${esc(REFERRAL_WORDS[r.status] ?? r.status)}${r.note && r.status !== 'rewarded' ? ` <span class="muted">${esc(r.note)}</span>` : ''}</td></tr>`).join('')}</tbody></table>`
+    : '<p class="muted">Nobody yet.</p>'}
+  <h2>Your rewards</h2>
+  ${rewards.length ? `<table><tbody>${rewards.map((w) => `<tr><td>${esc(w.text)}</td><td class="muted">${esc(w.when)}</td>
+    <td>${w.status === 'given' ? 'Given' : 'The club will arrange it'}</td></tr>`).join('')}</tbody></table>` : '<p class="muted">None yet.</p>'}`}` });
+
+const REFERRAL_WORDS = { trial: 'On their free month', member: 'Joined', rewarded: 'Joined — reward earned', void: 'Not counted' };
+
+export const joinPage = ({ me, csrf, trial, options = [], error }) => page({
+  title: 'Join', me, csrf, body: `
+  <h1>Join ${esc(trial.club)}</h1>
+  <p class="sub"><a href="/me">Back</a></p>
+  ${error ? `<div class="bad">${esc(error)}</div>` : ''}
+  <p>${trial.status === 'trialling' ? `Your free month runs until ${esc(trial.ends)}. Whatever you choose, your membership carries on from the day it ends.`
+      : 'Your free month has ended. Choose how you would like to join.'}</p>
+  ${options.length ? `<form method="post"><input type="hidden" name="_csrf" value="${esc(csrf ?? '')}">
+    <fieldset><legend>How would you like to pay?</legend>
+    ${options.map((o, i) => `<label class="check"><input type="radio" name="period" value="${esc(o.period)}"${i === 0 ? ' checked' : ''}>
+      ${esc(o.fee.label)} — ${esc(cents(o.fee.amount_cents, o.fee.currency))} <span class="muted">${esc(o.label.toLowerCase())}</span></label>`).join('')}
+    </fieldset><div class="actions"><button class="btn" type="submit">Continue to payment</button></div></form>`
+    : '<div class="note">The club has not published its prices yet. Please ask them how to join.</div>'}` });
+
+const GROWTH_KIND_OPTIONS = (sel) => Object.entries(REWARD_KINDS_).map(([k, v]) => `<option value="${k}"${sel === k ? ' selected' : ''}>${esc(v)}</option>`).join('');
+import { REWARD_KINDS as REWARD_KINDS_ } from '../core/domain/growth.mjs';
+
+export const growthScreen = ({ me, csrf, org, settings, trials = [], referrals = [], owed = [], top = [], report, offer, canManage, done, error, origin }) => {
+  const rf = (p, r) => `<fieldset><legend>${p === 'referrer' ? 'The member who invited them gets' : 'The new member gets (optional)'}</legend>
+    <select name="${p}_kind">${GROWTH_KIND_OPTIONS(r.kind)}</select>
+    <label>Weeks <input name="${p}_weeks" value="${r.weeks || ''}" size="3" inputmode="numeric"></label>
+    <label>Amount $ <input name="${p}_amount" value="${r.cents ? (r.cents / 100) : ''}" size="6" inputmode="decimal"></label>
+    <label>What <input name="${p}_note" value="${esc(r.note)}" maxlength="120"></label>
+    <p class="muted">Free weeks are added to their membership automatically. Anything else is listed below until somebody hands it over.</p></fieldset>`;
+  return page({
+    title: `${org.name} — trials and referrals`, me, csrf, body: `
+  <h1>Trials and referrals</h1>
+  <p class="sub">Adults try a month free, join, and bring friends. Every trial is a real person on your register.</p>
+  ${done ? `<div class="good">${esc(done)}</div>` : ''}${error ? `<div class="bad">${esc(error)}</div>` : ''}
+  ${settings.trial.enabled ? `<div class="note">Share this link on your website and social media: <strong>${esc(origin)}/trial/${esc(org.slug)}</strong></div>` : ''}
+
+  <h2>How it is going</h2>
+  <div class="row">
+    <div><strong>${report.started}</strong> trials started</div>
+    <div><strong>${report.trialling}</strong> trialling now</div>
+    <div><strong>${report.converted}</strong> joined${report.conversion != null ? ` (${report.conversion}% of finished trials)` : ''}</div>
+    <div><strong>${report.referrals}</strong> referrals</div>
+    <div><strong>${report.referralMembers}</strong> became members</div>
+    <div><strong>${report.rewarded}</strong> rewards earned</div>
+    <div><strong>${esc(cents(report.revenueCents, 'NZD'))}</strong> paid by referred members</div>
+  </div>
+  ${top.length ? `<p class="muted">Top referrers: ${top.map((t) => `${esc(t.name)} (${t.n})`).join(', ')}.</p>` : ''}
+
+  ${owed.length ? `<h2>Rewards to hand over</h2><table><tbody>${owed.map((w) => `<tr><td>${esc(w.name)} <span class="muted">${esc(w.display_number ?? '')}</span></td><td>${esc(w.text)}</td>
+    <td><form method="post" action="/o/${esc(org.slug)}/growth/rewards/${esc(w.id)}/given"><input type="hidden" name="_csrf" value="${esc(csrf ?? '')}">
+      <button class="btn quiet" type="submit">Mark as given</button></form></td></tr>`).join('')}</tbody></table>` : ''}
+
+  <h2>Free trials</h2>
+  ${trials.length ? `<table><thead><tr><th>Who</th><th>Started</th><th>Ends</th><th>Classes</th><th>Status</th></tr></thead><tbody>${trials.map((t) => `<tr>
+    <td>${esc(t.name)}${t.source === 'referral' ? ' <span class="tag ok">referred</span>' : ''}<div class="muted">${esc(t.email ?? '')} ${esc(t.phone ?? '')}</div></td>
+    <td>${esc(t.starts)}</td><td>${esc(t.ends)}${t.left != null ? ` <span class="muted">(${t.left < 0 ? 'ended' : t.left + ' days left'})</span>` : ''}</td>
+    <td>${t.classes}</td><td>${esc({ trialling: 'Trialling', converted: 'Joined', ended: 'Ended' }[t.status])}${t.display_number ? ` <span class="muted">${esc(t.display_number)}</span>` : ''}</td></tr>`).join('')}</tbody></table>`
+    : '<p class="muted">No trials yet.</p>'}
+
+  <h2>Referrals</h2>
+  ${referrals.length ? `<table><thead><tr><th>Invited by</th><th>Friend</th><th>When</th><th>Where it is</th></tr></thead><tbody>${referrals.map((r) => `<tr>
+    <td>${esc(r.referrer)}</td><td>${esc(r.referred)}</td><td>${esc(r.when)}</td>
+    <td>${esc(REFERRAL_WORDS[r.status] ?? r.status)}${r.note ? ` <span class="muted">${esc(r.note)}</span>` : ''}</td></tr>`).join('')}</tbody></table>`
+    : '<p class="muted">No referrals yet.</p>'}
+
+  <h2>What you offer</h2>
+  ${canManage ? `<form method="post" action="/o/${esc(org.slug)}/growth/settings">
+    <input type="hidden" name="_csrf" value="${esc(csrf ?? '')}">
+    <fieldset><legend>Free trial for adults</legend>
+      <label class="check"><input type="checkbox" name="trial_enabled" value="1"${settings.trial.enabled ? ' checked' : ''}> Offer a free trial on the website</label>
+      <label>Days free <input name="trial_days" value="${settings.trial.days}" size="3" inputmode="numeric"></label>
+      <label>Youngest allowed <input name="trial_min_age" value="${settings.trial.minAge}" size="3" inputmode="numeric"></label>
+    </fieldset>
+    <fieldset><legend>Referrals</legend>
+      <label class="check"><input type="checkbox" name="referral_enabled" value="1"${settings.referral.enabled ? ' checked' : ''}> Members can invite friends</label>
+      <label>Classes the friend must attend before the reward <input name="min_classes" value="${settings.referral.minClasses}" size="3" inputmode="numeric"></label>
+      <label>Most rewards one member can earn in a year <input name="max_per_year" value="${settings.referral.maxPerYear}" size="3" inputmode="numeric"></label>
+      ${rf('referrer', settings.referral.referrer)}${rf('referred', settings.referral.referred)}
+    </fieldset>
+    <div class="actions"><button class="btn" type="submit">Save</button></div></form>`
+  : '<p class="muted">An administrator sets these.</p>'}` });
+};

@@ -16,6 +16,7 @@ export function cardValidThrough({ paidUntil = null, exempt = false }, today, da
 /** Why somebody cannot have a card, in words they can act on. Null when they can. */
 export function cardRefusal({ role, status, paidUntil, exempt, displayNumber }, today) {
   if (role !== 'member') return 'Only members have a card.';
+  if (status === 'trial') return 'You are on a free trial. Your card arrives when you join.';
   if (status !== 'active') return `Your membership is ${status}.`;
   if (!displayNumber) return 'No member number has been given yet — ask your club.';
   if (!exempt && !paidUntil) return 'There is no paid-until date on your membership.';

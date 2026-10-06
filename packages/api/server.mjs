@@ -33,13 +33,14 @@
 import crypto from 'node:crypto';
 import { URL } from 'node:url';
 import { pool, orgs, people, rank, events, competition, pages, assets, news,
-         instructors, navigation, audit, cards, checkin, search, clubPages, appearance, clubs, clubProfile, family, myself, memberEvents, messages, emailPreferences, payments, fees, renewals, reminders, attendance, newcomers, reports, gradings, qualifications, portal, enquiries, scheduledPublishing, TooMany, outsiders,
+         instructors, navigation, audit, cards, checkin, search, clubPages, appearance, clubs, clubProfile, family, myself, memberEvents, messages, emailPreferences, payments, fees, renewals, reminders, attendance, newcomers, reports, gradings, qualifications, portal, enquiries, scheduledPublishing, TooMany, outsiders, trials, referrals, growth, clubMailer,
          Forbidden, NotFound, Invalid } from './data.mjs';
 import * as auth from './auth.mjs';
 import * as V from './views.mjs';
 import { qrSvg } from '../core/domain/qr.mjs';
 import { CHECKIN_REFRESH_SECONDS } from './card-token.mjs';
 import { readOutsider } from '../core/domain/outsider.mjs';
+import { readTrialSignup, normaliseCode } from '../core/domain/growth.mjs';
 import { signEntryToken, readEntryToken } from './entry-token.mjs';
 import { repeatFromLast, decideQuick } from '../core/domain/repeat-entry.mjs';
 import { readEnquiry, looksLikeRobot, sameSite } from '../core/domain/enquiry.mjs';
@@ -434,6 +435,115 @@ get('/me/messages/:id', async (ctx) => {
   ctx.requireActor();
   if (!UUID_RE.test(ctx.params.id)) throw new NotFound('Message');
   return ctx.send(200, V.messageView({ me: ctx.me, csrf: ctx.csrf, message: await portal.message(ctx.me.accountId, ctx.params.id) }));
+});
+
+// ---- adult free trials and referrals ----------------------------------------
+
+// A sign-in link that lands where the person was heading. Lives here because it needs auth.
+const signInLinkFor = (origin) => async (email, redirectTo) => {
+  const issue = await auth.requestLink(email, { redirectTo });
+  return issue?.token ? `${origin}/signin/${issue.token}` : `${origin}/signin`;
+};
+
+get('/trial/:slug/thanks', async (ctx) => {
+  const offer = await trials.offer(ctx.params.slug);
+  if (!offer) throw new NotFound('Free trial');
+  return ctx.send(200, V.trialThanks({ club: offer.name, days: offer.days }));
+});
+
+get('/trial/:slug', async (ctx) => {
+  const offer = await trials.offer(ctx.params.slug);
+  if (!offer) throw new NotFound('Free trial');
+  const code = normaliseCode(ctx.url.searchParams.get('ref'));
+  const hit = code ? await referrals.landing(code) : null;
+  return ctx.send(200, V.trialPage({ csrf: ctx.csrf, offer, action: `/trial/${offer.slug}`,
+    code: hit && hit.slug === offer.slug ? code : '', friend: hit && hit.slug === offer.slug ? hit.friend : '' }));
+});
+
+post('/trial/:slug', async (ctx) => {
+  const form = await ctx.publicForm();
+  const offer = await trials.offer(ctx.params.slug);
+  if (!offer) throw new NotFound('Free trial');
+  const done = `/trial/${offer.slug}/thanks`;
+  if (looksLikeRobot(form)) return ctx.redirect(done);
+  const input = readTrialSignup(form);
+  let out;
+  try {
+    out = await trials.start({ slug: offer.slug, input, ipHash: ipHash(ctx.ip) });
+  } catch (e) {
+    if (e instanceof Invalid || e instanceof TooMany)
+      return ctx.send(e.status ?? 422, V.trialPage({ csrf: ctx.csrf, offer, action: `/trial/${offer.slug}`, values: input, error: e.message }));
+    throw e;
+  }
+  // The same answer whether or not we knew them. Only an address they gave us is written to.
+  const origin = originOf(ctx);
+  const to = out.existing ? out.email : input.email;
+  if (to) {
+    const link = await signInLinkFor(origin)(to, '/me');
+    await clubMailer(out.org, { messenger: messengerFrom(), baseFrom: sendingAddress() }, to,
+      out.existing ? `Sign in to ${offer.name}` : `Welcome to ${offer.name}`,
+      out.existing ? `Hi ${input.firstName},\n\nHere is your sign-in link for ${offer.name}:\n${link}\n\nIt works once and expires in 15 minutes.`
+        : `Hi ${input.firstName},\n\nYour free month at ${offer.name} has started and runs until ${out.ends}. Sign in to see the timetable and check in to classes:\n${link}\n\nThe link works once and expires in 15 minutes. Bring a drink and wear something comfortable.`);
+  }
+  return ctx.redirect(done);
+});
+
+get('/r/:code', async (ctx) => {
+  const hit = await referrals.landing(ctx.params.code);
+  if (!hit) throw new NotFound('Invitation');
+  return ctx.send(200, V.referralLanding(hit));
+});
+
+get('/me/refer', async (ctx) => {
+  ctx.requireActor();
+  if (!ctx.me.personId) throw new NotFound('Your record');
+  const r = await referrals.mine(ctx.me.accountId, ctx.me.personId);
+  const link = r.eligible ? `${originOf(ctx)}/r/${r.code}` : '';
+  return ctx.send(200, V.referPage({ me: ctx.me, csrf: ctx.csrf, ...r, link, svg: r.eligible ? qrSvg(link, { label: 'Your invitation code' }) : '' }));
+});
+
+async function joinScreen(ctx, extra = {}) {
+  if (!UUID_RE.test(ctx.params.personId)) throw new NotFound('Person');
+  const { trial, options } = await trials.prices(ctx.me.accountId, ctx.params.personId);
+  return ctx.send(extra.status ?? 200, V.joinPage({ me: ctx.me, csrf: ctx.csrf, trial, options, ...extra }));
+}
+get('/me/:personId/join', async (ctx) => { ctx.requireActor(); return joinScreen(ctx); });
+post('/me/:personId/join', async (ctx) => {
+  ctx.requireActor();
+  const form = await ctx.form();
+  if (!UUID_RE.test(ctx.params.personId)) throw new NotFound('Person');
+  try {
+    const out = await trials.joinNow(ctx.me.accountId, ctx.params.personId, form.period);
+    return ctx.redirect(`/me/payments/${out.paymentId}`);
+  } catch (e) {
+    if (e instanceof Invalid) return joinScreen(ctx, { status: 422, error: e.message });
+    throw e;
+  }
+});
+
+async function growthScreen(ctx, org, extra = {}) {
+  const data = await growth.overview(ctx.me.accountId, org.id);
+  return ctx.send(extra.status ?? 200, V.growthScreen({ me: ctx.me, csrf: ctx.csrf, ...data, org, origin: originOf(ctx),
+    canManage: await mayManageAt(ctx, org.id), done: ctx.url.searchParams.get('done'), ...extra }));
+}
+get('/o/:slug/growth', async (ctx) => { const org = await organisationFor(ctx, { toRegister: true }); return growthScreen(ctx, org); });
+post('/o/:slug/growth/settings', async (ctx) => {
+  const org = await organisationFor(ctx);
+  const form = await ctx.form();
+  try {
+    await growth.save(ctx.me.accountId, org.id, form);
+    return ctx.redirect(`/o/${org.slug}/growth?done=${encodeURIComponent('Saved.')}`);
+  } catch (e) {
+    if (e instanceof Invalid) return growthScreen(ctx, org, { status: 422, error: e.message });
+    throw e;
+  }
+});
+post('/o/:slug/growth/rewards/:id/given', async (ctx) => {
+  const org = await organisationFor(ctx, { toRegister: true });
+  await ctx.form();
+  if (!UUID_RE.test(ctx.params.id)) throw new NotFound('Reward');
+  await growth.markGiven(ctx.me.accountId, org.id, ctx.params.id);
+  return ctx.redirect(`/o/${org.slug}/growth?done=${encodeURIComponent('Marked as given.')}`);
 });
 
 // ---- the digital card and class check-in ------------------------------------
@@ -1944,10 +2054,10 @@ get('/cron/renewals', async (ctx) => {
   const enquiriesDeleted = await enquiries.tidy();
   const qualReport = await qualifications.remind({ messenger: messengerFrom(), baseFrom: sendingAddress(),
     origin: process.env.VERCEL_PROJECT_PRODUCTION_URL ? `https://${process.env.VERCEL_PROJECT_PRODUCTION_URL}` : originOf(ctx) });
-  const report = await reminders.run({ messenger: messengerFrom(), baseFrom: sendingAddress(),
-    origin: process.env.VERCEL_PROJECT_PRODUCTION_URL
-      ? `https://${process.env.VERCEL_PROJECT_PRODUCTION_URL}` : originOf(ctx) });
-  return ctx.send(200, `<pre>${JSON.stringify({ report, qualifications: qualReport, newcomersForgotten: forgotten, enquiriesDeleted }, null, 1).replace(/</g, '&lt;')}</pre>`);
+  const origin = process.env.VERCEL_PROJECT_PRODUCTION_URL ? `https://${process.env.VERCEL_PROJECT_PRODUCTION_URL}` : originOf(ctx);
+  const report = await reminders.run({ messenger: messengerFrom(), baseFrom: sendingAddress(), origin });
+  const growthReport = await growth.run({ messenger: messengerFrom(), baseFrom: sendingAddress(), origin, signInLink: signInLinkFor(origin) });
+  return ctx.send(200, `<pre>${JSON.stringify({ report, qualifications: qualReport, newcomersForgotten: forgotten, enquiriesDeleted, growth: growthReport }, null, 1).replace(/</g, '&lt;')}</pre>`);
 });
 
 post('/o/:slug/renewals/fees', async (ctx) => {

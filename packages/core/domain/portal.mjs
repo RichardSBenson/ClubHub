@@ -45,8 +45,13 @@ export function nextSession(sessions, now, who = {}) {
  * `details` { emergencyContact: bool }
  */
 export function actionsFor({ personId, owed = [], memberships = [], closing = [], qualifications = [],
-                             details = { emergencyContact: true } }) {
+                             details = { emergencyContact: true }, trial = null }) {
   const out = [];
+  if (trial && trial.left != null)
+    out.push({ kind: 'trial', urgent: trial.left <= 3, href: `/me/${personId}/join`,
+      text: trial.left < 0 ? 'Your free month has ended — join to keep training'
+        : trial.left === 0 ? 'Your free month ends today — join to keep training'
+        : `Your free month ends in ${trial.left} day${trial.left === 1 ? '' : 's'} — join to keep training` });
   if (owed.length) {
     const total = owed.reduce((n, p) => n + (p.amount_cents ?? 0), 0);
     out.push({ kind: 'payment', urgent: true, href: '/me/payments', total, count: owed.length,
