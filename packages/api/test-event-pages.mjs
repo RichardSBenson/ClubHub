@@ -146,6 +146,7 @@ console.log('\nTHE BANNER AND THE PAGE');
   const html = fs.readFileSync(path.join(OUT, 'whanganui/events', eventSlug, 'index.html'), 'utf8');
   ok('without anybody at the federation approving it', !fs.existsSync(path.join(OUT, 'events', eventSlug)));
   ok('the event page has the big banner', /class="evbanner"/.test(html) && /Shinsa/.test(html));
+  ok('the banner names the dojo that is running it', /<span class="evhost">Whanganui Dojo<\/span>/.test(html));
   ok('the heading is there for screen readers and search', /<h1 class="sr">/.test(html));
   ok('the venue and address are listed', /Whanganui Collegiate Gym/.test(html) && /1 Hospital Road/.test(html));
   ok('the contact is a phone and an email link', /href="tel:063450000"/.test(html) && /href="mailto:doug@example.nz"/.test(html));

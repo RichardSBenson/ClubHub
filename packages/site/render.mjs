@@ -51,14 +51,17 @@ function shortRange(starts, ends, tz = 'Pacific/Auckland') {
  * three lines. Nothing here is a picture of words, so a changed date is a
  * changed line, and it stays sharp, searchable and readable by a screen reader.
  */
-function eventBanner(ev, { logoUrl = null, federationName = '', small = false } = {}) {
+function eventBanner(ev, { logoUrl = null, federationName = '', small = false, vocabulary = {} } = {}) {
   const { top, main } = bannerLines(ev);
+  // Who is running it: the dojo's name. An event the federation itself runs does not say so twice.
+  const host = ev.from_org && ev.from_org !== federationName ? `${ev.from_org} ${capitalise(clubWord(vocabulary))}` : '';
   return `<div class="evbanner${small ? ' small' : ''}">
   ${logoUrl ? `<img class="crest" src="${esc(logoUrl)}" alt="${esc(federationName)} crest">` : ''}
   <div class="evtext">
     ${top ? `<span class="evtop">${esc(top)}</span>` : ''}
     <span class="evmain">${esc(main)}</span>
     <span class="evwhen">${esc(shortRange(ev.starts_at, ev.ends_at))}</span>
+    ${host ? `<span class="evhost">${esc(host)}</span>` : ''}
   </div>
 </div>`;
 }
@@ -261,9 +264,10 @@ table.times td:last-child{text-align:right;color:var(--muted)}
 .evtop{font-size:clamp(28px,5.4vw,68px);color:var(--neutral)}
 .evmain{font-size:clamp(34px,7vw,92px);color:var(--accent);text-transform:uppercase}
 .evwhen{font-size:clamp(26px,5vw,64px);color:var(--neutral)}
+.evhost{margin-top:.5em;font-size:clamp(16px,2.6vw,34px);letter-spacing:.14em;text-transform:uppercase;color:var(--accent)}
 .evbanner.small{justify-content:flex-start;padding:16px 20px;gap:16px}
 .evbanner.small .crest{height:72px;max-width:30%}
-.evbanner.small .evtop{font-size:20px}.evbanner.small .evmain{font-size:26px}.evbanner.small .evwhen{font-size:18px}
+.evbanner.small .evtop{font-size:20px}.evbanner.small .evmain{font-size:26px}.evbanner.small .evwhen{font-size:18px}.evbanner.small .evhost{font-size:13px;margin-top:4px}
 a.evcard{display:block;text-decoration:none;border-bottom:4px solid var(--primary);border-radius:2px;overflow:hidden;
   transition:transform .15s ease,box-shadow .15s ease}
 a.evcard:hover{transform:translateY(-2px);box-shadow:0 10px 24px rgba(0,0,0,.25)}
@@ -516,7 +520,7 @@ export function dojoPage({ dojo, federation, events, origin, fonts, nav,
 
     events: () => events.length ? `<h2 style="margin-top:40px">What's on</h2>
   <div class="evcards" style="grid-template-columns:1fr">${events.map((e) => `<a class="evcard" href="${at(e.is_own ? `/${esc(dojo.slug)}/events/${esc(e.slug)}` : `/events/${esc(e.slug)}`)}">
-    ${eventBanner(e, { logoUrl, federationName: federation.name, small: true })}</a>`).join('')}</div>` : '',
+    ${eventBanner(e, { logoUrl, federationName: federation.name, small: true, vocabulary })}</a>`).join('')}</div>` : '',
 
     findUs: () => `<h2 id="visit" style="margin-top:40px">Finding us</h2>
   <p>${esc(dojo.venue_name ?? '')}<br>${esc([dojo.address_line, dojo.suburb, dojo.city].filter(Boolean).join(', '))}
@@ -746,7 +750,7 @@ export function eventPage({ ev, federation, origin, fonts, nav,
 
   const body = `
 <h1 class="sr">${esc(ev.title)}</h1>
-${eventBanner(ev, { logoUrl, federationName: federation.name })}
+${eventBanner(ev, { logoUrl, federationName: federation.name, vocabulary })}
 <section><div class="wrap evgrid">
   <div>
     ${ev.summary ? `<p style="font-size:20px">${esc(ev.summary)}</p>` : ''}
@@ -797,7 +801,7 @@ export function eventsPage({ events, federation, origin, fonts, nav,
 </div></div>
 <section><div class="wrap">
   ${events.length ? `<div class="evcards">${events.map((e) => `<a class="evcard" href="${at(`/events/${esc(e.slug)}`)}">
-    ${eventBanner(e, { logoUrl, federationName: federation.name, small: true })}
+    ${eventBanner(e, { logoUrl, federationName: federation.name, small: true, vocabulary })}
   </a>`).join('')}</div>`
   : '<p>Check back closer to the season.</p>'}
 </div></section>`;
