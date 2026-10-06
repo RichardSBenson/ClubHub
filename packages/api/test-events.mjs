@@ -162,14 +162,18 @@ console.log('\nA DRAFT IS NOT ON THE PUBLIC SITE');
   ok('marked as a draft', list.html.includes('Draft'));
 }
 
-console.log('\nTWO EVENTS CANNOT SHARE A WEB ADDRESS');
+console.log('\nTHE SAME EVENT TWICE IS DECIDED BY WHEN, NOT BY TITLE');
 {
   const again = await req('/o/whanganui/events/new',
     { method: 'POST', form: { ...FULL, status: 'draft' } });
-  ok('the second is refused', again.status === 422);
+  ok('the same kind at the same time is refused', again.status === 422);
   ok('by name, with what to do about it',
-    again.html.includes('already has an event at')
-    && again.html.includes('Change the title'));
+    again.html.includes('already has') && again.html.includes('at that date and time')
+    && again.html.includes('change the time'));
+  ok('the form no longer asks for a web address', !/name="slug" value=""/.test(again.html) && !/Web address/.test(again.html));
+  const later = await req('/o/whanganui/events/new',
+    { method: 'POST', form: { ...FULL, startsAt: '2026-12-12T09:00', endsAt: '2026-12-12T12:00', status: 'draft' } });
+  ok('the same title on another day is fine', later.status === 302, later.html.slice(0, 160));
 }
 
 console.log('\nOPENING IT TO CHANGE IT');

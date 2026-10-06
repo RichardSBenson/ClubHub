@@ -24,6 +24,24 @@ import { requirePort, Refused, NotPermitted,
  */
 export const MAY_SCHEDULE = ['owner', 'administrator', 'registrar'];
 
+/** The local calendar day of an instant, as 2026-11-14, in the organisation's own time zone. */
+function dayIn(date, zone) {
+  try { return new Intl.DateTimeFormat('en-CA', { timeZone: zone || 'UTC' }).format(date); }
+  catch { return date.toISOString().slice(0, 10); }
+}
+
+/**
+ * Is this the same event twice? Decided by WHEN it is and what kind it is, never by its title:
+ * a dojo runs several gradings a year, for juniors and for seniors, and they are all called
+ * "Kyu Grading". Two events of one kind starting at the same moment is a slip of the finger.
+ * `exceptId` lets an event be saved over itself.
+ */
+async function sameTimeAndKind(events, organisationId, event, exceptId = null) {
+  const mine = await events.listFor(organisationId);
+  return mine.find((e) => e.id !== exceptId && e.status !== 'cancelled'
+    && e.kind === event.kind && new Date(e.startsAt).getTime() === event.startsAt.getTime()) ?? null;
+}
+
 export class ScheduleEvent {
   constructor({ events, organisations, auth, clock }) {
     this.events = requirePort(events, EVENT_REPOSITORY);
@@ -41,13 +59,28 @@ export class ScheduleEvent {
 
     // Built before the clash is checked, so a malformed event is refused for
     // being malformed rather than for a slug collision it never reached.
-    const event = new Event({ ...fields, organisationId });
+    let event = new Event({ ...fields, organisationId });
 
-    const clash = await this.events.bySlug(organisationId, String(event.slug));
-    if (clash) {
+    const twin = await sameTimeAndKind(this.events, organisationId, event);
+    if (twin) {
       throw new Refused(
-        `${org.name} already has an event at "${event.slug}". `
-        + 'Change the title, or give this one its own web address.');
+        `${org.name} already has "${twin.title}" at that date and time. `
+        + 'If it is a different event, change the time.');
+    }
+
+    // A web address nobody asked for is made unique for them: the title, then the date, then a
+    // number. One that somebody typed themselves is theirs, so a clash with it is reported.
+    const wanted = String(fields.slug ?? '').trim();
+    const taken = async (slug) => !!await this.events.bySlug(organisationId, slug);
+    if (await taken(String(event.slug))) {
+      if (wanted) {
+        throw new Refused(`${org.name} already has an event at "${event.slug}". Choose another web address.`);
+      }
+      const base = String(event.slug);
+      const day = dayIn(event.startsAt, org.timezone);
+      let candidate = `${base}-${day}`;
+      for (let n = 2; await taken(candidate); n += 1) candidate = `${base}-${day}-${n}`;
+      event = new Event({ ...fields, organisationId, slug: candidate });
     }
 
     return this.events.save(event);
@@ -78,6 +111,11 @@ export class ReviseEvent {
 
     let revised = existing.revisedWith(changes);
     if (status) revised = revised.movedTo(status);
+
+    if (revised.startsAt.getTime() !== existing.startsAt.getTime() || revised.kind !== existing.kind) {
+      const twin = await sameTimeAndKind(this.events, existing.organisationId, revised, existing.id);
+      if (twin) throw new Refused(`There is already "${twin.title}" at that date and time.`);
+    }
 
     if (String(revised.slug) !== String(existing.slug)) {
       const clash = await this.events.bySlug(

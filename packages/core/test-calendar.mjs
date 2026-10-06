@@ -53,13 +53,24 @@ console.log('\nRULES THAT DO NOT DEPEND ON THE DATABASE');
     startsAt: '2026-12-05T09:00Z', visibility: 'by_grade' }), 'needs a lowest or highest');
 }
 
-console.log('\nTWO EVENTS CANNOT SHARE AN ADDRESS');
+console.log('\nTHE SAME EVENT TWICE IS DECIDED BY WHEN, NOT BY TITLE');
 {
   const { schedule } = build();
   const base = { actorId: 'a', organisationId: 'wh', kind: 'grading',
-    title: 'Summer Kyu Grading', startsAt: '2026-12-05T09:00Z' };
-  await schedule.execute(base);
-  await throws('the second one is refused, by name', () => schedule.execute(base),
+    title: 'Kyu Grading', startsAt: '2026-12-05T09:00Z' };
+  const first = await schedule.execute(base);
+  await throws('the same kind at the same moment is refused, naming the first', () => schedule.execute({ ...base, title: 'Something else' }),
+    'already has "Kyu Grading" at that date and time');
+  const juniors = await schedule.execute({ ...base, startsAt: '2026-12-05T13:00Z' });
+  const march = await schedule.execute({ ...base, startsAt: '2027-03-06T09:00Z' });
+  const june = await schedule.execute({ ...base, startsAt: '2027-06-05T09:00Z' });
+  ok('three gradings with one title can live side by side', [first, juniors, march, june].every(Boolean));
+  ok('each gets its own web address without anybody typing one',
+    new Set([first, juniors, march, june].map((e) => String(e.slug))).size === 4
+    && String(first.slug) === 'kyu-grading' && /^kyu-grading-2026-12-05/.test(String(juniors.slug)));
+  const social = await schedule.execute({ ...base, kind: 'social', title: 'Kyu Grading party' });
+  ok('a different kind at the same moment is allowed', !!social);
+  await throws('a web address somebody typed is theirs, so a clash is reported', () => schedule.execute({ ...base, startsAt: '2028-01-01T09:00Z', slug: 'kyu-grading' }),
     'already has an event at');
 }
 

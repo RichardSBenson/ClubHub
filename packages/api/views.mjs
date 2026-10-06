@@ -1126,12 +1126,7 @@ export const eventForm = ({ me, csrf, org, values = {}, zone, error,
             option(k, KIND_LABELS[k], v('kind', 'training'))).join('')}
         </select>
       </div>
-      <div>
-        <label for="slug">Web address
-          <span class="hint">Leave blank and it is made from the title.</span></label>
-        <input id="slug" name="slug" value="${esc(v('slug'))}"
-          pattern="[a-z0-9]+(-[a-z0-9]+)*">
-      </div>
+      ${v('slug') ? `<input type="hidden" name="slug" value="${esc(v('slug'))}">` : ''}
     </div>
 
     <label for="summary">One line about it</label>

@@ -37,6 +37,12 @@ layout the federation saved. Sizes are in `website-images.md` (aim for 1200 × 8
 Adding a new picture needs an owner or administrator (uploading is limited to them); choosing one already in the
 library does not.
 
+## Several of the same event
+A dojo can run as many events with the same title as it likes (three kyu gradings a year, for juniors and for
+seniors). The form has no web address box: one is made from the title and, if that is taken, the date as well
+(`kyu-grading-2026-11-14`). The only thing refused is the same kind of event starting at the same moment, which is
+almost certainly a double entry; the message names the event already there.
+
 ## About this event
 The event form has an **About this event** box (up to 4000 characters). A blank line starts a new paragraph and a
 single line break is kept. It is plain text: anything that looks like markup is shown as written, never run. It
