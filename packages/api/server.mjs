@@ -392,11 +392,13 @@ post('/p/:id/instructor', async (ctx) => {
 post('/p/:id/photo', async (ctx) => {
   ctx.requireActor();
   if (!UUID_RE.test(ctx.params.id)) throw new NotFound('Person');
-  const back = `/p/${ctx.params.id}`;
+  let back = `/p/${ctx.params.id}`;
   // Whether this person may touch this record is settled before anything they sent is looked at.
   await photos.assertMay(ctx.me.accountId, ctx.params.id);
   try {
     const { fields, files } = await ctx.upload({ maxBytes: MAX_BYTES + 256 * 1024 });
+    // Sent from "My details": go back there, not to the register view a member may not open.
+    if (fields.return === 'me') back = `/me/${ctx.params.id}`;
     if (fields.remove) { await photos.clear(ctx.me.accountId, ctx.params.id); return ctx.redirect(`${back}?done=${encodeURIComponent('Photograph removed.')}`); }
     const file = files.find((f) => f.field === 'photo' && f.bytes.length);
     if (!file) return ctx.redirect(`${back}?error=${encodeURIComponent('Choose a photograph first.')}`);

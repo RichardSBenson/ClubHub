@@ -121,6 +121,12 @@ await signIn('doug@example.nz');
   await signIn('pat.plain@example.nz');
   r = await req(`/p/${sensei.id}/photo`);
   ok('a stranger cannot fetch it', r.status === 403 || r.status === 404);
+  // The member's own page: that is where they look for it.
+  r = await req(`/me/${plain.id}`);
+  ok('a member finds the photograph form on their own details page', r.status === 200 && new RegExp(`action="/p/${plain.id}/photo"`).test(r.html) && /name="return" value="me"/.test(r.html));
+  r = await multi(`/p/${plain.id}/photo`, { consent: 'on', return: 'me' }, { field: 'photo', bytes: PNG, name: 'pat.png' });
+  ok('saving it brings them back to their own page', r.status === 302 && r.location.startsWith(`/me/${plain.id}?done=Photograph`), r.location);
+  ok('where they can see it', new RegExp(`<img src="/p/${plain.id}/photo"`).test((await req(`/me/${plain.id}`)).html));
   await signIn('doug@example.nz');
 }
 

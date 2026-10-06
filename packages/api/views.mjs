@@ -3121,6 +3121,19 @@ export const myPerson = ({ me, csrf, how, person, private: priv = {}, grade, mem
   <p class="muted">Name, date of birth, grade and membership are kept by the club
     and federation. Ask them if one is wrong.</p>
 
+  <h2>Photograph</h2>
+  <form method="post" action="/p/${esc(person.id)}/photo" enctype="multipart/form-data" class="card" style="margin:12px 0">
+    <input type="hidden" name="_csrf" value="${esc(csrf ?? '')}">
+    <input type="hidden" name="return" value="me">
+    ${person.photo_asset_id ? `<p><img src="/p/${esc(person.id)}/photo" alt="Photograph of ${esc(person.first_name)}" style="width:120px;height:120px;object-fit:cover;border-radius:2px"></p>` : '<p class="hint">No photograph yet.</p>'}
+    <p><input type="file" name="photo" accept="image/png,image/jpeg,image/webp"></p>
+    <p class="hint">${esc(slotHint('portrait'))} It is used on ${mine ? 'your' : 'their'} membership card and, if ${mine ? 'you are' : 'they are'} shown on the website, on the instructor card.</p>
+    <label class="check"><input type="checkbox" name="consent">
+      ${mine ? 'I agree' : 'I agree, as their parent or guardian,'} to this photograph being kept on the record.</label>
+    <p><button class="btn" type="submit">Save photograph</button>
+      ${person.photo_asset_id ? '<button class="btn quiet" type="submit" name="remove" value="1">Remove photograph</button>' : ''}</p>
+  </form>
+
   <h2>Contact and safety details</h2>
   <form method="post" action="/me/${esc(person.id)}">
     <input type="hidden" name="_csrf" value="${esc(csrf ?? '')}">

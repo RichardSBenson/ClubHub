@@ -2263,7 +2263,7 @@ export const myself = {
   /** Everything a member sees about themselves or a child they look after. */
   async get(actor, personId) {
     const how = await family.assertMayActFor(actor, personId);
-    const person = await one(`select ${PERSON_COLUMNS} from person p where p.id=$1`, [personId]);
+    const person = await one(`select ${PERSON_COLUMNS}, p.photo_asset_id from person p where p.id=$1`, [personId]);
     if (!person) throw new NotFound('Person');
     const priv = await one(`select address_line, suburb, city, postcode, emergency_name,
       emergency_phone, medical_notes from person_private where person_id=$1`, [personId]) ?? {};
