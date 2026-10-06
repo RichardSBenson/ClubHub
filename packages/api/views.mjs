@@ -3936,3 +3936,170 @@ export const enterNew = ({ csrf, ev, action, token, values = {}, error }) => pag
     <p class="muted">Entering for a child? Use your own email, and give the child's details above.</p>
     <div class="actions"><button class="btn" type="submit">Continue</button></div>
   </form>` });
+
+
+// ---- the member's home -----------------------------------------------------------------
+
+import { STANDING_WORDS as STANDING_WORDS_ } from '../core/domain/membership.mjs';
+
+const dashCss = `<style>
+.tiles{display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:12px;margin:12px 0 20px}
+.tile{border:1px solid var(--line,#ddd);border-radius:10px;padding:12px 14px;background:var(--panel,transparent)}
+.tile h3{margin:0 0 6px;font-size:.8rem;text-transform:uppercase;letter-spacing:.05em;opacity:.7}
+.tile .big{font-size:1.15rem;font-weight:600}
+.tile p{margin:.3em 0}
+.todo{border-left:4px solid var(--accent,#b00);padding:8px 12px;margin:8px 0;background:rgba(200,0,0,.06);border-radius:4px}
+.todo.soft{border-left-color:#c80;background:rgba(200,130,0,.07)}
+.unread{font-weight:700}
+</style>`;
+
+const personTiles = (p, csrf) => {
+  const base = `/me/${esc(p.person.id)}`;
+  const m = p.memberships.filter((x) => x.role === 'member');
+  return `
+  <h2>${p.how === 'self' ? esc(p.person.preferred_name || p.person.first_name) + ' ' + esc(p.person.last_name)
+    : esc(p.person.first_name) + ' ' + esc(p.person.last_name)}${p.how === 'self' ? '' : ' <span class="muted">· you look after this person</span>'}</h2>
+  ${p.actions.length ? p.actions.map((a) => `<div class="todo${a.urgent ? '' : ' soft'}">
+    <a href="${esc(a.href)}">${esc(a.text)}${a.total ? ` — ${esc(cents(a.total, p.currency))}` : ''}</a></div>`).join('') : ''}
+  <div class="tiles">
+    <div class="tile"><h3>Membership</h3>
+      ${m.length ? m.map((x) => `<p><span class="big">${esc(x.name)}</span><br>
+        <span class="muted">${esc((x.chain ?? []).slice(0, -1).map((c) => c.name).join(' › '))}</span><br>
+        ${x.status !== 'active' ? `<span class="tag no">${esc(x.status)}</span> ` : ''}${
+          x.standing ? `<span class="tag ${['current', 'exempt'].includes(x.standing) ? 'ok' : 'wait'}">${esc(STANDING_WORDS_[x.standing] ?? x.standing)}</span>` : ''}${
+          x.paid_until ? ` <span class="muted">until ${esc(x.paid_until)}</span>` : ''}</p>`).join('')
+        : '<p class="muted">Not on a club\'s roll.</p>'}
+      <p><a href="${base}">Details</a></p></div>
+    <div class="tile"><h3>Current grade</h3>
+      ${p.grade ? `<p class="big">${esc(p.grade.label)}</p><p class="muted">since ${esc(p.grade.awarded_on)}</p>`
+        : '<p class="muted">No grade recorded yet.</p>'}
+      <p><a href="${base}/record">Grade history</a></p></div>
+    <div class="tile"><h3>Next class</h3>
+      ${p.next ? `<p class="big">${p.next.daysAway === 0 ? 'Today' : p.next.daysAway === 1 ? 'Tomorrow' : esc(p.next.weekdayName)} ${esc(p.next.starts)}</p>
+        <p>${esc(p.next.label)}<br><span class="muted">${esc(p.next.club)}</span></p>`
+        : '<p class="muted">No class found for you.</p>'}
+      <p><a href="/me/classes">Timetable</a></p></div>
+    <div class="tile"><h3>Next event</h3>
+      ${p.nextEvent ? `<p class="big">${esc(p.nextEvent.title)}</p><p class="muted">${esc(when(p.nextEvent.starts_at, p.nextEvent.host_timezone))}</p>`
+        : '<p class="muted">You are not entered in anything.</p>'}
+      <p><a href="/me/events">${p.openCount ? `${p.openCount} open to enter` : 'Events'}</a></p></div>
+    <div class="tile"><h3>Payments</h3>
+      ${p.owed.length ? `<p class="big">${esc(cents(p.owedTotal, p.currency))} to pay</p>` : '<p class="big">Nothing to pay</p>'}
+      <p><a href="/me/payments">${p.owed.length ? 'Pay now' : 'Payment history'}</a></p></div>
+    <div class="tile"><h3>Documents</h3>
+      <p>${p.counts.certificates} certificate${p.counts.certificates === 1 ? '' : 's'} ·
+        ${p.counts.consents} signed declaration${p.counts.consents === 1 ? '' : 's'} ·
+        ${p.qualifications.length} qualification${p.qualifications.length === 1 ? '' : 's'}</p>
+      <p><a href="${base}/documents">Open</a></p></div>
+    <div class="tile"><h3>Training</h3>
+      <p class="big">${p.counts.recent_classes} class${p.counts.recent_classes === 1 ? '' : 'es'}</p>
+      <p class="muted">in the last 90 days${p.counts.last_trained ? ` · last on ${esc(p.counts.last_trained)}` : ''}</p>
+      <p><a href="${base}/record">Attendance</a></p></div>
+  </div>`;
+};
+
+export const memberHome = ({ me, csrf, people = [], unread = 0, messages = [] }) => page({
+  title: 'My home', me, csrf, body: `${dashCss}
+  ${people.length ? `<h1>Kia ora, ${esc(people[0].person.preferred_name || people[0].person.first_name)}</h1>
+  <p class="sub">${esc(people[0].person.display_number ?? '')}
+    · <a href="/me/${esc(people[0].person.id)}">See and update my details</a>
+    · <a href="/me/messages">Messages${unread ? ` <span class="tag wait">${unread} new</span>` : ''}</a></p>
+  ${people.length > 1 ? '<p class="muted">Children I look after are below.</p>' : ''}
+  ${people.map((p) => personTiles(p, csrf)).join('')}
+  <h2>Notifications</h2>
+  ${messages.length ? `<table><tbody>${messages.map((m) => `<tr>
+    <td class="${m.read_at ? '' : 'unread'}"><a href="/me/messages/${esc(m.id)}">${esc(m.subject)}</a>
+      <div class="muted">${esc(m.club)}${m.about ? ` · about ${esc(m.about)}` : ''}</div></td>
+    <td class="muted">${esc(when(m.sent_at))}</td></tr>`).join('')}</tbody></table>
+    <p><a href="/me/messages">All messages</a></p>` : '<p class="muted">Nothing yet. Messages from your club appear here.</p>'}`
+  : `<h1>My home</h1><div class="note">This sign-in is not linked to a member record yet, so there is
+    nothing to show here. Ask your club to link it.</div>`}` });
+
+export const messagesInbox = ({ me, csrf, rows = [], unread = 0 }) => page({
+  title: 'Messages', me, csrf, body: `
+  <h1>Messages</h1>
+  <p class="sub"><a href="/me">Back</a>${unread ? ` · ${unread} unread` : ''}</p>
+  ${rows.length ? `<table><thead><tr><th>Message</th><th>From</th><th>When</th></tr></thead><tbody>${rows.map((m) => `<tr>
+    <td class="${m.read_at ? '' : 'unread'}"><a href="/me/messages/${esc(m.id)}">${esc(m.subject)}</a>${m.about ? ` <span class="muted">about ${esc(m.about)}</span>` : ''}</td>
+    <td>${esc(m.club)}</td><td class="muted">${esc(when(m.sent_at))}</td></tr>`).join('')}</tbody></table>`
+    : '<p class="muted">Nothing yet. Messages from your club appear here as well as in your email.</p>'}` });
+
+export const messageView = ({ me, csrf, message: m }) => page({
+  title: m.subject, me, csrf, body: `
+  <h1>${esc(m.subject)}</h1>
+  <p class="sub">From ${esc(m.sender_name)}, ${esc(m.club)} · ${esc(when(m.sent_at))}${m.about ? ` · about ${esc(m.about)}` : ''}
+    · <a href="/me/messages">Back</a></p>
+  <div style="white-space:pre-wrap">${esc(m.text)}</div>` });
+
+const RESULT_WORDS = { pass: 'Passed', provisional: 'Passed (provisional)', fail: 'Not yet', deferred: 'Deferred', absent: 'Absent' };
+
+export const myRecord = ({ me, csrf, how, person, gradings = [], attendance = [], stats, upcoming = [], past = [] }) => page({
+  title: `${person.first_name} — record`, me, csrf, body: `
+  <h1>${esc(person.first_name)} ${esc(person.last_name)}</h1>
+  <p class="sub"><a href="/me">Back</a> · <a href="/me/${esc(person.id)}/documents">Documents</a></p>
+
+  <h2>Grade history</h2>
+  ${gradings.length ? `<table><thead><tr><th>Grade</th><th>Date</th><th>Result</th><th>Awarded by</th></tr></thead><tbody>${gradings.map((g) => `<tr>
+    <td>${esc(g.label)}</td><td>${esc(g.awarded_on)}</td><td>${esc(RESULT_WORDS[g.result] ?? g.result)}</td>
+    <td>${esc(g.awarded_by ?? '')}${g.certificate_no ? ` · <a href="/p/${esc(person.id)}/certificate/${esc(g.id)}">certificate</a>` : ''}</td></tr>`).join('')}</tbody></table>`
+    : '<p class="muted">No gradings recorded yet.</p>'}
+
+  <h2>Training</h2>
+  <p>${stats.last30} class${stats.last30 === 1 ? '' : 'es'} in the last 30 days · ${stats.last365} in the last year · ${stats.total} in all${stats.since ? ` since ${esc(stats.since)}` : ''}.</p>
+  ${attendance.length ? `<table><tbody>${attendance.map((a) => `<tr><td>${esc(a.day)}</td><td>${esc(a.label ?? 'Class')}</td><td class="muted">${esc(a.club)}</td></tr>`).join('')}</tbody></table>`
+    : '<p class="muted">No classes recorded yet.</p>'}
+
+  <h2>Events coming up</h2>
+  ${upcoming.length ? eventRows(upcoming) : '<p class="muted">Nothing coming up. <a href="/me/events">See what is open</a>.</p>'}
+  <h2>Event history</h2>
+  ${past.length ? eventRows(past) : '<p class="muted">No past events.</p>'}
+  <p class="muted">Results are not shown here yet.</p>` });
+
+const ENTRY_WORDS = { entered: 'Entered', confirmed: 'Confirmed', withdrawn: 'Withdrawn', disqualified: 'Disqualified' };
+const eventRows = (rows) => `<table><thead><tr><th>When</th><th>Event</th><th>Status</th></tr></thead><tbody>${rows.map((e) => `<tr>
+  <td>${esc(when(e.starts_at, e.host_timezone))}</td>
+  <td><strong>${esc(e.title)}</strong>${(e.picks ?? []).length ? `<div class="muted">${e.picks.map((p) => esc(p.discipline) + (p.division ? ' — ' + esc(p.division) : '')).join('; ')}</div>` : ''}</td>
+  <td><span class="tag ${['entered', 'confirmed'].includes(e.status) ? 'ok' : 'no'}">${esc(ENTRY_WORDS[e.status] ?? e.status)}</span>${
+    e.pay_status && e.pay_status !== 'succeeded' ? ' <span class="tag wait">Not paid</span>' : ''}</td></tr>`).join('')}</tbody></table>`;
+
+export const myDocuments = ({ me, csrf, how, person, certificates = [], consents = [], qualifications = [], receipts = [] }) => page({
+  title: `${person.first_name} — documents`, me, csrf, body: `
+  <h1>${esc(person.first_name)} ${esc(person.last_name)}</h1>
+  <p class="sub"><a href="/me">Back</a> · <a href="/me/${esc(person.id)}/record">Record</a></p>
+
+  <h2>Certificates</h2>
+  ${certificates.length ? `<ul class="plain">${certificates.map((c) => `<li><a href="/p/${esc(person.id)}/certificate/${esc(c.id)}">${esc(c.label)}</a>
+    <span class="muted">${esc(c.awarded_on)} · ${esc(c.certificate_no)}</span></li>`).join('')}</ul>` : '<p class="muted">None yet.</p>'}
+
+  <h2>Qualifications</h2>
+  ${qualifications.length ? `<table><tbody>${qualifications.map((a) => `<tr><td>${esc(a.label)}</td>
+    <td>${esc(QUAL_WORDS[a.state] ?? a.state)}${a.expires_on ? ` · until ${esc(a.expires_on)}` : ''}</td></tr>`).join('')}</tbody></table>
+    <p class="muted">To add a new certificate, send it to your club to be recorded.</p>` : '<p class="muted">None recorded.</p>'}
+
+  <h2>Declarations signed</h2>
+  ${consents.length ? consents.map((c) => `<details><summary><strong>${esc(c.title)}</strong>
+    <span class="muted">${esc(when(c.accepted_at))} · version ${esc(c.version)} · agreed by ${esc(c.accepted_name)}${c.guardian ? ` (${esc(c.guardian.relationship ?? 'guardian')})` : ''}</span></summary>
+    <div class="note" style="white-space:pre-wrap">${esc(c.consent_text ?? 'The text of this version is not kept with the event any more.')}</div></details>`).join('')
+    : '<p class="muted">Nothing signed yet.</p>'}
+
+  <h2>Receipts</h2>
+  ${receipts.length ? `<table><tbody>${receipts.map((r) => `<tr><td>${esc(r.settled_at ? when(r.settled_at) : '')}</td><td>${esc(r.description ?? '')}</td>
+    <td>${esc(cents(r.amount_cents, r.currency))}</td><td class="muted">${esc(r.receipt_no ?? '')} · ${esc(r.payee)}</td></tr>`).join('')}</tbody></table>`
+    : '<p class="muted">No payments yet.</p>'}` });
+
+export const myClasses = ({ me, csrf, groups = [] }) => page({
+  title: 'Classes', me, csrf, body: `
+  <h1>Classes</h1>
+  <p class="sub"><a href="/me">Back</a></p>
+  ${groups.length ? groups.map((g) => `
+  <h2>${esc(g.club)}${g.person ? ` <span class="muted">· ${esc(g.person.first_name)}</span>` : ''}</h2>
+  ${g.next ? `<p>Next for ${esc(g.person.first_name)}: <strong>${g.next.daysAway === 0 ? 'today' : esc(g.next.weekdayName)} ${esc(g.next.starts)}</strong> — ${esc(g.next.label)}.</p>` : ''}
+  ${g.sessions.length ? `<table><thead><tr><th>Day</th><th>Time</th><th>Class</th><th></th></tr></thead><tbody>${g.sessions.map((s) => `<tr>
+    <td>${esc(DAY_NAMES_[s.weekday])}</td><td>${esc(s.starts)}–${esc(s.ends)}</td>
+    <td>${esc(s.label)}${s.notes ? `<div class="muted">${esc(s.notes)}</div>` : ''}</td>
+    <td>${s.forMe ? '<span class="tag ok">For you</span>' : '<span class="muted">Not for you</span>'}</td></tr>`).join('')}</tbody></table>`
+    : '<p class="muted">The club has not published a timetable.</p>'}`).join('')
+  : '<div class="note">You are not on a club\'s roll, so there is no timetable to show.</div>'}
+  <p class="muted">Booking and cancelling a class are not available yet.</p>` });
+
+const DAY_NAMES_ = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];

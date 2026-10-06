@@ -4986,3 +4986,212 @@ export const outsiders = {
     } catch (e) { await client.query('rollback'); throw e; } finally { client.release(); }
   },
 };
+
+
+// ---------------------------------------------------------------------------
+// the member's own home: dashboard, inbox, record, documents, timetable
+//
+// Everything is for the signed-in person and the children they look after, by
+// family.mayActFor. Nothing here takes an organisation or a role.
+// ---------------------------------------------------------------------------
+
+import { nextSession, actionsFor, messageText } from '../core/domain/portal.mjs';
+
+const localNow = (tz) => {
+  const parts = Object.fromEntries(new Intl.DateTimeFormat('en-CA', { timeZone: tz || 'Pacific/Auckland',
+    year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' })
+    .formatToParts(new Date()).map((x) => [x.type, x.value]));
+  return { date: `${parts.year}-${parts.month}-${parts.day}`, time: `${parts.hour}:${parts.minute}` };
+};
+
+const ageOnDate = (dob, date) => {
+  if (!dob) return null;
+  const [y, m, d] = String(dob).slice(0, 10).split('-').map(Number);
+  const [cy, cm, cd] = date.split('-').map(Number);
+  return cy - y - ((cm < m || (cm === m && cd < d)) ? 1 : 0);
+};
+
+export const portal = {
+  /** One person's card on the dashboard. */
+  async summary(actor, person, how) {
+    const { rows: memberships } = await pool.query(`
+      select a.id, o.id as org_id, o.name, o.slug, o.type, o.timezone, a.role, a.status,
+             a.paid_until::text as paid_until, a.fee_exempt,
+             (select json_agg(json_build_object('name', x.name, 'type', x.type) order by nlevel(x.path))
+                from organisation x where o.path <@ x.path) as chain
+      from affiliation a join organisation o on o.id = a.organisation_id
+      where a.person_id = $1 and a.ends is null order by o.type, o.name`, [person.id]);
+
+    const tz = memberships[0]?.timezone ?? 'Pacific/Auckland';
+    const now = localNow(tz);
+    for (const m of memberships)
+      m.standing = m.role === 'member' ? standing({ paidUntil: m.paid_until, exempt: m.fee_exempt }, localNow(m.timezone).date) : null;
+
+    const grade = await one(`select label, rank_order, awarded_on::text as awarded_on
+      from person_current_grade where person_id = $1`, [person.id]);
+
+    const sessions = memberships.length ? await q(`
+      select ts.id, ts.label, ts.weekday, to_char(ts.starts,'HH24:MI') as starts, to_char(ts.ends,'HH24:MI') as ends,
+             ts.min_age, ts.max_age, g.rank_order as min_rank_order, o.name as club
+      from training_session ts join organisation o on o.id = ts.organisation_id
+      left join grade g on g.id = ts.min_grade_id
+      where ts.organisation_id = any($1::uuid[])`,
+      [memberships.filter((m) => m.role === 'member' && m.status === 'active').map((m) => m.org_id)]) : [];
+    const next = nextSession(sessions, now, { ageYears: ageOnDate(person.date_of_birth, now.date), rankOrder: grade?.rank_order ?? null });
+
+    const nextEvent = await one(`
+      select e.title, e.starts_at, x.status, o.timezone as host_timezone
+      from event_entry x join event e on e.id = x.event_id join organisation o on o.id = e.organisation_id
+      where x.person_id = $1 and x.status in ('entered','confirmed') and e.starts_at > now()
+      order by e.starts_at limit 1`, [person.id]);
+
+    const open = await memberEvents.openFor(person.id);
+    const closing = open.filter((e) => e.entries_close && new Date(e.entries_close) < new Date(Date.now() + 7 * 864e5));
+
+    const owed = (await payments.owedBy(actor)).filter((p) => p.person_id === person.id)
+      .map((p) => ({ id: p.id, amount_cents: p.amount_cents, currency: p.currency,
+                     description: p.lines.map((l) => l.description).join('; ') }));
+
+    const home = (await homesOf(person.id))[0];
+    const qToday = home ? await qualToday(home) : null;
+    const quals = qToday ? describeAwards(await q(`${AWARD_SELECT} where qa.person_id = $1`, [person.id]), qToday)
+      .filter((a) => a.counts) : [];
+    const priv = await one('select emergency_name, emergency_phone from person_private where person_id = $1', [person.id]);
+
+    const counts = await one(`
+      select (select count(*)::int from grading_record where person_id = $1 and certificate_no is not null
+                 and result in ('pass','provisional')) as certificates,
+             (select count(*)::int from entry_consent c join event_entry x on x.id = c.entry_id where x.person_id = $1) as consents,
+             (select count(*)::int from attendance where person_id = $1 and session_date > current_date - 90) as recent_classes,
+             (select to_char(max(session_date),'YYYY-MM-DD') from attendance where person_id = $1) as last_trained`, [person.id]);
+
+    const actions = actionsFor({ personId: person.id, owed, closing, qualifications: quals,
+      memberships: memberships.filter((m) => m.standing).map((m) => ({ name: m.name, standing: m.standing, paid_until: m.paid_until })),
+      details: { emergencyContact: !!(priv?.emergency_name && priv?.emergency_phone) } });
+
+    return { person, how, memberships, grade, next, nextEvent, openCount: open.length, closing: closing.length,
+      owed, owedTotal: owed.reduce((n, p) => n + p.amount_cents, 0), currency: owed[0]?.currency ?? 'NZD',
+      counts, qualifications: quals, actions };
+  },
+
+  /** The whole dashboard: me and the children I look after, and my messages. */
+  async dashboard(actor) {
+    const { self, dependants } = await family.mine(actor);
+    if (!self) return { people: [], unread: 0, messages: [] };
+    const people = [await this.summary(actor, self, 'self')];
+    for (const d of dependants) people.push(await this.summary(actor, d, 'guardian'));
+    const inbox = await this.inbox(actor, { limit: 5 });
+    return { people, unread: inbox.unread, messages: inbox.rows };
+  },
+
+  /** Messages written to me, or to me about a child. */
+  async inbox(actor, { limit = 50 } = {}) {
+    const { self, dependants } = await family.mine(actor);
+    const ids = [self, ...dependants].filter(Boolean).map((p) => p.id);
+    if (!ids.length) return { rows: [], unread: 0 };
+    const rows = await q(`
+      select r.id, m.subject, o.name as club, r.sent_at, r.read_at,
+             nullif(trim(concat_ws(' ', ab.first_name, ab.last_name)), '') as about
+      from message_recipient r join message m on m.id = r.message_id
+      join organisation o on o.id = m.organisation_id left join person ab on ab.id = r.about_id
+      where r.person_id = any($1::uuid[]) and r.status = 'sent'
+      order by r.sent_at desc limit $2`, [ids, limit]);
+    const unread = (await one(`select count(*)::int as n from message_recipient
+      where person_id = any($1::uuid[]) and status = 'sent' and read_at is null`, [ids])).n;
+    return { rows, unread };
+  },
+
+  /** Open one message. Marks it read. Somebody else's recipient row is not found, not forbidden. */
+  async message(actor, recipientId) {
+    const { self, dependants } = await family.mine(actor);
+    const ids = [self, ...dependants].filter(Boolean).map((p) => p.id);
+    const row = await one(`
+      select r.id, m.subject, m.body, o.name as club, r.sent_at, r.read_at, m.sender_name,
+             nullif(trim(concat_ws(' ', ab.first_name, ab.last_name)), '') as about
+      from message_recipient r join message m on m.id = r.message_id
+      join organisation o on o.id = m.organisation_id left join person ab on ab.id = r.about_id
+      where r.id = $1 and r.person_id = any($2::uuid[]) and r.status = 'sent'`, [recipientId, ids]);
+    if (!row) throw new NotFound('Message');
+    if (!row.read_at) await pool.query('update message_recipient set read_at = now() where id = $1 and read_at is null', [recipientId]);
+    return { ...row, text: messageText(row.body, { club: row.club }) };
+  },
+
+  /** Grade history, attendance and events: the person's own record. */
+  async record(actor, personId) {
+    const how = await family.assertMayActFor(actor, personId);
+    const person = await one(`select ${PERSON_COLUMNS} from person p where p.id = $1`, [personId]);
+    const gradings = await q(`
+      select g.label, to_char(gr.awarded_on,'YYYY-MM-DD') as awarded_on, gr.result, gr.certificate_no,
+             ao.name as awarded_by, gr.id
+      from grading_record gr join grade g on g.id = gr.grade_id
+      left join organisation ao on ao.id = gr.awarded_by_org
+      where gr.person_id = $1 order by gr.awarded_on desc, g.rank_order desc`, [personId]);
+    const attendance = await q(`
+      select to_char(a.session_date,'YYYY-MM-DD') as day, ts.label, o.name as club
+      from attendance a join organisation o on o.id = a.organisation_id
+      left join training_session ts on ts.id = a.session_id
+      where a.person_id = $1 order by a.session_date desc limit 30`, [personId]);
+    const stats = await one(`
+      select count(*) filter (where session_date > current_date - 30)::int as last30,
+             count(*) filter (where session_date > current_date - 365)::int as last365,
+             count(*)::int as total, to_char(min(session_date),'YYYY-MM-DD') as since
+      from attendance where person_id = $1`, [personId]);
+    const events = await q(`
+      select e.title, e.kind, e.starts_at, x.status, o.timezone as host_timezone,
+             (select py.status from payment py where py.event_entry_id = x.id order by py.created_at desc limit 1) as pay_status,
+             coalesce((select json_agg(json_build_object('discipline', d.name, 'division', v.label) order by d.sort_order)
+                         from entry_selection s join event_discipline d on d.id = s.discipline_id
+                         left join event_division v on v.id = s.division_id where s.entry_id = x.id), '[]'::json) as picks
+      from event_entry x join event e on e.id = x.event_id join organisation o on o.id = e.organisation_id
+      where x.person_id = $1 order by e.starts_at desc`, [personId]);
+    return { how, person, gradings, attendance, stats, events,
+      upcoming: events.filter((e) => new Date(e.starts_at) > new Date()).reverse(),
+      past: events.filter((e) => new Date(e.starts_at) <= new Date()) };
+  },
+
+  /** What I have been given and what I have signed. */
+  async documents(actor, personId) {
+    const how = await family.assertMayActFor(actor, personId);
+    const person = await one(`select ${PERSON_COLUMNS} from person p where p.id = $1`, [personId]);
+    const certificates = await q(`select gr.id, g.label, gr.awarded_on::text as awarded_on, gr.certificate_no
+      from grading_record gr join grade g on g.id = gr.grade_id
+      where gr.person_id = $1 and gr.certificate_no is not null and gr.result in ('pass','provisional')
+      order by gr.awarded_on desc`, [personId]);
+    const consents = await q(`
+      select c.id, c.version, c.accepted_name, c.accepted_at, c.guardian, e.title, e.consent_text, e.starts_at
+      from entry_consent c join event_entry x on x.id = c.entry_id join event e on e.id = x.event_id
+      where x.person_id = $1 order by c.accepted_at desc`, [personId]);
+    const home = (await homesOf(personId))[0];
+    const today = home ? await qualToday(home) : null;
+    const qualifications = today ? describeAwards(await q(`${AWARD_SELECT} where qa.person_id = $1`, [personId]), today)
+      .filter((a) => a.counts) : [];
+    const receipts = await q(`select py.id, py.receipt_no, py.amount_cents, py.currency, py.settled_at, po.name as payee,
+        (select string_agg(l.description, '; ') from payment_line l where l.payment_id = py.id) as description
+      from payment py join organisation po on po.id = py.organisation_id
+      where py.person_id = $1 and py.status = 'succeeded' order by py.settled_at desc nulls last limit 50`, [personId]);
+    return { how, person, certificates, consents, qualifications, receipts };
+  },
+
+  /** The classes at the clubs I and my children belong to, with who each is for. */
+  async timetable(actor) {
+    const { self, dependants } = await family.mine(actor);
+    const out = [];
+    for (const person of [self, ...dependants].filter(Boolean)) {
+      const clubs = await q(`select o.id, o.name, o.timezone from affiliation a join organisation o on o.id = a.organisation_id
+        where a.person_id = $1 and a.ends is null and a.role = 'member' and a.status = 'active'`, [person.id]);
+      const grade = await one('select rank_order from person_current_grade where person_id = $1', [person.id]);
+      for (const club of clubs) {
+        const now = localNow(club.timezone);
+        const sessions = await q(`
+          select ts.id, ts.label, ts.weekday, to_char(ts.starts,'HH24:MI') as starts, to_char(ts.ends,'HH24:MI') as ends,
+                 ts.min_age, ts.max_age, ts.notes, g.rank_order as min_rank_order, g.label as min_grade_label
+          from training_session ts left join grade g on g.id = ts.min_grade_id
+          where ts.organisation_id = $1 order by ts.weekday, ts.starts`, [club.id]);
+        const who = { ageYears: ageOnDate(person.date_of_birth, now.date), rankOrder: grade?.rank_order ?? null };
+        const next = nextSession(sessions, now, who);
+        out.push({ person, club: club.name, next, sessions: sessions.map((s) => ({ ...s, forMe: nextSession([s], now, who) !== null })) });
+      }
+    }
+    return out;
+  },
+};

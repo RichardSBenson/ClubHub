@@ -68,13 +68,9 @@ const ACCOUNTED_FOR = {
   'grading_record.ratified_by_org': 'national ratification of a dan grade is '
     + 'recorded in the authority rules but not against the record itself.',
   'grading_record.certificate_asset_id': 'no certificate is generated yet.',
-  'entry_consent.accepted_at': 'the consent row implies the moment; the '
-    + 'column duplicates it and nothing writes it.',
   'event_entry.waiver_ok': 'superseded by entry_consent, which records what '
     + 'was agreed rather than a boolean. Should probably be dropped.',
   'event_discipline.allows_team': 'team events are not built.',
-  'training_session.min_grade_id': 'a session restricted by grade. Nothing '
-    + 'in the editor sets it.',
 };
 
 /** Columns every table has, which prove nothing either way. */

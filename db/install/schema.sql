@@ -1793,3 +1793,8 @@ alter table page    add column if not exists publish_at timestamptz;
 alter table article add column if not exists publish_at timestamptz;
 create index if not exists page_publish_at_idx on page (publish_at) where publish_at is not null and status = 'draft';
 create index if not exists article_publish_at_idx on article (publish_at) where publish_at is not null and status = 'draft';
+
+-- 035-message-read
+alter table message_recipient add column if not exists read_at timestamptz;
+create index if not exists message_recipient_unread
+  on message_recipient (person_id, sent_at desc) where status = 'sent' and read_at is null;

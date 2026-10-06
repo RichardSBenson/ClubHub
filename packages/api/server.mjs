@@ -33,7 +33,7 @@
 import crypto from 'node:crypto';
 import { URL } from 'node:url';
 import { pool, orgs, people, rank, events, competition, pages, assets, news,
-         instructors, navigation, audit, search, clubPages, appearance, clubs, clubProfile, family, myself, memberEvents, messages, emailPreferences, payments, fees, renewals, reminders, attendance, newcomers, reports, gradings, qualifications, enquiries, scheduledPublishing, TooMany, outsiders,
+         instructors, navigation, audit, search, clubPages, appearance, clubs, clubProfile, family, myself, memberEvents, messages, emailPreferences, payments, fees, renewals, reminders, attendance, newcomers, reports, gradings, qualifications, portal, enquiries, scheduledPublishing, TooMany, outsiders,
          Forbidden, NotFound, Invalid } from './data.mjs';
 import * as auth from './auth.mjs';
 import * as V from './views.mjs';
@@ -414,8 +414,37 @@ post('/p/:id/guardians/:linkId/end', async (ctx) => {
 
 get('/me', async (ctx) => {
   ctx.requireActor();
-  const { self, dependants } = await family.mine(ctx.me.accountId);
-  return ctx.send(200, V.myHome({ me: ctx.me, csrf: ctx.csrf, self, dependants }));
+  return ctx.send(200, V.memberHome({ me: ctx.me, csrf: ctx.csrf, ...(await portal.dashboard(ctx.me.accountId)) }));
+});
+
+// The member's own inbox, timetable, record and documents. Registered before
+// /me/:personId so that these words are not read as somebody's id.
+get('/me/messages', async (ctx) => {
+  ctx.requireActor();
+  return ctx.send(200, V.messagesInbox({ me: ctx.me, csrf: ctx.csrf, ...(await portal.inbox(ctx.me.accountId)) }));
+});
+
+get('/me/messages/:id', async (ctx) => {
+  ctx.requireActor();
+  if (!UUID_RE.test(ctx.params.id)) throw new NotFound('Message');
+  return ctx.send(200, V.messageView({ me: ctx.me, csrf: ctx.csrf, message: await portal.message(ctx.me.accountId, ctx.params.id) }));
+});
+
+get('/me/classes', async (ctx) => {
+  ctx.requireActor();
+  return ctx.send(200, V.myClasses({ me: ctx.me, csrf: ctx.csrf, groups: await portal.timetable(ctx.me.accountId) }));
+});
+
+get('/me/:personId/record', async (ctx) => {
+  ctx.requireActor();
+  if (!UUID_RE.test(ctx.params.personId)) throw new NotFound('Person');
+  return ctx.send(200, V.myRecord({ me: ctx.me, csrf: ctx.csrf, ...(await portal.record(ctx.me.accountId, ctx.params.personId)) }));
+});
+
+get('/me/:personId/documents', async (ctx) => {
+  ctx.requireActor();
+  if (!UUID_RE.test(ctx.params.personId)) throw new NotFound('Person');
+  return ctx.send(200, V.myDocuments({ me: ctx.me, csrf: ctx.csrf, ...(await portal.documents(ctx.me.accountId, ctx.params.personId)) }));
 });
 
 // ---- entering events as a member or a parent ------------------------------

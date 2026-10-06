@@ -272,6 +272,9 @@ const SCOPED = new Map([
   ['GET /search', 'everybody may search; the scoping is in the query'],
   ['GET /me', 'a person sees themselves and their own children; scoped by family.mayActFor'],
   ['GET /me/payments', 'what the signed-in person and their children owe; scoped by payments.forPerson'],
+  ['GET /me/messages', 'messages written to the signed-in person or about their children; scoped by portal.inbox'],
+  ['GET /me/messages/:id', 'one message; the recipient row must belong to the signed-in person or their children, otherwise not found'],
+  ['GET /me/classes', 'the timetable of the clubs the signed-in person and their children belong to; scoped by portal.timetable'],
   ['GET /me/events', 'what is open to the signed-in person and their children; scoped by memberEvents'],
 ]);
 
@@ -352,7 +355,7 @@ console.log('\nSEARCHING FOR THEIRS FINDS NOTHING');
 
 console.log('\nTHEIR OWN HOME SHOWS NOTHING OF THEIRS');
 {
-  for (const path of ['/me', '/me/events', '/me/payments']) {
+  for (const path of ['/me', '/me/events', '/me/payments', '/me/messages', '/me/classes']) {
     const r = await req(path);
     const leaked = THEIR_WORDS.filter((w) => r.html.includes(w));
     ok(`${path} answers them, and contains nothing of theirs`,
