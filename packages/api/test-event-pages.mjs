@@ -164,7 +164,7 @@ console.log('\nA DOJO GALLERY');
 {
   await signIn('doug@example.nz');
   let r = await req('/o/whanganui/gallery');
-  ok('the operator\'s gallery screen opens', r.status === 200 && /0 of 24/.test(r.html));
+  ok('the operator\'s gallery screen opens', r.status === 200 && /0 of 300/.test(r.html));
   ok('with the size to aim for', /1200 × 800/.test(r.html));
   r = await multi('/o/whanganui/gallery', { caption: 'Juniors after a grading', alt_text: 'Juniors bowing' }, { field: 'file', bytes: PNG, name: 'juniors.png' });
   ok('uploading a picture adds it', r.status === 302 && /done=Added/.test(r.location));

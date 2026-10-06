@@ -4563,46 +4563,122 @@ export const myTerms = ({ me, csrf, groups = [], error, done }) => page({
         : i.enrolment?.status === 'enrolled' && i.state !== 'current' ? `<form method="post" action="/me/terms/${esc(i.term.id)}/${esc(g.person.id)}/withdraw"><input type="hidden" name="_csrf" value="${esc(csrf ?? '')}"><button class="btn quiet" type="submit">Withdraw</button></form>` : ''}</td></tr>`).join('')}</tbody></table>`).join('')
   : '<div class="note">There are no school terms to enrol in. They appear here for children who are members of a club that follows school terms.</div>'}` });
 
-/** A dojo's photo gallery: what is in it, in order, and a way to add more. */
-export const galleryScreen = ({ me, csrf, org, items = [], library = [], max = 24, done, error, rebuild }) => page({
-  title: `Gallery — ${org.name}`, me, csrf, body: `
+/**
+ * A dojo's photo gallery: add many at once, file them by year and event, and tidy them in bulk.
+ * Works without a script; the script (served from this site) shrinks big photos and sends them one at a time.
+ */
+export const galleryScreen = ({ me, csrf, org, items = [], total = 0, years = [], events = [], filter = {}, library = [], max = 300,
+                                done, error, rebuild }) => {
+  const base = `/o/${esc(org.slug)}/gallery`;
+  const nowYear = new Date().getFullYear();
+  const day = (d) => new Date(d).toLocaleDateString('en-NZ', { day: 'numeric', month: 'short', year: 'numeric' });
+  const eventOptions = (selected, { keep = false } = {}) =>
+    (keep ? '<option value="">— leave as it is —</option>' : '<option value="">No event</option>')
+    + (keep ? '<option value="none">Take out of its event</option>' : '')
+    + events.map((e) => `<option value="${esc(e.id)}"${selected === e.id ? ' selected' : ''}>${esc(e.title)} · ${esc(day(e.starts_at))}</option>`).join('');
+
+  // Group: year, then event.
+  const groups = [];
+  for (const g of items) {
+    const key = `${g.year ?? ''}`;
+    let y = groups.find((x) => x.key === key);
+    if (!y) groups.push(y = { key, year: g.year, events: [] });
+    const ek = g.event_id ?? '';
+    let e = y.events.find((x) => x.key === ek);
+    if (!e) y.events.push(e = { key: ek, title: g.event_title ?? null, pics: [] });
+    e.pics.push(g);
+  }
+
+  const card = (g, flat, i) => `
+    <div class="card">
+      <label class="check" style="margin:0 0 8px"><input type="checkbox" name="pick_${esc(g.id)}" form="bulk"> Select</label>
+      <img src="/a/${esc(g.asset_id)}" alt="${esc(g.alt_text ?? '')}" loading="lazy" style="max-width:100%;height:auto;display:block;margin-bottom:8px">
+      <form method="post" action="${base}/${esc(g.id)}/details">
+        <input type="hidden" name="_csrf" value="${esc(csrf ?? '')}">
+        <input name="caption" maxlength="160" value="${esc(g.caption ?? '')}" placeholder="Caption" aria-label="Caption">
+        <div class="row" style="margin-top:6px">
+          <div><input name="year" type="number" min="1950" max="${nowYear + 1}" value="${esc(g.year ?? '')}" aria-label="Year"></div>
+          <div><select name="eventId" aria-label="Event">${eventOptions(g.event_id, { keep: true })}</select></div>
+        </div>
+        <button class="btn quiet" type="submit" style="margin-top:6px">Save</button>
+      </form>
+      <p style="display:flex;gap:8px;margin-top:8px;flex-wrap:wrap">
+        ${['up', 'down'].map((d) => `<form method="post" action="${base}/${esc(g.id)}/move">
+          <input type="hidden" name="_csrf" value="${esc(csrf ?? '')}"><input type="hidden" name="direction" value="${d}">
+          <button class="btn quiet" type="submit"${(d === 'up' && i === 0) || (d === 'down' && i === flat.length - 1) ? ' disabled' : ''}>${d === 'up' ? 'Earlier' : 'Later'}</button></form>`).join('')}
+        <form method="post" action="${base}/${esc(g.id)}/remove">
+          <input type="hidden" name="_csrf" value="${esc(csrf ?? '')}"><button class="btn quiet" type="submit">Remove</button></form>
+      </p>
+    </div>`;
+
+  return page({ title: `Gallery — ${org.name}`, me, csrf, body: `
   <h1>Gallery</h1>
-  <p class="sub">${esc(org.name)} · the photo strip on your page. ${items.length} of ${max}.
+  <p class="sub">${esc(org.name)} · your photos, by year and event. ${total} of ${max}.
     <a href="/o/${esc(org.slug)}/club-page/preview">See your page</a></p>
   ${done ? `<div class="good">${esc(done)}</div>` : ''}
   ${error ? `<div class="bad">${esc(error)}</div>` : ''}
   ${rebuild ? `<div class="note">${esc(rebuild)}</div>` : ''}
 
-  <form method="post" action="/o/${esc(org.slug)}/gallery" enctype="multipart/form-data" class="card" style="margin-bottom:24px">
+  <form method="post" action="${base}" enctype="multipart/form-data" class="card" style="margin-bottom:24px" data-gallery-upload>
     <input type="hidden" name="_csrf" value="${esc(csrf ?? '')}">
-    <h3>Add a picture</h3>
-    <p><label>Add a new one<br><input type="file" name="file" accept="image/png,image/jpeg,image/gif,image/webp"></label></p>
-    <p class="hint">${esc(slotHint('gallery'))}</p>
-    ${library.length ? `<p><label>…or choose one you have already uploaded<br>
+    <h3>Add pictures</h3>
+    <p><label>Choose as many as you like<br>
+      <input type="file" name="file" multiple accept="image/png,image/jpeg,image/gif,image/webp"></label></p>
+    <p class="hint">Big phone photos are made smaller for you before they are sent. ${esc(slotHint('gallery'))}</p>
+    <div class="row">
+      <div><label for="g-year">Year <span class="muted">for all of these</span></label>
+        <input id="g-year" name="year" type="number" min="1950" max="${nowYear + 1}" value="${nowYear}" style="max-width:120px"></div>
+      <div><label for="g-event">Event <span class="muted">optional</span></label>
+        <select id="g-event" name="eventId">${eventOptions('')}</select></div>
+    </div>
+    ${library.length ? `<p><label>…or one you have already uploaded<br>
       <select name="assetId"><option value="">—</option>${library.map((a) =>
         `<option value="${esc(a.id)}">${esc(a.filename ?? a.id)}</option>`).join('')}</select></label></p>` : ''}
-    <p><label>Caption <span class="muted">optional</span><br>
+    <p><label>Caption <span class="muted">optional, when adding just one</span><br>
       <input name="caption" maxlength="160" style="max-width:420px" placeholder="Juniors after a grading"></label></p>
-    <p><label>Describe it for somebody who cannot see it <span class="muted">for a new picture</span><br>
+    <p><label>Describe it for somebody who cannot see it <span class="muted">optional</span><br>
       <input name="alt_text" maxlength="300" style="max-width:560px"></label></p>
     <p class="muted">Only photographs you have permission to show, especially of children.</p>
     <p><button class="btn" type="submit">Add to gallery</button></p>
+    <ul id="upload-progress" class="plain" aria-live="polite"></ul>
+  </form>
+  <form id="upload-finish" method="post" action="${base}/done" hidden class="card">
+    <input type="hidden" name="_csrf" value="${esc(csrf ?? '')}">
+    <p>Pictures are in. Update the website so they appear.</p>
+    <button class="btn" type="submit">Finish and update the website</button>
   </form>
 
-  ${items.length ? `<div class="grid">${items.map((g, i) => `
-    <div class="card">
-      <img src="/a/${esc(g.asset_id)}" alt="${esc(g.alt_text ?? '')}" style="max-width:100%;height:auto;display:block;margin-bottom:8px">
-      <form method="post" action="/o/${esc(org.slug)}/gallery/${esc(g.id)}/caption">
-        <input type="hidden" name="_csrf" value="${esc(csrf ?? '')}">
-        <input name="caption" maxlength="160" value="${esc(g.caption ?? '')}" placeholder="Caption" aria-label="Caption">
-        <button class="btn" type="submit">Save caption</button>
-      </form>
-      <p style="display:flex;gap:8px;margin-top:8px">
-        ${['up', 'down'].map((d) => `<form method="post" action="/o/${esc(org.slug)}/gallery/${esc(g.id)}/move">
-          <input type="hidden" name="_csrf" value="${esc(csrf ?? '')}"><input type="hidden" name="direction" value="${d}">
-          <button class="btn" type="submit"${(d === 'up' && i === 0) || (d === 'down' && i === items.length - 1) ? ' disabled' : ''}>${d === 'up' ? 'Earlier' : 'Later'}</button></form>`).join('')}
-        <form method="post" action="/o/${esc(org.slug)}/gallery/${esc(g.id)}/remove">
-          <input type="hidden" name="_csrf" value="${esc(csrf ?? '')}"><button class="btn" type="submit">Remove</button></form>
-      </p>
-    </div>`).join('')}</div>` : '<p class="muted">No pictures yet. The gallery shows on your page once it has one.</p>'}
+  ${total ? `<form method="get" action="${base}" class="card" style="margin-bottom:16px">
+    <p style="margin:0 0 8px"><strong>Show</strong>
+      <a href="${base}"${!filter.year && !filter.eventId ? ' aria-current="page"' : ''}>All</a>
+      ${years.map((y) => ` · <a href="${base}?year=${y.year}"${filter.year === y.year ? ' aria-current="page"' : ''}>${y.year} <span class="muted">(${y.n})</span></a>`).join('')}</p>
+    <div class="row" style="align-items:end">
+      <div><label for="f-event">One event</label>
+        <select id="f-event" name="event"><option value="">All events</option>${eventOptions(filter.eventId).replace('<option value="">No event</option>', '')}</select></div>
+      <div><button class="btn quiet" type="submit">Show</button></div>
+    </div>
+  </form>` : ''}
+
+  ${items.length ? `
+  <form id="bulk" method="post" action="${base}/bulk" class="card" style="margin-bottom:16px">
+    <input type="hidden" name="_csrf" value="${esc(csrf ?? '')}">
+    <h3>Tidy several at once</h3>
+    <p class="muted">Tick the pictures below, then file them or remove them.</p>
+    <div class="row" style="align-items:end">
+      <div><label for="b-year">Year</label>
+        <input id="b-year" name="year" type="number" min="1950" max="${nowYear + 1}" placeholder="leave as it is"></div>
+      <div><label for="b-event">Event</label><select id="b-event" name="eventId">${eventOptions('', { keep: true })}</select></div>
+    </div>
+    <p style="margin-top:12px"><button class="btn" type="submit" name="action" value="file">File the ticked ones</button>
+      <button class="btn quiet" type="submit" name="action" value="remove">Remove the ticked ones</button></p>
+  </form>` : ''}
+
+  ${groups.map((y) => `
+    <h2>${y.year ?? 'No year'}</h2>
+    ${y.events.map((e) => `
+      <h3 style="margin:18px 0 8px">${e.title ? esc(e.title) : 'Not part of an event'} <span class="muted">${e.pics.length}</span></h3>
+      <div class="grid">${e.pics.map((g) => card(g, e.pics, e.pics.indexOf(g))).join('')}</div>`).join('')}`).join('')}
+  ${!items.length ? `<p class="muted">${total ? 'Nothing matches that.' : 'No pictures yet. The gallery shows on your page once it has one.'}</p>` : ''}
+  <script src="/vendor/gallery-upload.js" defer></script>
 `, });
+};

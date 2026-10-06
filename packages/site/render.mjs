@@ -299,6 +299,10 @@ a.evcard:hover{transform:translateY(-2px);box-shadow:0 10px 24px rgba(0,0,0,.25)
 .gallery img{width:100%;aspect-ratio:3/2;object-fit:cover;border-radius:2px}
 .gallery figcaption{font-size:14px;color:var(--muted);margin-top:4px}
 .gallery figure{margin:0}
+.yearnav{display:flex;flex-wrap:wrap;gap:10px;margin:8px 0 0}
+.yearnav a{display:inline-block;padding:8px 16px;border:2px solid var(--ink);color:var(--ink);text-decoration:none;font-weight:700}
+.yearnav a:hover{background:var(--ink);color:var(--canvas)}
+.galevent{font-family:var(--display);font-size:22px;margin:22px 0 10px}
 .crestmark{height:40px;width:auto;flex:none}
 @media (max-width:860px){.icards{grid-template-columns:repeat(2,minmax(0,1fr))}.evgrid{grid-template-columns:1fr}.evcards{grid-template-columns:1fr}.gallery{grid-template-columns:repeat(2,minmax(0,1fr))}}
 @media (max-width:600px){.icards{grid-template-columns:1fr}.evbanner{flex-direction:column;text-align:center}.evbanner .crest{max-width:70%}
@@ -447,7 +451,7 @@ function arrange(order, parts, bands) {
 }
 
 export function dojoPage({ dojo, federation, events, origin, fonts, nav,
-                           base = '', vocabulary = {}, logoUrl = null, gallery = [], instructors = [],
+                           base = '', vocabulary = {}, logoUrl = null, gallery = [], galleryTotal = null, instructors = [],
                            sections = DOJO_DEFAULT, startAnyWeekText = null,
                            showFirstClassFree = true }) {
   logoUrl = logoUrl ?? federation.logoUrl ?? null;
@@ -516,7 +520,10 @@ export function dojoPage({ dojo, federation, events, origin, fonts, nav,
 
     gallery: () => gallery.length ? `<h2 style="margin-top:40px">In the dojo</h2>
   <ul class="gallery">${gallery.map((g) => `<li><figure><img src="${esc(g.url)}" alt="${esc(g.alt ?? '')}" loading="lazy">${
-    g.caption ? `<figcaption>${esc(g.caption)}</figcaption>` : ''}</figure></li>`).join('')}</ul>` : '',
+    g.caption ? `<figcaption>${esc(g.caption)}</figcaption>` : ''}</figure></li>`).join('')}</ul>
+  ${(galleryTotal ?? gallery.length) > gallery.length
+    ? `<p><a class="btn outline" href="${at(`/${esc(dojo.slug)}/gallery`)}">See all ${galleryTotal} photos</a></p>`
+    : `<p><a href="${at(`/${esc(dojo.slug)}/gallery`)}">Photos by year and event</a></p>`}` : '',
 
     events: () => events.length ? `<h2 style="margin-top:40px">What's on</h2>
   <div class="evcards" style="grid-template-columns:1fr">${events.map((e) => `<a class="evcard" href="${at(e.is_own ? `/${esc(dojo.slug)}/events/${esc(e.slug)}` : `/events/${esc(e.slug)}`)}">
@@ -653,6 +660,48 @@ export function instructorCard(i, { at = (x) => x, federationSlug = null, full =
     ${about}
     ${checks ? `<ul class="ichecks" aria-label="Checks">${checks}</ul>` : ''}
   </article>`;
+}
+
+/**
+ * A dojo's whole gallery, newest year first and within each year by event. Plain links and anchors:
+ * the year buttons jump down the page, and an event's name links to its page when it has one.
+ */
+export function galleryPage({ dojo, items = [], federation, origin, fonts, nav,
+                              base = '', vocabulary = {}, logoUrl = null }) {
+  logoUrl = logoUrl ?? federation.logoUrl ?? null;
+  const at = (p) => `${base}${p}`;
+  const years = [];
+  for (const g of items) {
+    const key = g.year ?? 0;
+    let y = years.find((x) => x.year === key);
+    if (!y) years.push(y = { year: key, events: [] });
+    const ek = g.eventId ?? '';
+    let e = y.events.find((x) => x.key === ek);
+    if (!e) y.events.push(e = { key: ek, title: g.eventTitle ?? null, slug: g.eventSlug ?? null, pics: [] });
+    e.pics.push(g);
+  }
+  const label = (y) => y.year || 'Earlier';
+  const pic = (g) => `<li><figure><img src="${esc(g.url)}" alt="${esc(g.alt ?? '')}" loading="lazy">${
+    g.caption ? `<figcaption>${esc(g.caption)}</figcaption>` : ''}</figure></li>`;
+  const body = `
+<section><div class="wrap">
+  <p><a href="${at(`/${esc(dojo.slug)}`)}">← ${esc(dojo.name)}</a></p>
+  <h1 style="font-family:var(--display);font-size:clamp(30px,5vw,46px);margin:0 0 12px">${esc(dojo.name)} photos</h1>
+  ${items.length ? `<p class="yearnav">${years.map((y) => `<a href="#y${esc(String(y.year))}">${esc(String(label(y)))}</a>`).join('')}</p>` : ''}
+  ${years.map((y) => `<h2 id="y${esc(String(y.year))}" style="margin-top:40px">${esc(String(label(y)))}</h2>
+    ${y.events.map((e) => `${e.title ? `<h3 class="galevent">${e.slug
+        ? `<a href="${at(`/${esc(dojo.slug)}/events/${esc(e.slug)}`)}">${esc(e.title)}</a>` : esc(e.title)}</h3>` : (y.events.length > 1 ? '<h3 class="galevent">Other photos</h3>' : '')}
+      <ul class="gallery">${e.pics.map(pic).join('')}</ul>`).join('')}`).join('')}
+  ${items.length ? '' : '<p style="font-size:19px">No photos yet.</p>'}
+</div></section>`;
+  return layout({
+    title: `${dojo.name} photos — ${federation.name}`,
+    description: `Photos from ${dojo.name}${items.length ? `, ${items.length} of them, by year and event` : ''}.`,
+    canonical: `${origin}${at(`/${dojo.slug}/gallery`)}`,
+    jsonLd: [],
+    image: items[0]?.url ?? dojo.hero_url ?? null,
+    federation, fonts, nav, base, vocabulary, logoUrl, body,
+  });
 }
 
 export function instructorsPage({ instructors = [], federation, origin, fonts,

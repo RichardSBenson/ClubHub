@@ -6110,32 +6110,106 @@ export const eventDetails = {
 // A dojo's photo gallery
 // ---------------------------------------------------------------------------
 
-export const MAX_GALLERY = 24;
+export const MAX_GALLERY = 300;
+
+/** The year a picture belongs to when nobody said: this one, in the dojo's own calendar. */
+const thisYear = () => new Date().getFullYear();
+
+/** A year somebody typed, checked; blank means "work it out". */
+function readYear(v) {
+  if (v == null || String(v).trim() === '') return null;
+  const n = Number(v);
+  if (!Number.isInteger(n) || n < 1950 || n > thisYear() + 1) throw new Invalid(`The year must be between 1950 and ${thisYear() + 1}.`);
+  return n;
+}
 
 export const gallery = {
-  async list(actor, orgId) {
+  /** Newest year first, then by event, then in the order the dojo set. */
+  async list(actor, orgId, { year = null, eventId = null } = {}) {
     await assertRole(actor, orgId, TEACH);
-    return q(`select g.id, g.asset_id, g.caption, g.position, a.filename, a.width, a.height, a.alt_text
+    return q(`select g.id, g.asset_id, g.caption, g.position, g.year, g.event_id, g.created_at,
+        e.title as event_title, e.starts_at as event_starts,
+        a.filename, a.width, a.height, a.alt_text
       from club_gallery g join asset a on a.id = g.asset_id
-      where g.organisation_id = $1 order by g.position, g.created_at`, [orgId]);
+      left join event e on e.id = g.event_id
+      where g.organisation_id = $1
+        and ($2::int is null or g.year = $2)
+        and ($3::uuid is null or g.event_id = $3)
+      order by g.year desc nulls last, e.starts_at desc nulls last, g.event_id nulls last, g.position, g.created_at`,
+      [orgId, year, eventId]);
   },
 
-  async add(actor, orgId, assetId, caption = null) {
+  /** The events a picture can be filed under: this dojo's own, newest first. */
+  async events(actor, orgId) {
+    await assertRole(actor, orgId, TEACH);
+    return q(`select id, title, starts_at from event where organisation_id = $1 and status <> 'cancelled'
+      order by starts_at desc limit 300`, [orgId]);
+  },
+
+  /** Years that have pictures, newest first, with how many. */
+  async years(actor, orgId) {
+    await assertRole(actor, orgId, TEACH);
+    return q(`select year, count(*)::int as n from club_gallery where organisation_id = $1 and year is not null
+      group by year order by year desc`, [orgId]);
+  },
+
+  /** Checks an event belongs to this dojo and returns it (or null for "no event"). */
+  async _event(orgId, eventId) {
+    if (!eventId) return null;
+    const e = await one('select id, starts_at from event where id = $1 and organisation_id = $2', [eventId, orgId]);
+    if (!e) throw new Invalid('Choose one of this club\'s own events.');
+    return e;
+  },
+
+  async add(actor, orgId, assetId, caption = null, { year = null, eventId = null } = {}) {
     await assertRole(actor, orgId, TEACH);
     const a = await one('select organisation_id, alt_text from asset where id = $1', [assetId]);
     if (!a || a.organisation_id !== orgId) throw new Invalid('Choose one of this club\'s own pictures.');
     const count = (await one('select count(*)::int as n from club_gallery where organisation_id = $1', [orgId])).n;
-    if (count >= MAX_GALLERY) throw new Invalid(`A gallery holds up to ${MAX_GALLERY} pictures. Remove one first.`);
+    if (count >= MAX_GALLERY) throw new Invalid(`A gallery holds up to ${MAX_GALLERY} pictures. Remove some first.`);
     if (await one('select 1 as x from club_gallery where organisation_id = $1 and asset_id = $2', [orgId, assetId]))
       throw new Invalid('That picture is already in the gallery.');
+    const ev = await this._event(orgId, eventId);
+    // An event gives a picture its year unless somebody said otherwise.
+    const y = readYear(year) ?? (ev ? new Date(ev.starts_at).getFullYear() : thisYear());
     const cap = String(caption ?? '').trim().slice(0, 160) || null;
-    await pool.query('insert into club_gallery (organisation_id, asset_id, caption, position) values ($1,$2,$3,$4)', [orgId, assetId, cap, count]);
+    await pool.query('insert into club_gallery (organisation_id, asset_id, caption, position, year, event_id) values ($1,$2,$3,$4,$5,$6)',
+      [orgId, assetId, cap, count, y, ev?.id ?? null]);
     await pool.query(`insert into audit_log (account_id, organisation_id, action, entity, entity_id) values ($1,$2,'gallery_added','asset',$3)`, [actor, orgId, assetId]);
   },
 
-  async remove(actor, orgId, id) {
+  /**
+   * Set the year and/or event on several pictures at once. `undefined` leaves a field alone;
+   * eventId '' or null takes the picture out of its event.
+   */
+  async file(actor, orgId, ids, { year, eventId }) {
     await assertRole(actor, orgId, TEACH);
-    await pool.query('delete from club_gallery where id = $1 and organisation_id = $2', [id, orgId]);
+    if (!ids.length) throw new Invalid('Tick at least one picture first.');
+    const sets = [], args = [orgId, ids];
+    if (year !== undefined) {
+      const y = readYear(year);
+      if (y != null) { args.push(y); sets.push(`year = $${args.length}`); }
+    }
+    if (eventId !== undefined) {
+      const ev = await this._event(orgId, eventId || null);
+      args.push(ev?.id ?? null); sets.push(`event_id = $${args.length}`);
+      // Putting pictures into an event with no year chosen files them under the event's year.
+      if (ev && (year === undefined || String(year).trim() === '')) {
+        args.push(new Date(ev.starts_at).getFullYear()); sets.push(`year = $${args.length}`);
+      }
+    }
+    if (!sets.length) throw new Invalid('Choose a year or an event to file them under.');
+    await pool.query(`update club_gallery set ${sets.join(', ')} where organisation_id = $1 and id = any($2::uuid[])`, args);
+    await pool.query(`insert into audit_log (account_id, organisation_id, action, entity, after) values ($1,$2,'gallery_filed','club_gallery',$3)`,
+      [actor, orgId, JSON.stringify({ count: ids.length, year: year ?? null, eventId: eventId ?? null })]);
+  },
+
+  async remove(actor, orgId, id) { return this.removeMany(actor, orgId, [id]); },
+
+  async removeMany(actor, orgId, ids) {
+    await assertRole(actor, orgId, TEACH);
+    if (!ids.length) throw new Invalid('Tick at least one picture first.');
+    await pool.query('delete from club_gallery where organisation_id = $1 and id = any($2::uuid[])', [orgId, ids]);
     await pool.query(`update club_gallery g set position = s.rn from (select id, row_number() over (order by position, created_at) - 1 as rn
       from club_gallery where organisation_id = $1) s where g.id = s.id`, [orgId]);
   },
@@ -6146,14 +6220,21 @@ export const gallery = {
       [id, orgId, String(caption ?? '').trim().slice(0, 160) || null]);
   },
 
-  /** direction -1 = earlier, +1 = later. Swaps with its neighbour. */
+  /** direction -1 = earlier, +1 = later. Swaps with its neighbour in the same year and event. */
   async move(actor, orgId, id, direction) {
     await assertRole(actor, orgId, TEACH);
-    const rows = await q('select id from club_gallery where organisation_id = $1 order by position, created_at', [orgId]);
+    const me = await one('select year, event_id from club_gallery where id = $1 and organisation_id = $2', [id, orgId]);
+    if (!me) return;
+    const rows = await q(`select id, position from club_gallery where organisation_id = $1
+      and year is not distinct from $2 and event_id is not distinct from $3 order by position, created_at`, [orgId, me.year, me.event_id]);
     const i = rows.findIndex((r) => r.id === id), j = i + (direction < 0 ? -1 : 1);
     if (i < 0 || j < 0 || j >= rows.length) return;
-    [rows[i], rows[j]] = [rows[j], rows[i]];
-    for (let k = 0; k < rows.length; k++) await pool.query('update club_gallery set position = $2 where id = $1', [rows[k].id, k]);
+    // Give the group a clean run of positions, then swap the two.
+    const order = rows.map((r) => r.id);
+    [order[i], order[j]] = [order[j], order[i]];
+    const base = Math.min(...rows.map((r) => r.position));
+    for (let k = 0; k < order.length; k++)
+      await pool.query('update club_gallery set position = $2 where id = $1', [order[k], base + k]);
   },
 };
 

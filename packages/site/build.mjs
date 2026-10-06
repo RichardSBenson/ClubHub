@@ -411,6 +411,10 @@ for (const target of SITES) {
       await fs.copyFile(path.join(vendor, file), to);
       written.push(`vendor/${file}`);
     }
+    // The admin's gallery uploader: a small script served from this site, never inline.
+    const own = new URL('../../vendor/honbu/gallery-upload.js', import.meta.url).pathname;
+    await fs.copyFile(own, path.join(OUT, 'vendor', 'gallery-upload.js'));
+    written.push('vendor/gallery-upload.js');
   }
 
   // Only those the organisation has published. An empty page is the right
@@ -419,8 +423,15 @@ for (const target of SITES) {
   const teachers = (site.instructors ? await site.instructors(target.slug) : [])
     .map((x) => ({ ...x, photoUrl: assets[x.photoAssetId] ?? null, paragraphs: paragraphs(x.bio) }));
 
+  // A dojo's pictures, newest year first, as the pages want them.
+  const galleryFor = (dojo) => (galleryRows.get(dojo.id) ?? []).map((g) => ({
+    url: assets[g.asset_id], alt: g.alt_text, caption: g.caption, year: g.year ?? null,
+    eventId: g.event_id ?? null, eventTitle: g.event_title ?? null, eventSlug: g.event_slug ?? null })).filter((g) => g.url);
+
   for (const dojo of dojos) {
     const dojoEvents = await site.eventsFor(dojo.slug);
+    if (galleryFor(dojo).length)
+      await write(`${dojo.slug}/gallery/index.html`, R.galleryPage({ dojo, items: galleryFor(dojo), ...shared }));
     // A dojo's own events get their page under the dojo, so a local event needs nobody's
     // permission to be on the website. Ones that reached the federation's calendar are there too.
     for (const ev of dojoEvents.filter((e) => e.is_own))
@@ -431,7 +442,7 @@ for (const target of SITES) {
     }
     await write(`${dojo.slug}/index.html`,
       R.dojoPage({ dojo, events: dojoEvents, ...shared, instructors: teachers.filter((x) => x.organisationSlug === dojo.slug),
-        gallery: (galleryRows.get(dojo.id) ?? []).map((g) => ({ url: assets[g.asset_id], alt: g.alt_text, caption: g.caption })).filter((g) => g.url),
+        gallery: galleryFor(dojo).slice(0, 8), galleryTotal: galleryFor(dojo).length,
         sections: dojoSections, startAnyWeekText: dojoCopy.startAnyWeekText ?? null,
         showFirstClassFree: dojoCopy.showFirstClassFree !== false }));
   }

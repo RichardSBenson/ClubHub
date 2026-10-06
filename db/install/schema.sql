@@ -1957,3 +1957,9 @@ alter table instructor_profile
   add column if not exists show_checks boolean not null default false;
 
 alter table event_detail add column if not exists description text;
+
+alter table club_gallery
+  add column if not exists year smallint check (year between 1950 and 2100),
+  add column if not exists event_id uuid references event(id) on delete set null;
+update club_gallery set year = extract(year from created_at)::smallint where year is null;
+create index if not exists club_gallery_year on club_gallery (organisation_id, year desc, event_id);

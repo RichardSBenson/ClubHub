@@ -30,9 +30,19 @@ at the federation approving them. To also appear on the federation's calendar th
 decides, as before.
 
 ## Dojo galleries
-**Gallery** in a dojo's admin menu: add pictures (new, or from the dojo's own library), caption them, put them in
-order, remove them. Up to 24. They show as "In the dojo" on the dojo's page once there is at least one, whatever
-layout the federation saved. Sizes are in `website-images.md` (aim for 1200 × 800).
+**Gallery** in a dojo's admin menu: add many pictures at once, file them by **year** and by **event** (one of the
+dojo's own events), caption them, put them in order, remove them. Up to 300 per dojo.
+
+- *Adding.* Pick several files, choose a year and/or an event, press Add. With an event and no year, the pictures take
+  the event's year. A file that is not a picture is skipped and named; the rest go in.
+- *Big photos.* A small script (`/vendor/gallery-upload.js`, same-origin so the CSP is unchanged) shrinks each picture
+  in the browser to 2000 px and sends them one at a time, with a progress list. Without scripts the plain form still
+  works, but the host's request-size limit applies (about 4.5 MB on Vercel), so shrink first.
+- *Tidying.* Filter by year or event, tick pictures and file them under a year/event, or remove them together. Each
+  picture also has its own caption, year and event form. Moving earlier/later works inside its year and event.
+- *Public.* The dojo page shows the first 8 as "In the dojo" with a link to the dojo's own gallery page
+  (`/<dojo>/gallery`), which has a button per year (newest first) and each event as a heading linked to its page.
+  A dojo with no pictures has no gallery page. Sizes are in `website-images.md` (aim for 1200 × 800).
 
 Adding a new picture needs an owner or administrator (uploading is limited to them); choosing one already in the
 library does not.

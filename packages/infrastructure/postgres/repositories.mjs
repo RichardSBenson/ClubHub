@@ -307,15 +307,18 @@ export class PostgresSiteContent {
   async galleryFor(rootSlug) {
     try {
       const { rows } = await this.pool.query(`
-        select g.organisation_id, g.asset_id, g.caption, g.position, a.alt_text
+        select g.id, g.organisation_id, g.asset_id, g.caption, g.position, g.year, g.event_id, a.alt_text,
+               e.title as event_title, e.starts_at as event_starts,
+               case when e.status = 'published' and e.visibility = 'public' then e.slug end as event_slug
         from club_gallery g
         join asset a on a.id = g.asset_id
+        left join event e on e.id = g.event_id
         join organisation o on o.id = g.organisation_id
         join organisation root on o.path <@ root.path
         where root.slug = $1
-        order by g.organisation_id, g.position`, [rootSlug]);
+        order by g.organisation_id, g.year desc nulls last, e.starts_at desc nulls last, g.event_id nulls last, g.position, g.created_at`, [rootSlug]);
       return rows;
-    } catch (e) { if (e.code === '42P01') return []; throw e; }
+    } catch (e) { if (e.code === '42P01' || e.code === '42703') return []; throw e; }
   }
 
   async eventsFor(orgSlug) {
