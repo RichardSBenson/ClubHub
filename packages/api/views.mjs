@@ -8,7 +8,7 @@ import { EVENT_TYPES } from '../core/domain/event-types.mjs';
 import { slotHint, slotTable } from '../content/image-slots.mjs';
 import { WRITING_HELP } from '../content/document-text.mjs';
 import path from 'node:path';
-import { BLOCKS } from '../content/blocks.mjs';
+import { BLOCKS, paragraphs } from '../content/blocks.mjs';
 import { BLOCK_MENU } from '../content/page-form.mjs';
 import { SHORTHAND_HELP } from '../content/marks.mjs';
 /**
@@ -426,10 +426,11 @@ export const roster = ({ me, csrf, org, roster, canRegister = false,
 
 export const person = ({ me, csrf, person, history, affiliations, eligibility,
                         titles = [], changes = [], guardians = null, training = null,
-                        canEdit = false, access = null, link = null,
+                        canEdit = false, access = null, link = null, isInstructor = false, canManage = false, done = null, photoError = null,
                         linkExpires = 15, error = null }) => page({
-  title: `${person.first_name} ${person.last_name}`, me, csrf, body: `
-  <h1>${esc(person.first_name)} ${esc(person.last_name)}</h1>
+  title: `${person.first_name} ${person.last_name}`, me, csrf, body: `<style>${identityCss}
+  .idphoto{background:#ddd}.idphoto.none{color:#666}.idchip{color:#9a2a1f}</style>
+  ${identityHead({ personId: person.id, name: `${person.first_name} ${person.last_name}`, hasPhoto: !!person.photo_asset_id, isInstructor, tag: 'h1' })}
   <p class="sub">${esc(person.display_number ?? 'no member number')}
     ${person.age ? ` · ${person.age} years old` : ''}
     ${canEdit ? ` · <a href="/p/${esc(person.id)}/edit">Correct this record</a>` : ''}</p>
@@ -439,6 +440,31 @@ export const person = ({ me, csrf, person, history, affiliations, eligibility,
     ${titles[0].address_as && titles[0].address_as !== titles[0].label
       ? `<span class="muted">addressed as ${esc(titles[0].address_as)}</span>`
       : ''}</p>` : ''}
+
+  ${done ? `<div class="good">${esc(done)}</div>` : ''}
+  ${photoError ? `<div class="bad">${esc(photoError)}</div>` : ''}
+
+  ${canManage ? `<form method="post" action="/p/${esc(person.id)}/instructor" class="card" style="margin:12px 0">
+    <input type="hidden" name="_csrf" value="${esc(csrf ?? '')}">
+    <label style="display:flex;gap:10px;align-items:center;font-weight:700">
+      <input type="checkbox" name="instructor"${isInstructor ? ' checked' : ''} style="width:22px;height:22px">
+      This person is an instructor</label>
+    <p class="hint">Ticked, they are listed as an instructor of their club and can be shown on its website
+      (you choose that on the Instructors screen). Taking the tick off ends it today and keeps the history.
+      Signing in to take the roll is a separate thing, under Access.</p>
+    <button class="btn" type="submit">Save</button>
+  </form>` : ''}
+
+  ${canEdit ? `<form method="post" action="/p/${esc(person.id)}/photo" enctype="multipart/form-data" class="card" style="margin:12px 0">
+    <input type="hidden" name="_csrf" value="${esc(csrf ?? '')}">
+    <h3 style="margin-top:0">Photograph</h3>
+    <p><input type="file" name="photo" accept="image/png,image/jpeg,image/webp"></p>
+    <p class="hint">${esc(slotHint('portrait'))} The same photograph is used on their membership card and, if they are shown on the website, on their instructor card.</p>
+    <label style="display:flex;gap:8px;align-items:flex-start"><input type="checkbox" name="consent">
+      <span>They (or their parent or guardian) agree to this photograph being kept on their record.</span></label>
+    <p><button class="btn" type="submit">Save photograph</button>
+      ${person.photo_asset_id ? '<button class="btn quiet" type="submit" name="remove" value="1">Remove photograph</button>' : ''}</p>
+  </form>` : ''}
 
   ${!eligibility?.next && history.length
     ? `<div class="note"><strong>Top of the ladder.</strong>
@@ -2202,9 +2228,7 @@ export const instructorList = ({ me, csrf, org, instructors = [],
     return y;
   };
 
-  const bioText = (bio) => (bio?.blocks ?? [])
-    .map((b) => typeof b.text === 'string' ? b.text : '')
-    .filter(Boolean).join('\n\n');
+  const bioText = (bio) => paragraphs(bio).join('\n\n');
 
   const card = (i) => {
     const years = age(i.date_of_birth);
@@ -2239,10 +2263,22 @@ export const instructorList = ({ me, csrf, org, instructors = [],
           <input type="text" name="teaches" maxlength="200"
             value="${esc(i.teaches ?? '')}"></label></p>
 
-        <p><label>About them<br>
+        <p><label>Training since
+          <span class="hint">The year they started, such as 1998.</span><br>
+          <input type="number" name="startedYear" min="1930" max="2100" style="max-width:120px"
+            value="${esc(i.started_year ?? '')}"></label></p>
+
+        <p><label>About them
+          <span class="hint">A few sentences a parent or a new student would find useful: where they trained, what they
+            enjoy teaching. The cards show the first 280 characters; the Instructors page shows all of it.</span><br>
           <textarea name="bio" rows="4">${esc(bioText(i.bio))}</textarea>
           <span class="hint">Leave a blank line between paragraphs.</span>
         </label></p>
+
+        <p><label><input type="checkbox" name="showChecks"${i.show_checks ? ' checked' : ''}>
+          Show that they are cleared to work with children
+          <span class="hint">Lists their current police vetting, first aid and similar checks by name (never what a check
+            found). Ask them first.</span></label></p>
 
         <p><label>Order on the page
           <span class="hint">Lower numbers first.</span><br>
@@ -2263,8 +2299,7 @@ export const instructorList = ({ me, csrf, org, instructors = [],
       ${i.published && i.published_at ? `<p class="hint">On the site since
         ${esc(new Date(i.published_at).toISOString().slice(0, 10))}.</p>` : ''}
       ${i.photo_asset_id ? '' : `<p class="hint">No photograph on their record.
-        <a href="/o/${esc(org.slug)}/media">Upload one</a> and set it on their
-        page.</p>`}
+        <a href="/p/${esc(i.person_id)}">Add one on their profile</a>; the same photograph is used on their card.</p>`}
     </div>`;
   };
 
@@ -4172,7 +4207,30 @@ const DAY_NAMES_ = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Fri
 // the digital card and class check-in
 // ---------------------------------------------------------------------------
 
-const cardCss = `<style>
+/**
+ * One identity head for everybody: photograph (or initials), name, and chips for what they are.
+ * The member's own card, the check an official sees, and the profile page all draw this, so a
+ * person looks the same wherever they appear and the only difference between two people is the data.
+ */
+const identityCss = `
+.idhead{display:flex;gap:14px;align-items:center;text-align:left}
+.idphoto{width:84px;height:104px;border-radius:8px;object-fit:cover;flex:none;background:#3a3a3d}
+.idphoto.none{display:flex;align-items:center;justify-content:center;font-size:1.8rem;font-weight:700;color:#bbb}
+.idwho h2,.idwho h1{margin:0 0 4px}
+.idchips{display:flex;gap:6px;flex-wrap:wrap;margin:0}
+.idchip{display:inline-block;font-size:.75rem;font-weight:700;letter-spacing:.06em;text-transform:uppercase;padding:2px 8px;border-radius:999px;border:1px solid currentColor}
+`;
+export const identityHead = ({ personId, name, hasPhoto = false, isInstructor = false, tag = 'h2' }) => {
+  const initials = String(name ?? '?').split(/\s+/).filter(Boolean).slice(0, 2).map((w) => w[0].toUpperCase()).join('');
+  return `<div class="idhead">
+    ${hasPhoto ? `<img class="idphoto" src="/p/${esc(personId)}/photo" alt="Photograph of ${esc(name)}">`
+               : `<div class="idphoto none" aria-hidden="true">${esc(initials)}</div>`}
+    <div class="idwho"><${tag}>${esc(name)}</${tag}>
+      <p class="idchips">${isInstructor ? '<span class="idchip">Instructor</span>' : ''}</p></div>
+  </div>`;
+};
+
+const cardCss = `<style>${identityCss}
 .idcard{max-width:340px;margin:16px auto;padding:20px;border-radius:14px;background:#1c1c1e;color:#fff;text-align:center}
 .idcard .org{font-size:.8rem;letter-spacing:.12em;text-transform:uppercase;color:#f0ce41}
 .idcard h2{margin:.4em 0 .1em;color:#fff}
@@ -4189,7 +4247,7 @@ export const memberCard = ({ me, csrf, how, issued, reason, member, validThrough
   <p class="sub"><a href="/me">Back</a></p>
   ${issued ? `<div class="idcard">
     <div class="org">${esc(member.federation)}</div>
-    <h2>${esc(member.name)}</h2>
+    ${identityHead({ personId: member.id, name: member.name, hasPhoto: !!member.photo_asset_id, isInstructor: member.is_instructor })}
     <dl><dt>Number</dt><dd>${esc(member.display_number)}</dd>
       <dt>Club</dt><dd>${esc(member.club)}</dd>
       ${member.grade ? `<dt>Grade</dt><dd>${esc(member.grade)}</dd>` : ''}
@@ -4207,7 +4265,7 @@ export const cardVerdict = ({ me, csrf, token, verdict, official, stale, federat
     <div class="bigverdict" style="color:${verdict.ok ? '#0a7a2f' : '#b00020'}">${verdict.ok ? '✓ ' : '✗ '}${esc(verdict.headline)}</div>
     ${federation ? `<p class="muted">${esc(federation)}</p>` : ''}
     ${verdict.why ? `<p>${esc(verdict.why)}</p>` : ''}
-    ${member ? `<div class="idcard" style="text-align:left"><h2>${esc(member.name)}</h2>
+    ${member ? `<div class="idcard" style="text-align:left">${identityHead({ personId: member.personId, name: member.name, hasPhoto: member.hasPhoto, isInstructor: member.isInstructor })}
       <dl><dt>Number</dt><dd>${esc(member.number)}</dd><dt>Club</dt><dd>${esc(member.club)}</dd>
       ${member.grade ? `<dt>Grade</dt><dd>${esc(member.grade)}</dd>` : ''}
       <dt>${member.exempt ? 'Membership' : 'Paid until'}</dt><dd>${member.exempt ? 'No fee' : esc(member.paidUntil)}</dd></dl></div>

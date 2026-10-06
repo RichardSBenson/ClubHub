@@ -263,6 +263,12 @@ export class PostgresSiteContent {
              cg.label as grade, cg.is_dan as "isDan",
              ct.label as title, ct.address_as as "addressAs",
              ip.bio, ip.teaches, ip.sort_order as "sortOrder",
+             ip.started_year as "startedYear",
+             case when ip.show_checks then (
+               select coalesce(json_agg(distinct q.label order by q.label), '[]'::json)
+               from qualification_award qa join qualification q on q.id = qa.qualification_id
+               where qa.person_id = p.id and q.category in ('safeguarding','medical','safety')
+                 and (qa.expires_on is null or qa.expires_on >= current_date)) else '[]'::json end as checks,
              o.name as "organisationName", o.slug as "organisationSlug"
       from instructor_profile ip
       join person p on p.id = ip.person_id

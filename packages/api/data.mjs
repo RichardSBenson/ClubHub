@@ -1515,6 +1515,49 @@ export const pages = {
 // to show a filename.
 // ---------------------------------------------------------------------------
 
+/**
+ * Store an image and its bytes in one transaction. No role check: the caller has already
+ * decided the actor may put a picture here (an administrator adding to the library, or a person
+ * or their guardian adding a photograph to their own record).
+ */
+async function insertAsset(actor, orgId, { bytes, identified, filename, altText = null,
+                                          credit = null, consentRef = null }) {
+
+  const client = await pool.connect();
+  try {
+    await client.query('begin');
+    const { rows: [row] } = await client.query(`
+      insert into asset (organisation_id, kind, storage_key, filename, mime,
+                         width, height, bytes, alt_text, credit, consent_ref)
+      values ($1,'image','',$2,$3,$4,$5,$6,$7,$8,$9)
+      returning *`,
+      [orgId, filename, identified.mime, identified.width, identified.height,
+       identified.bytes, altText?.trim() || null, credit?.trim() || null,
+       consentRef?.trim() || null]);
+
+    await client.query(
+      `insert into asset_blob (asset_id, bytes) values ($1,$2)`,
+      [row.id, bytes]);
+
+    await client.query(`
+      insert into audit_log (account_id, organisation_id, action, entity,
+                             entity_id, after)
+      values ($1,$2,'asset_upload','asset',$3,$4)`,
+      [actor, orgId, row.id,
+       JSON.stringify({ filename, mime: identified.mime,
+                        width: identified.width, height: identified.height,
+                        bytes: identified.bytes })]);
+
+    await client.query('commit');
+    return row;
+  } catch (e) {
+    await client.query('rollback');
+    throw e;
+  } finally {
+    client.release();
+  }
+}
+
 export const assets = {
   /** One federation's images, newest first. Never the bytes. */
   async list(actor, orgId) {
@@ -1569,43 +1612,9 @@ export const assets = {
    * `identified` comes from images.mjs, which read it out of the bytes — the
    * mime recorded here is never the one the uploader declared.
    */
-  async create(actor, orgId, { bytes, identified, filename, altText = null,
-                               credit = null, consentRef = null }) {
+  async create(actor, orgId, input) {
     await assertRole(actor, orgId, MANAGE);
-
-    const client = await pool.connect();
-    try {
-      await client.query('begin');
-      const { rows: [row] } = await client.query(`
-        insert into asset (organisation_id, kind, storage_key, filename, mime,
-                           width, height, bytes, alt_text, credit, consent_ref)
-        values ($1,'image','',$2,$3,$4,$5,$6,$7,$8,$9)
-        returning *`,
-        [orgId, filename, identified.mime, identified.width, identified.height,
-         identified.bytes, altText?.trim() || null, credit?.trim() || null,
-         consentRef?.trim() || null]);
-
-      await client.query(
-        `insert into asset_blob (asset_id, bytes) values ($1,$2)`,
-        [row.id, bytes]);
-
-      await client.query(`
-        insert into audit_log (account_id, organisation_id, action, entity,
-                               entity_id, after)
-        values ($1,$2,'asset_upload','asset',$3,$4)`,
-        [actor, orgId, row.id,
-         JSON.stringify({ filename, mime: identified.mime,
-                          width: identified.width, height: identified.height,
-                          bytes: identified.bytes })]);
-
-      await client.query('commit');
-      return row;
-    } catch (e) {
-      await client.query('rollback');
-      throw e;
-    } finally {
-      client.release();
-    }
+    return insertAsset(actor, orgId, input);
   },
 
   /** Change what an image says about itself. Not its bytes — those are fixed. */
@@ -1864,7 +1873,7 @@ export const instructors = {
              cg.label as grade, cg.is_dan,
              ct.label as title, ct.address_as,
              ip.id as profile_id, ip.bio, ip.teaches, ip.published,
-             ip.published_at, ip.sort_order
+             ip.published_at, ip.sort_order, ip.started_year, ip.show_checks
       from affiliation a
       join person p on p.id = a.person_id
       left join person_current_grade cg on cg.person_id = p.id
@@ -1885,7 +1894,7 @@ export const instructors = {
    * the box is first ticked — somebody's birthday does not move, but a
    * federation raising its minimum age should take effect on the next save.
    */
-  async save(actor, orgId, personId, { bio, teaches, published, sortOrder = 0 }) {
+  async save(actor, orgId, personId, { bio, teaches, published, sortOrder = 0, startedYear = null, showChecks = false }) {
     await assertRole(actor, orgId, MANAGE);
 
     const person = await one(`
@@ -1912,13 +1921,19 @@ export const instructors = {
 
     const { doc } = validate(bio ?? { blocks: [] });
 
+    const year = startedYear == null || startedYear === '' ? null : Number(startedYear);
+    if (year != null && !(Number.isInteger(year) && year >= 1930 && year <= new Date().getFullYear()))
+      throw new Invalid('"Training since" must be a year, such as 1998.');
+
     const row = await one(`
       insert into instructor_profile (organisation_id, person_id, bio, teaches,
                                       published, published_by, published_at,
-                                      sort_order)
-      values ($1,$2,$3,$4,$5,$6,$7,$8)
+                                      sort_order, started_year, show_checks)
+      values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
       on conflict (organisation_id, person_id) do update set
         bio = excluded.bio,
+        started_year = excluded.started_year,
+        show_checks = excluded.show_checks,
         teaches = excluded.teaches,
         published = excluded.published,
         -- Only stamped when it becomes published, so the record keeps who
@@ -1932,7 +1947,7 @@ export const instructors = {
         sort_order = excluded.sort_order
       returning *`,
       [orgId, personId, doc, teaches?.trim() || null, !!published,
-       published ? actor : null, published ? new Date() : null, sortOrder]);
+       published ? actor : null, published ? new Date() : null, sortOrder, year, !!showChecks]);
 
     await pool.query(`
       insert into audit_log (account_id, organisation_id, action, entity,
@@ -5239,7 +5254,9 @@ const cardRow = (personId) => one(`
          p.photo_asset_id, a.role, a.status, a.paid_until::text as paid_until, a.fee_exempt, a.starts::text as since,
          o.id as org_id, o.name as club, o.timezone,
          root.name as federation, root.slug as federation_slug,
-         cg.label as grade, cg.rank_order
+         cg.label as grade, cg.rank_order,
+         exists (select 1 from affiliation i where i.person_id = p.id and i.ends is null
+                 and i.role = 'instructor' and i.status = 'active') as is_instructor
   from person p
   join affiliation a on a.person_id = p.id and a.ends is null and a.role = 'member'
   join organisation o on o.id = a.organisation_id
@@ -5281,7 +5298,7 @@ export const cards = {
     if (actor && row) official = !!(await one('select has_role_at($1,$2,$3) as ok', [actor, row.org_id, TEACHERS_ROLES]))?.ok;
     return { verdict, official, stale, federation: row?.federation ?? null,
       member: official && row ? { name: row.name, number: row.display_number, club: row.club, grade: row.grade,
-        paidUntil: row.paid_until, exempt: row.fee_exempt, hasPhoto: !!row.photo_asset_id, personId: row.id } : null };
+        paidUntil: row.paid_until, exempt: row.fee_exempt, hasPhoto: !!row.photo_asset_id, isInstructor: row.is_instructor, name: row.name, personId: row.id } : null };
   },
 };
 const TEACHERS_ROLES = ['owner', 'administrator', 'registrar', 'instructor'];
@@ -6099,4 +6116,104 @@ export const gallery = {
     [rows[i], rows[j]] = [rows[j], rows[i]];
     for (let k = 0; k < rows.length; k++) await pool.query('update club_gallery set position = $2 where id = $1', [rows[k].id, k]);
   },
+};
+
+// ---------------------------------------------------------------------------
+// A person's photograph: one picture on their record, used wherever they appear
+// ---------------------------------------------------------------------------
+
+export const photos = {
+  /** Who may change a photograph: the person, a guardian, or an official of their club who keeps the register. */
+  async assertMay(actor, personId) {
+    if (await family.mayActFor(actor, personId)) return;
+    const homes = await q('select organisation_id from affiliation where person_id = $1 and ends is null', [personId]);
+    for (const h of homes)
+      if ((await one('select has_role_at($1,$2,$3) as ok', [actor, h.organisation_id, REGISTER]))?.ok) return;
+    throw new Forbidden();
+  },
+
+  /**
+   * Set or replace somebody's photograph. The person, a guardian, or an official of their club may do it
+   * (the same people who may edit the record), and somebody has to say the photograph may be kept: for a
+   * child that is a parent's yes, so it is asked every time rather than assumed.
+   */
+  async set(actor, personId, { bytes, identified, filename }, { consent } = {}) {
+    await this.assertMay(actor, personId);
+    if (!consent) throw new Invalid('Please confirm that the person (or their parent or guardian) agrees to this photograph being kept.');
+    const home = await one(`select organisation_id from affiliation where person_id = $1 and ends is null
+      order by (role = 'member') desc limit 1`, [personId]);
+    if (!home) throw new NotFound('Person has no current affiliation');
+    const who = await one(`select first_name || ' ' || last_name as name from person where id = $1`, [personId]);
+    const asset = await insertAsset(actor, home.organisation_id, { bytes, identified, filename,
+      altText: `Photograph of ${who.name}`, consentRef: `Agreed to by the person or their guardian, recorded ${new Date().toISOString().slice(0, 10)}` });
+    await pool.query('update person set photo_asset_id = $2, updated_at = now() where id = $1', [personId, asset.id]);
+    await pool.query(`insert into audit_log (account_id, organisation_id, action, entity, entity_id, after)
+      values ($1,$2,'person_photo_set','person',$3,$4)`, [actor, home.organisation_id, personId, JSON.stringify({ assetId: asset.id })]);
+    return asset;
+  },
+
+  async clear(actor, personId) {
+    await this.assertMay(actor, personId);
+    await pool.query('update person set photo_asset_id = null, updated_at = now() where id = $1', [personId]);
+    await pool.query(`insert into audit_log (account_id, action, entity, entity_id) values ($1,'person_photo_cleared','person',$2)`, [actor, personId]);
+  },
+
+  async forPerson(personId) {
+    return (await one('select photo_asset_id from person where id = $1', [personId]))?.photo_asset_id ?? null;
+  },
+};
+
+// ---------------------------------------------------------------------------
+// The instructor switch
+// ---------------------------------------------------------------------------
+
+export const instructorRole = {
+  /** Is this person recorded as an instructor right now? */
+  async is(personId) {
+    return !!(await one(`select 1 as x from affiliation where person_id = $1 and ends is null
+      and role = 'instructor' and status = 'active'`, [personId]));
+  },
+
+  /**
+   * Tick or untick "is an instructor" for somebody. Done at their own club by an owner or administrator
+   * there, or by one above (a region or the federation): has_role_at reaches down the tree.
+   * Unticking ends the role today and keeps the history; it also takes them off the public website,
+   * because a profile for someone who no longer instructs would be a claim nobody is making.
+   */
+  async set(actor, personId, on) {
+    const home = await one(`select organisation_id from affiliation where person_id = $1 and ends is null
+      order by (role = 'member') desc limit 1`, [personId]);
+    if (!home) throw new NotFound('Person has no current affiliation');
+    await assertRole(actor, home.organisation_id, MANAGE);
+    const club = home.organisation_id;
+    const now = await is_(personId);
+    if (on && !now) {
+      await pool.query(`insert into affiliation (person_id, organisation_id, role, starts, status)
+        values ($1,$2,'instructor', current_date, 'active')`, [personId, club]);
+    } else if (!on && now) {
+      await pool.query(`update affiliation set ends = current_date, status = 'resigned'
+        where person_id = $1 and role = 'instructor' and ends is null`, [personId]);
+      await pool.query('update instructor_profile set published = false where person_id = $1', [personId]);
+    } else return { changed: false };
+    await pool.query(`insert into audit_log (account_id, organisation_id, action, entity, entity_id, after)
+      values ($1,$2,$3,'person',$4,$5)`, [actor, club, on ? 'instructor_on' : 'instructor_off', personId, JSON.stringify({ instructor: !!on })]);
+    return { changed: true };
+  },
+};
+const is_ = (personId) => instructorRole.is(personId);
+
+photos.bytes = async function bytes(actor, personId) {
+  const asset = await one('select photo_asset_id from person where id = $1', [personId]);
+  if (!asset?.photo_asset_id) throw new NotFound('Photograph');
+  let allowed = false;
+  try { await family.assertMayActFor(actor, personId); allowed = true; } catch { /* maybe an official */ }
+  if (!allowed) {
+    const homes = await q('select organisation_id from affiliation where person_id = $1 and ends is null', [personId]);
+    for (const h of homes) if ((await one('select has_role_at($1,$2,$3) as ok', [actor, h.organisation_id, TEACH]))?.ok) { allowed = true; break; }
+  }
+  if (!allowed) throw new Forbidden();
+  const a = await one('select mime from asset where id = $1', [asset.photo_asset_id]);
+  const b = await one('select bytes from asset_blob where asset_id = $1', [asset.photo_asset_id]);
+  if (!b?.bytes) throw new NotFound('Photograph');
+  return { mime: a.mime, bytes: b.bytes };
 };

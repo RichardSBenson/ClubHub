@@ -32,7 +32,7 @@
 
 import crypto from 'node:crypto';
 import { URL } from 'node:url';
-import { eventDetails, gallery, MAX_GALLERY, pool, orgs, people, rank, events, competition, pages, assets, news,
+import { photos, instructorRole, eventDetails, gallery, MAX_GALLERY, pool, orgs, people, rank, events, competition, pages, assets, news,
          instructors, navigation, audit, cards, checkin, search, clubPages, appearance, clubs, clubProfile, family, myself, memberEvents, messages, emailPreferences, payments, fees, renewals, reminders, attendance, newcomers, reports, gradings, qualifications, portal, enquiries, scheduledPublishing, TooMany, outsiders, trials, referrals, growth, clubMailer, terms,
          Forbidden, NotFound, Invalid } from './data.mjs';
 import * as auth from './auth.mjs';
@@ -360,6 +360,8 @@ get('/p/:id', async (ctx) => {
 
   return ctx.send(200, V.person({
     me: ctx.me, ...record, eligibility, csrf: ctx.csrf, canEdit,
+    isInstructor: await instructorRole.is(record.person.id), canManage: mayManage,
+    done: ctx.url.searchParams.get('done'), photoError: ctx.url.searchParams.get('error'),
     titles: await people.titlesOf(ctx.me.accountId, ctx.params.id),
     // Named `changes`, not `history`: this view already has a `history`, and
     // it is the grading history. Overwriting it with the audit log would have
@@ -375,6 +377,46 @@ get('/p/:id', async (ctx) => {
     guardians: canEdit ? await family.guardiansOf(ctx.me.accountId, record.person.id)
                        : null,
   }));
+});
+
+post('/p/:id/instructor', async (ctx) => {
+  ctx.requireActor();
+  const form = await ctx.form();
+  if (!UUID_RE.test(ctx.params.id)) throw new NotFound('Person');
+  const on = form.instructor === 'on';
+  const out = await instructorRole.set(ctx.me.accountId, ctx.params.id, on);
+  if (out.changed) await requestRebuild({ reason: `instructor ${on ? 'on' : 'off'}` });
+  return ctx.redirect(`/p/${ctx.params.id}?done=${encodeURIComponent(!out.changed ? 'No change.' : on ? 'Marked as an instructor.' : 'No longer marked as an instructor.')}`);
+});
+
+post('/p/:id/photo', async (ctx) => {
+  ctx.requireActor();
+  if (!UUID_RE.test(ctx.params.id)) throw new NotFound('Person');
+  const back = `/p/${ctx.params.id}`;
+  // Whether this person may touch this record is settled before anything they sent is looked at.
+  await photos.assertMay(ctx.me.accountId, ctx.params.id);
+  try {
+    const { fields, files } = await ctx.upload({ maxBytes: MAX_BYTES + 256 * 1024 });
+    if (fields.remove) { await photos.clear(ctx.me.accountId, ctx.params.id); return ctx.redirect(`${back}?done=${encodeURIComponent('Photograph removed.')}`); }
+    const file = files.find((f) => f.field === 'photo' && f.bytes.length);
+    if (!file) return ctx.redirect(`${back}?error=${encodeURIComponent('Choose a photograph first.')}`);
+    const identified = identify(file.bytes, { filename: file.filename });
+    await photos.set(ctx.me.accountId, ctx.params.id, { bytes: file.bytes, identified, filename: file.filename }, { consent: fields.consent === 'on' });
+    const warn = fitFor('portrait', identified)[0];
+    await requestRebuild({ reason: 'photograph' });
+    return ctx.redirect(`${back}?done=${encodeURIComponent('Photograph saved.' + (warn ? ' ' + warn : ''))}`);
+  } catch (e) {
+    if (e instanceof NotAnImage || e instanceof BadUpload || e instanceof Invalid)
+      return ctx.redirect(`${back}?error=${encodeURIComponent(e.message)}`);
+    throw e;
+  }
+});
+
+get('/p/:id/photo', async (ctx) => {
+  ctx.requireActor();
+  if (!UUID_RE.test(ctx.params.id)) throw new NotFound('Photograph');
+  const { mime, bytes } = await photos.bytes(ctx.me.accountId, ctx.params.id);
+  return ctx.sendBytes(200, bytes, { type: mime, cacheControl: 'private, max-age=300' });
 });
 
 post('/p/:id/guardians', async (ctx) => {
@@ -2546,6 +2588,7 @@ post('/o/:slug/instructors/:personId', async (ctx) => {
         teaches: form.teaches,
         published,
         sortOrder: Number(form.sortOrder) || 0,
+        startedYear: form.startedYear, showChecks: form.showChecks === 'on',
       });
 
     const rebuild = row.published

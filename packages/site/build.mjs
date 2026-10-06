@@ -9,7 +9,7 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { repositories, currentStore } from '../infrastructure/factory.mjs';
-import { renderBlocks, excerpt } from '../content/blocks.mjs';
+import { renderBlocks, excerpt, paragraphs } from '../content/blocks.mjs';
 import { extensionFor } from '../content/images.mjs';
 import { menuFor } from '../content/navigation.mjs';
 import { loadSettings, SettingsError } from './settings.mjs';
@@ -404,6 +404,12 @@ for (const target of SITES) {
     }
   }
 
+  // Only those the organisation has published. An empty page is the right
+  // answer when nobody has been asked yet, so it is still written — a missing
+  // page and an empty one say different things to somebody following a link.
+  const teachers = (site.instructors ? await site.instructors(target.slug) : [])
+    .map((x) => ({ ...x, photoUrl: assets[x.photoAssetId] ?? null, paragraphs: paragraphs(x.bio) }));
+
   for (const dojo of dojos) {
     const dojoEvents = await site.eventsFor(dojo.slug);
     // A dojo's own events get their page under the dojo, so a local event needs nobody's
@@ -412,17 +418,14 @@ for (const target of SITES) {
       await write(`${dojo.slug}/events/${ev.slug}/index.html`,
         R.eventPage({ ev, ...shared, path: `/${dojo.slug}/events/${ev.slug}` }));
     await write(`${dojo.slug}/index.html`,
-      R.dojoPage({ dojo, events: dojoEvents, ...shared, gallery: (galleryRows.get(dojo.id) ?? []).map((g) => ({ url: assets[g.asset_id], alt: g.alt_text, caption: g.caption })).filter((g) => g.url),
+      R.dojoPage({ dojo, events: dojoEvents, ...shared, instructors: teachers.filter((x) => x.organisationSlug === dojo.slug),
+        gallery: (galleryRows.get(dojo.id) ?? []).map((g) => ({ url: assets[g.asset_id], alt: g.alt_text, caption: g.caption })).filter((g) => g.url),
         sections: dojoSections, startAnyWeekText: dojoCopy.startAnyWeekText ?? null,
         showFirstClassFree: dojoCopy.showFirstClassFree !== false }));
   }
 
   await write('find-a-dojo/index.html', R.findADojoPage({ dojos, ...shared }));
 
-  // Only those the organisation has published. An empty page is the right
-  // answer when nobody has been asked yet, so it is still written — a missing
-  // page and an empty one say different things to somebody following a link.
-  const teachers = site.instructors ? await site.instructors(target.slug) : [];
   await write('instructors/index.html',
     R.instructorsPage({ instructors: teachers, assets, ...shared }));
 

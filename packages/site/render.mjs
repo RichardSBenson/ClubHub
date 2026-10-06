@@ -272,14 +272,28 @@ a.evcard:hover{transform:translateY(-2px);box-shadow:0 10px 24px rgba(0,0,0,.25)
 .evside dd{margin:2px 0 0}
 .evmap{margin-top:20px}.evmap iframe{width:100%;height:260px;border:0;display:block;background:#ddd}
 .evmap .links{display:flex;gap:14px;flex-wrap:wrap;margin-top:8px;font-size:15px}
+.icards{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:20px}
+.icard{background:var(--canvas-alt);border-top:4px solid var(--primary);padding:16px 18px 18px}
+.icard .iphoto{width:100%;aspect-ratio:1/1;object-fit:cover;object-position:center 20%;border-radius:2px;margin-bottom:12px}
+.icard .iphoto.none{display:flex;align-items:center;justify-content:center;background:var(--ink-soft);
+  color:var(--neutral);font-family:var(--display);font-size:44px}
+.icard h3{font-family:var(--display);font-size:21px;margin:0 0 2px}
+.icard .irank{margin:0 0 8px;color:var(--muted);font-weight:700}
+.icard .iclub{margin:0 0 8px;font-size:15px}
+.icard ul{list-style:none;margin:0 0 10px;padding:0;font-size:15px}
+.icard .ifacts b{font-family:var(--display);font-size:12px;letter-spacing:.05em;text-transform:uppercase;color:var(--muted);margin-right:6px}
+.icard .ichecks li{display:inline-block;margin:0 6px 6px 0;padding:2px 10px;border:1px solid var(--primary);
+  border-radius:999px;font-size:13px;font-weight:700;color:var(--primary-text-strong)}
+.icard .ichecks li::before{content:"✓ "}
+.icard p{font-size:15.5px;margin:0 0 10px}
 .gallery{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;margin:0;padding:0;list-style:none}
 .gallery li{margin:0}
 .gallery img{width:100%;aspect-ratio:3/2;object-fit:cover;border-radius:2px}
 .gallery figcaption{font-size:14px;color:var(--muted);margin-top:4px}
 .gallery figure{margin:0}
 .crestmark{height:40px;width:auto;flex:none}
-@media (max-width:860px){.evgrid{grid-template-columns:1fr}.evcards{grid-template-columns:1fr}.gallery{grid-template-columns:repeat(2,minmax(0,1fr))}}
-@media (max-width:600px){.evbanner{flex-direction:column;text-align:center}.evbanner .crest{max-width:70%}
+@media (max-width:860px){.icards{grid-template-columns:repeat(2,minmax(0,1fr))}.evgrid{grid-template-columns:1fr}.evcards{grid-template-columns:1fr}.gallery{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media (max-width:600px){.icards{grid-template-columns:1fr}.evbanner{flex-direction:column;text-align:center}.evbanner .crest{max-width:70%}
   .evbanner.small{flex-direction:row;text-align:left}.evbanner.small .crest{max-width:30%}}
 
 ul.events{list-style:none;padding:0;margin:0}
@@ -390,7 +404,7 @@ ${body}
 // pages
 // ---------------------------------------------------------------------------
 
-export const DOJO_DEFAULT = ['hero', 'facts', 'startAnyWeek', 'times', 'about', 'gallery', 'events', 'findUs'];
+export const DOJO_DEFAULT = ['hero', 'facts', 'startAnyWeek', 'times', 'about', 'instructors', 'gallery', 'events', 'findUs'];
 export const HOME_DEFAULT = ['hero', 'dojoGrid', 'events', 'news'];
 
 /**
@@ -418,7 +432,7 @@ function arrange(order, parts, bands) {
 }
 
 export function dojoPage({ dojo, federation, events, origin, fonts, nav,
-                           base = '', vocabulary = {}, logoUrl = null, gallery = [],
+                           base = '', vocabulary = {}, logoUrl = null, gallery = [], instructors = [],
                            sections = DOJO_DEFAULT, startAnyWeekText = null,
                            showFirstClassFree = true }) {
   logoUrl = logoUrl ?? federation.logoUrl ?? null;
@@ -475,6 +489,10 @@ export function dojoPage({ dojo, federation, events, origin, fonts, nav,
     <p>${esc(dojo.blurb)}</p>
     ${dojo.who_trains ? `<p>${esc(dojo.who_trains)}</p>` : ''}` : '',
 
+    instructors: () => instructors.length ? `<h2 style="margin-top:40px">${instructors.length === 1 ? 'Your instructor' : 'Your instructors'}</h2>
+  <div class="icards" style="grid-template-columns:repeat(auto-fill,minmax(220px,1fr))">${instructors.map((i) => instructorCard(i, { at })).join('')}</div>
+  <p><a href="${at('/instructors')}">All instructors</a></p>` : '',
+
     gallery: () => gallery.length ? `<h2 style="margin-top:40px">In the dojo</h2>
   <ul class="gallery">${gallery.map((g) => `<li><figure><img src="${esc(g.url)}" alt="${esc(g.alt ?? '')}" loading="lazy">${
     g.caption ? `<figcaption>${esc(g.caption)}</figcaption>` : ''}</figure></li>`).join('')}</ul>` : '',
@@ -495,7 +513,9 @@ export function dojoPage({ dojo, federation, events, origin, fonts, nav,
   if (!order.includes('facts')) order.splice(Math.min(1, order.length), 0, 'facts');
   if (!order.includes('findUs')) order.push('findUs');
   // A gallery appears once a dojo has pictures, whatever layout the federation saved before galleries existed.
-  if (gallery.length && !order.includes('gallery')) order.splice(Math.max(0, order.indexOf('events')) || order.length - 1, 0, 'gallery');
+  const before = (name) => { const i = order.indexOf(name); return i < 0 ? order.length - 1 : i; };
+  if (instructors.length && !order.includes('instructors')) order.splice(before('gallery') < order.length - 1 && order.includes('gallery') ? order.indexOf('gallery') : before('events'), 0, 'instructors');
+  if (gallery.length && !order.includes('gallery')) order.splice(before('events'), 0, 'gallery');
 
   const trial = free ? `/enquire/${esc(dojo.slug)}?kind=trial` : '#visit';
   const body = arrange(order, parts, new Set(['hero', 'facts']))
@@ -575,39 +595,54 @@ function welcomeLine(dojos = []) {
  * Only people whose organisation has published them appear here. An empty
  * page is the correct answer when nobody has been asked yet.
  */
+/**
+ * An instructor, in one fixed format wherever they appear (a dojo's page, the Instructors page): photograph, name,
+ * title and grade, what they teach, how long they have trained, a few words about them, and the checks they have
+ * chosen to show. Every instructor is the same shape; only the data differs.
+ */
+function bioText(b) {
+  return (b?.blocks ?? []).map((blk) => (typeof blk.text === 'string' ? blk.text : '')).filter(Boolean);
+}
+function excerpt(text, max = 280) {
+  if (text.length <= max) return text;
+  const cut = text.slice(0, max);
+  return `${cut.slice(0, Math.max(cut.lastIndexOf(' '), 200)).replace(/[\s,;:.\-–]+$/, '')}…`;
+}
+export function instructorCard(i, { at = (x) => x, federationSlug = null, full = false, showClub = false, assets = {} } = {}) {
+  const name = `${i.firstName} ${i.lastName}`;
+  const photo = i.photoUrl ?? (i.photoAssetId ? assets[i.photoAssetId] : null);
+  const paras = i.paragraphs ?? bioText(i.bio);
+  const about = full ? paras.map((t) => `<p>${esc(t)}</p>`).join('')
+    : paras.length ? `<p>${esc(excerpt(paras.join(' ')))}</p>` : '';
+  const rank = [...new Set([i.title, i.grade].filter(Boolean))].map(esc).join(' · ');
+  const facts = [
+    i.teaches ? `<li><b>Teaches</b> ${esc(i.teaches)}</li>` : '',
+    i.startedYear ? `<li><b>Training since</b> ${esc(i.startedYear)}</li>` : '',
+  ].filter(Boolean).join('');
+  const checks = (i.checks ?? []).map((c) => `<li>${esc(c)}</li>`).join('');
+  return `<article class="icard">
+    ${photo ? `<img class="iphoto" src="${esc(photo)}" alt="${esc(name)}" loading="lazy">`
+            : `<div class="iphoto none" aria-hidden="true">${esc(`${i.firstName[0] ?? ''}${i.lastName[0] ?? ''}`)}</div>`}
+    <h3>${esc(name)}</h3>
+    ${rank ? `<p class="irank">${rank}</p>` : ''}
+    ${showClub && i.organisationName && i.organisationSlug !== federationSlug
+      ? `<p class="iclub"><a href="${at(`/${esc(i.organisationSlug)}`)}">${esc(i.organisationName)}</a></p>` : ''}
+    ${facts ? `<ul class="ifacts">${facts}</ul>` : ''}
+    ${about}
+    ${checks ? `<ul class="ichecks" aria-label="Checks">${checks}</ul>` : ''}
+  </article>`;
+}
+
 export function instructorsPage({ instructors = [], federation, origin, fonts,
                                   nav, base = '', vocabulary = {}, assets = {} }) {
   const at = (p) => `${base}${p}`;
-
-  const bio = (b) => (b?.blocks ?? [])
-    .map((blk) => typeof blk.text === 'string' ? blk.text : '')
-    .filter(Boolean)
-    .map((t) => `<p>${esc(t)}</p>`).join('');
-
-  const card = (i) => {
-    const photo = i.photoAssetId ? assets[i.photoAssetId] : null;
-    return `<article class="card">
-      ${photo ? `<img src="${esc(photo)}" alt="${esc(`${i.firstName} ${i.lastName}`)}"
-        loading="lazy" style="width:100%;height:auto;display:block;margin-bottom:12px">` : ''}
-      <h2 style="margin:0 0 4px">${esc(i.firstName)} ${esc(i.lastName)}</h2>
-      <p style="margin:0 0 10px;color:var(--muted)">
-        ${/* In MOKNZ the senior dan grades and the titles share a name —
-             Hanshi is 8th dan and the title conferred by holding it. Printing
-             both gives "Hanshi · Hanshi". Same word, two facts, one line. */
-          [...new Set([i.title, i.grade].filter(Boolean))].map(esc).join(' · ')}
-        ${i.organisationName && i.organisationSlug !== federation.slug
-          ? ` · <a href="${at(`/${esc(i.organisationSlug)}`)}">${esc(i.organisationName)}</a>`
-          : ''}</p>
-      ${i.teaches ? `<p><strong>${esc(i.teaches)}</strong></p>` : ''}
-      ${bio(i.bio)}
-    </article>`;
-  };
+  const card = (i) => instructorCard(i, { at, federationSlug: federation.slug, full: true, showClub: true, assets });
 
   const body = `
 <section><div class="wrap">
   <h1 style="font-family:var(--display);font-size:clamp(30px,5vw,46px);margin:0 0 12px">Instructors</h1>
   ${instructors.length
-    ? `<div class="grid" style="margin-top:28px">${instructors.map(card).join('')}</div>`
+    ? `<div class="icards" style="margin-top:28px">${instructors.map(card).join('')}</div>`
     : `<p style="font-size:19px;max-width:60ch">No instructor has been listed
         here yet.</p>`}
 </div></section>`;

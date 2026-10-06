@@ -331,3 +331,8 @@ export function toText(doc) {
 }
 
 export { esc, renderRich, cleanRich };
+
+/** The paragraphs of a document as plain strings, whether stored as text or as runs. */
+export function paragraphs(doc) {
+  return (doc?.blocks ?? []).filter((b) => b.type === 'paragraph').map((b) => wordsOf(b.text).trim()).filter(Boolean);
+}
