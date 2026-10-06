@@ -341,6 +341,8 @@ footer.site a{color:var(--neutral)}
 @media (max-width:600px){
   .grid{grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
   .grid a{min-height:120px}
+  /* On a phone the bar that stays at the bottom is the call to action; the closing band would repeat it. */
+  .cta{display:none}
   .stickycta{display:block;position:sticky;bottom:0;z-index:15;padding:10px 16px;
     background:var(--ink);border-top:3px solid var(--primary)}
   .stickycta .btn{display:block;text-align:center;width:100%}
@@ -496,9 +498,15 @@ export function dojoPage({ dojo, federation, events, origin, fonts, nav,
     <p>${esc(dojo.blurb)}</p>
     ${dojo.who_trains ? `<p>${esc(dojo.who_trains)}</p>` : ''}` : '',
 
-    instructors: () => instructors.length ? `<h2 style="margin-top:40px">${instructors.length === 1 ? 'Your instructor' : 'Your instructors'}</h2>
-  <div class="icards" style="grid-template-columns:repeat(auto-fill,minmax(220px,1fr))">${instructors.map((i) => instructorCard(i, { at })).join('')}</div>
-  <p><a href="${at('/instructors')}">All instructors</a></p>` : '',
+    // Always on the page, so a visitor sees where the instructor will be. With nobody published yet it
+    // is an honest placeholder in the same layout, not an empty gap.
+    instructors: () => `<h2 style="margin-top:40px">${instructors.length === 1 ? 'Your instructor' : 'Your instructors'}</h2>
+  <div class="icards" style="grid-template-columns:repeat(auto-fill,minmax(220px,1fr))">${instructors.length
+    ? instructors.map((i) => instructorCard(i, { at })).join('')
+    : `<article class="icard waiting"><div class="iphoto none" aria-hidden="true">?</div>
+    <h3>Meet your instructor</h3><p class="irank">Introductions coming soon</p>
+    <p>Come along to a class and meet them in person.</p></article>`}</div>
+  ${instructors.length ? `<p><a href="${at('/instructors')}">All instructors</a></p>` : ''}`,
 
     gallery: () => gallery.length ? `<h2 style="margin-top:40px">In the dojo</h2>
   <ul class="gallery">${gallery.map((g) => `<li><figure><img src="${esc(g.url)}" alt="${esc(g.alt ?? '')}" loading="lazy">${
@@ -521,7 +529,7 @@ export function dojoPage({ dojo, federation, events, origin, fonts, nav,
   if (!order.includes('findUs')) order.push('findUs');
   // A gallery appears once a dojo has pictures, whatever layout the federation saved before galleries existed.
   const before = (name) => { const i = order.indexOf(name); return i < 0 ? order.length - 1 : i; };
-  if (instructors.length && !order.includes('instructors')) order.splice(before('gallery') < order.length - 1 && order.includes('gallery') ? order.indexOf('gallery') : before('events'), 0, 'instructors');
+  if (!order.includes('instructors')) order.splice(before('gallery') < order.length - 1 && order.includes('gallery') ? order.indexOf('gallery') : before('events'), 0, 'instructors');
   if (gallery.length && !order.includes('gallery')) order.splice(before('events'), 0, 'gallery');
 
   const trial = free ? `/enquire/${esc(dojo.slug)}?kind=trial` : '#visit';

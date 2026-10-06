@@ -163,7 +163,8 @@ let year = new Date().getFullYear() - 25;
   ok('unticking ends the role', await instructorRows() === 0);
   ok('and takes her off the website', (await one(`select published from instructor_profile where person_id=$1`, [sensei.id])).published === false);
   await build();
-  ok('so the dojo page has no instructors section', !/Your instructor/.test(fs.readFileSync(path.join(OUT, 'whanganui/index.html'), 'utf8')));
+  { const h = fs.readFileSync(path.join(OUT, 'whanganui/index.html'), 'utf8');
+    ok('so the dojo page shows the placeholder, not a person', /class="icard waiting"/.test(h) && /Introductions coming soon/.test(h) && !/class="icard"/.test(h)); }
   ok('and the history is kept', (await one(`select count(*)::int as n from affiliation where person_id=$1 and role='instructor'`, [sensei.id])).n === 1);
 }
 
