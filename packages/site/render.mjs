@@ -299,6 +299,17 @@ a.evcard:hover{transform:translateY(-2px);box-shadow:0 10px 24px rgba(0,0,0,.25)
 .gallery img{width:100%;aspect-ratio:3/2;object-fit:cover;border-radius:2px}
 .gallery figcaption{font-size:14px;color:var(--muted);margin-top:4px}
 .gallery figure{margin:0}
+.gallery a.glink{display:block;cursor:zoom-in}
+.lb{position:fixed;inset:0;z-index:100;background:rgba(0,0,0,.92);display:flex;flex-direction:column;align-items:center;justify-content:center;padding:56px 56px 72px}
+.lb[hidden]{display:none}
+.lb-img{max-width:100%;max-height:100%;object-fit:contain;cursor:pointer}
+.lb-cap{position:absolute;left:0;right:0;bottom:36px;margin:0;padding:0 56px;text-align:center;color:#fff;font-size:15px}
+.lb-count{position:absolute;bottom:10px;left:0;right:0;text-align:center;color:#bbb;font-size:13px}
+.lb-btn{position:absolute;background:rgba(255,255,255,.12);color:#fff;border:0;cursor:pointer;font-size:34px;line-height:1;width:48px;height:48px;border-radius:50%}
+.lb-btn:hover,.lb-btn:focus-visible{background:rgba(255,255,255,.3)}
+.lb-close{top:10px;right:10px}.lb-prev{left:8px;top:50%;margin-top:-24px}.lb-next{right:8px;top:50%;margin-top:-24px}
+.lb-open{overflow:hidden}
+@media (max-width:600px){.lb{padding:56px 8px 72px}.lb-prev,.lb-next{top:auto;bottom:14px;margin:0}.lb-prev{left:8px}.lb-next{right:8px}.lb-count{bottom:26px}}
 .yearnav{display:flex;flex-wrap:wrap;gap:10px;margin:8px 0 0}
 .yearnav a{display:inline-block;padding:8px 16px;border:2px solid var(--ink);color:var(--ink);text-decoration:none;font-weight:700}
 .yearnav a:hover{background:var(--ink);color:var(--canvas)}
@@ -415,6 +426,7 @@ ${body}
 <footer class="site"><div class="wrap">
   ${esc(federation.name)} · <a href="${at('/find-a-dojo')}">${esc(clubsWord)}</a> · <a href="${at('/events')}">Events</a>
 </div></footer>
+${body.includes('class="gallery"') ? `<script src="${at('/vendor/lightbox.js')}" defer></script>` : ''}
 </body>
 </html>`;
 }
@@ -519,7 +531,7 @@ export function dojoPage({ dojo, federation, events, origin, fonts, nav,
   ${instructors.length ? `<p><a href="${at('/instructors')}">All instructors</a></p>` : ''}`,
 
     gallery: () => gallery.length ? `<h2 style="margin-top:40px">In the dojo</h2>
-  <ul class="gallery">${gallery.map((g) => `<li><figure><img src="${esc(g.url)}" alt="${esc(g.alt ?? '')}" loading="lazy">${
+  <ul class="gallery">${gallery.map((g) => `<li><figure><a class="glink" href="${esc(g.url)}"><img src="${esc(g.url)}" alt="${esc(g.alt ?? '')}" loading="lazy"></a>${
     g.caption ? `<figcaption>${esc(g.caption)}</figcaption>` : ''}</figure></li>`).join('')}</ul>
   ${(galleryTotal ?? gallery.length) > gallery.length
     ? `<p><a class="btn outline" href="${at(`/${esc(dojo.slug)}/gallery`)}">See all ${galleryTotal} photos</a></p>`
@@ -681,7 +693,7 @@ export function galleryPage({ dojo, items = [], federation, origin, fonts, nav,
     e.pics.push(g);
   }
   const label = (y) => y.year || 'Earlier';
-  const pic = (g) => `<li><figure><img src="${esc(g.url)}" alt="${esc(g.alt ?? '')}" loading="lazy">${
+  const pic = (g) => `<li><figure><a class="glink" href="${esc(g.url)}"><img src="${esc(g.url)}" alt="${esc(g.alt ?? '')}" loading="lazy"></a>${
     g.caption ? `<figcaption>${esc(g.caption)}</figcaption>` : ''}</figure></li>`;
   const body = `
 <section><div class="wrap">

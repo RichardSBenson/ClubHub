@@ -41,7 +41,7 @@ dojo's own events), caption them, put them in order, remove them. Up to 300 per 
 - *Tidying.* Filter by year or event, tick pictures and file them under a year/event, or remove them together. Each
   picture also has its own caption, year and event form. Moving earlier/later works inside its year and event.
 - *Public.* The dojo page shows the first 8 as "In the dojo" with a link to the dojo's own gallery page
-  (`/<dojo>/gallery`), which has a button per year (newest first) and each event as a heading linked to its page.
+  (`/<dojo>/gallery`), where clicking a photo opens it full-screen (arrows, swipe, Esc; without scripts it opens the full file). It has a button per year (newest first) and each event as a heading linked to its page.
   A dojo with no pictures has no gallery page. Sizes are in `website-images.md` (aim for 1200 × 800).
 
 Adding a new picture needs an owner or administrator (uploading is limited to them); choosing one already in the

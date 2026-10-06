@@ -180,6 +180,9 @@ console.log('\nWHAT THE PUBLIC SEES');
   ok('a caption shows', html.includes('Our first grading'));
   ok('every picture is a file on the site', (html.match(/<img src="\/images\/[^"]+"/g) ?? []).length === total);
   ok('a dojo with no pictures has no gallery page', !fs.existsSync(path.join(OUT, 'wellington/gallery/index.html')) && !fs.existsSync(path.join(OUT, 'wellington/gallery')));
+  ok('each picture links to its full-size file, so it opens large even without scripts', (html.match(/<a class="glink" href="\/images\/[^"]+"><img/g) ?? []).length === total);
+  ok('the page loads the photo viewer from this site', /<script src="\/vendor\/lightbox\.js" defer><\/script>/.test(html) && /<script src="\/vendor\/lightbox\.js"/.test(dojo));
+  ok('the viewer script is part of the site', fs.existsSync(path.join(OUT, 'vendor/lightbox.js')) && /ArrowRight/.test(fs.readFileSync(path.join(OUT, 'vendor/lightbox.js'), 'utf8')));
   ok('the uploader script is part of the site', fs.existsSync(path.join(OUT, 'vendor/gallery-upload.js')) && /createImageBitmap/.test(fs.readFileSync(path.join(OUT, 'vendor/gallery-upload.js'), 'utf8')));
 }
 
