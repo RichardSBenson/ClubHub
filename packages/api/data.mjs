@@ -5195,3 +5195,130 @@ export const portal = {
     return out;
   },
 };
+
+// ---------------------------------------------------------------------------
+// the digital card and class check-in
+//
+// A card is shown on the member's own screen (or a guardian's, for a child). Anyone can read the
+// QR; only the signature makes it worth anything, and what an official sees depends on who they are.
+// ---------------------------------------------------------------------------
+import { cardValidThrough, cardRefusal, verdictFor, checkinPlan } from '../core/domain/card.mjs';
+import { signCard, readCard, signCheckin, readCheckin, CARD_DAYS } from './card-token.mjs';
+
+const cardRow = (personId) => one(`
+  select p.id, p.display_number, coalesce(p.preferred_name, p.first_name) || ' ' || p.last_name as name,
+         p.photo_asset_id, a.role, a.status, a.paid_until::text as paid_until, a.fee_exempt, a.starts::text as since,
+         o.id as org_id, o.name as club, o.timezone,
+         root.name as federation, root.slug as federation_slug,
+         cg.label as grade, cg.rank_order
+  from person p
+  join affiliation a on a.person_id = p.id and a.ends is null and a.role = 'member'
+  join organisation o on o.id = a.organisation_id
+  join organisation root on o.path <@ root.path and root.parent_id is null
+  left join person_current_grade cg on cg.person_id = p.id
+  where p.id = $1 order by a.starts limit 1`, [personId]);
+
+export const cards = {
+  /** The card on one person's own (or child's) screen. */
+  async forPerson(actor, personId) {
+    const how = await family.assertMayActFor(actor, personId);
+    const m = await cardRow(personId);
+    if (!m) return { how, issued: false, reason: 'Only members have a card.' };
+    const today = localNow(m.timezone).date;
+    const why = cardRefusal({ role: m.role, status: m.status, paidUntil: m.paid_until, exempt: m.fee_exempt,
+      displayNumber: m.display_number }, today);
+    if (why) return { how, issued: false, reason: why, member: m };
+    const validThrough = cardValidThrough({ paidUntil: m.paid_until, exempt: m.fee_exempt }, today, CARD_DAYS);
+    const token = signCard({ memberNumber: m.display_number, rankOrder: m.rank_order, expires: validThrough, orgSlug: m.federation_slug });
+    if (!token) return { how, issued: false, reason: 'Cards are not switched on for this installation yet.', member: m };
+    return { how, issued: true, member: m, validThrough, token };
+  },
+
+  /**
+   * What a scan says. Signed in as an official of the member's club or above: who they are. Anybody
+   * else: only whether the code is good — a stranger who scans a card learns nothing about the person.
+   */
+  async verify(actor, token) {
+    const signature = readCard(token);
+    const live = signature.memberNumber ? await one(`select p.id from person p where upper(p.display_number) = upper($1)`,
+      [signature.memberNumber]) : null;
+    const row = live ? await cardRow(live.id) : null;
+    const today = localNow(row?.timezone).date;
+    const verdict = verdictFor({ signature, today, live: row && { role: row.role, status: row.status,
+      paidUntil: row.paid_until, exempt: row.fee_exempt, displayNumber: row.display_number } });
+    // The signed rank must still be the real one; a grade changed since the code was made is worth a flag.
+    const stale = row && signature.valid && (signature.rankOrder ?? null) !== (row.rank_order ?? null);
+    let official = false;
+    if (actor && row) official = !!(await one('select has_role_at($1,$2,$3) as ok', [actor, row.org_id, TEACHERS_ROLES]))?.ok;
+    return { verdict, official, stale, federation: row?.federation ?? null,
+      member: official && row ? { name: row.name, number: row.display_number, club: row.club, grade: row.grade,
+        paidUntil: row.paid_until, exempt: row.fee_exempt, hasPhoto: !!row.photo_asset_id, personId: row.id } : null };
+  },
+};
+const TEACHERS_ROLES = ['owner', 'administrator', 'registrar', 'instructor'];
+
+export const checkin = {
+  /** The code an instructor shows for one class today. */
+  async code(actor, orgId, sessionId) {
+    await assertRole(actor, orgId, TEACHERS_ROLES);
+    const org = await attendanceClub(orgId);
+    const date = await todayAt(org);
+    const session = await one(`select id, label, weekday, to_char(starts,'HH24:MI') as starts,
+        to_char(ends,'HH24:MI') as ends from training_session where id=$1 and organisation_id=$2`, [sessionId, orgId]);
+    if (!session) throw new NotFound('Class');
+    if (session.weekday !== new Date(`${date}T00:00:00Z`).getUTCDay()) throw new Invalid('That class does not run today.');
+    const token = signCheckin({ sessionId, date });
+    if (!token) throw new Invalid('Check-in codes are not switched on for this installation yet.');
+    const here = (await one(`select count(*)::int as n from attendance where organisation_id=$1 and session_id=$2
+      and session_date=$3::date`, [orgId, sessionId, date])).n;
+    return { org, session, date, token, here };
+  },
+
+  /** What a parent sees after scanning: their family, who can go in and who cannot. */
+  async plan(actor, token) {
+    const t = readCheckin(token);
+    if (!t) throw new NotFound('Check-in code');
+    if (t.expired) return { expired: true };
+    const session = await one(`select ts.id, ts.label, ts.weekday, ts.organisation_id, to_char(ts.starts,'HH24:MI') as starts,
+        to_char(ts.ends,'HH24:MI') as ends, ts.min_age, ts.max_age, g.rank_order as min_rank_order, o.name as club, o.timezone
+      from training_session ts join organisation o on o.id = ts.organisation_id left join grade g on g.id = ts.min_grade_id
+      where ts.id = $1`, [t.sessionId]);
+    if (!session) throw new NotFound('Class');
+    const today = localNow(session.timezone).date;
+    if (today !== t.date) return { expired: true };
+    const { self, dependants } = await family.mine(actor);
+    const folk = [];
+    for (const p of [self, ...dependants].filter(Boolean)) {
+      const member = !!(await one(`select 1 as x from affiliation where person_id=$1 and organisation_id=$2 and ends is null
+        and status='active' and role in ('member','instructor','assistant')`, [p.id, session.organisation_id]));
+      const grade = await one('select rank_order from person_current_grade where person_id = $1', [p.id]);
+      folk.push({ id: p.id, name: p.first_name, ageYears: ageOnDate(p.date_of_birth, today), rankOrder: grade?.rank_order ?? null, member });
+    }
+    const here = new Set((await q(`select person_id from attendance where organisation_id=$1 and session_id=$2 and session_date=$3::date`,
+      [session.organisation_id, session.id, t.date])).map((r) => r.person_id));
+    return { expired: false, session, date: t.date, people: checkinPlan(folk, session, here) };
+  },
+
+  /** Check these people in. Anything the plan would not allow is quietly left out. */
+  async confirm(actor, token, personIds) {
+    const plan = await this.plan(actor, token);
+    if (plan.expired) throw new Invalid('That code has run out — scan the screen again.');
+    const ok = plan.people.filter((p) => p.state === 'can' && personIds.includes(p.id));
+    if (!ok.length) return { came: [], plan };
+    const by = (await one('select person_id from account where id=$1', [actor]))?.person_id ?? null;
+    const orgId = plan.session.organisation_id;
+    const client = await pool.connect();
+    try {
+      await client.query('begin');
+      await client.query(`insert into attendance (person_id, organisation_id, session_date, session_id, recorded_by)
+        select x, $1, $2::date, $3, $4 from unnest($5::uuid[]) as x
+        on conflict (person_id, organisation_id, session_date, session_id) do nothing`,
+        [orgId, plan.date, plan.session.id, by, ok.map((p) => p.id)]);
+      await client.query(`insert into audit_log (account_id, organisation_id, action, entity, entity_id, before, after)
+        values ($1,$2,'self_check_in','training_session',$3,null,$4)`, [actor, orgId, plan.session.id,
+        JSON.stringify({ date: plan.date, label: plan.session.label, people: ok.map((p) => p.id) })]);
+      await client.query('commit');
+    } catch (e) { await client.query('rollback'); throw e; } finally { client.release(); }
+    return { came: ok.map((p) => p.name), plan };
+  },
+};

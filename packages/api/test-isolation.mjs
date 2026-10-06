@@ -90,6 +90,8 @@ const PUBLIC = new Map([
   ['GET /enter/:slug/:eventSlug/go', 'redirects the signed-in person to their own entry screen'],
   ['GET /enter/:slug/:eventSlug/new', 'needs a signed token proving the address; shows only a form'],
   ['POST /enter/:slug/:eventSlug/new', 'needs a signed token proving the address; creates one person'],
+  ['GET /v/:token', 'a scanned card; says only whether the code is good unless the signer-in is an official of that member\'s club'],
+  ['GET /checkin/:token', 'sends a signed-out person to sign in; a signed-in one sees only their own family'],
   ['POST /signout', 'leaving must always work'],
   ['GET /dashboard', 'shows only what the signer-in may see'],
   ['GET /cron/renewals', 'the scheduler; refuses without the shared secret and when none is configured'],
@@ -275,6 +277,7 @@ const SCOPED = new Map([
   ['GET /me/messages', 'messages written to the signed-in person or about their children; scoped by portal.inbox'],
   ['GET /me/messages/:id', 'one message; the recipient row must belong to the signed-in person or their children, otherwise not found'],
   ['GET /me/classes', 'the timetable of the clubs the signed-in person and their children belong to; scoped by portal.timetable'],
+  ['POST /checkin/:token', 'checks in only the signed-in person and the children they look after, and only those the class suits; scoped by checkin.plan'],
   ['GET /me/events', 'what is open to the signed-in person and their children; scoped by memberEvents'],
 ]);
 

@@ -33,10 +33,12 @@
 import crypto from 'node:crypto';
 import { URL } from 'node:url';
 import { pool, orgs, people, rank, events, competition, pages, assets, news,
-         instructors, navigation, audit, search, clubPages, appearance, clubs, clubProfile, family, myself, memberEvents, messages, emailPreferences, payments, fees, renewals, reminders, attendance, newcomers, reports, gradings, qualifications, portal, enquiries, scheduledPublishing, TooMany, outsiders,
+         instructors, navigation, audit, cards, checkin, search, clubPages, appearance, clubs, clubProfile, family, myself, memberEvents, messages, emailPreferences, payments, fees, renewals, reminders, attendance, newcomers, reports, gradings, qualifications, portal, enquiries, scheduledPublishing, TooMany, outsiders,
          Forbidden, NotFound, Invalid } from './data.mjs';
 import * as auth from './auth.mjs';
 import * as V from './views.mjs';
+import { qrSvg } from '../core/domain/qr.mjs';
+import { CHECKIN_REFRESH_SECONDS } from './card-token.mjs';
 import { readOutsider } from '../core/domain/outsider.mjs';
 import { signEntryToken, readEntryToken } from './entry-token.mjs';
 import { repeatFromLast, decideQuick } from '../core/domain/repeat-entry.mjs';
@@ -171,13 +173,17 @@ get('/', async (ctx) => ctx.redirect(ctx.me ? '/dashboard' : '/signin'));
 // /admin is the door people will actually type.
 get('/admin', async (ctx) => ctx.redirect(ctx.me ? '/dashboard' : '/signin'));
 
+// Where to go after signing in. Only a path on this site: anything with a scheme or a second
+// slash could send a signed-in person somewhere else.
+const safeNext = (v) => (typeof v === 'string' && /^\/[A-Za-z0-9_\-./?=&%~]*$/.test(v) && !v.startsWith('//') && v.length < 600) ? v : null;
+
 get('/signin', async (ctx) => ctx.send(200, V.signIn({
-  sent: ctx.url.searchParams.get('sent'), csrf: ctx.csrf })));
+  sent: ctx.url.searchParams.get('sent'), csrf: ctx.csrf, next: safeNext(ctx.url.searchParams.get('next')) ?? '' })));
 
 post('/signin', async (ctx) => {
   const form = await ctx.form();
   try {
-    const issue = await auth.requestLink(form.email, { ip: ctx.ip });
+    const issue = await auth.requestLink(form.email, { ip: ctx.ip, redirectTo: safeNext(form.next) });
 
     const send = new SendSignInLink({
       messenger: messengerFrom(),
@@ -428,6 +434,57 @@ get('/me/messages/:id', async (ctx) => {
   ctx.requireActor();
   if (!UUID_RE.test(ctx.params.id)) throw new NotFound('Message');
   return ctx.send(200, V.messageView({ me: ctx.me, csrf: ctx.csrf, message: await portal.message(ctx.me.accountId, ctx.params.id) }));
+});
+
+// ---- the digital card and class check-in ------------------------------------
+
+get('/me/:personId/card', async (ctx) => {
+  ctx.requireActor();
+  if (!UUID_RE.test(ctx.params.personId)) throw new NotFound('Person');
+  const c = await cards.forPerson(ctx.me.accountId, ctx.params.personId);
+  const url = c.issued ? `${ctx.secure ? 'https' : 'http'}://${ctx.req.headers.host}/v/${c.token}` : null;
+  return ctx.send(200, V.memberCard({ me: ctx.me, csrf: ctx.csrf, ...c, url,
+    svg: url ? qrSvg(url, { label: `Membership card for ${c.member.name}` }) : null }));
+});
+
+// Anybody may scan a card. What they are told depends on who they are (cards.verify).
+get('/v/:token', async (ctx) => {
+  const r = await cards.verify(ctx.me?.accountId ?? null, ctx.params.token);
+  return ctx.send(200, V.cardVerdict({ me: ctx.me, csrf: ctx.csrf, token: ctx.params.token, ...r }));
+});
+
+get('/o/:slug/attendance/:sessionId/code', async (ctx) => {
+  ctx.requireActor();
+  const org = await orgs.bySlug(ctx.params.slug);
+  if (!org || !UUID_RE.test(ctx.params.sessionId)) throw new NotFound('Class');
+  try {
+    const c = await checkin.code(ctx.me.accountId, org.id, ctx.params.sessionId);
+    const url = `${ctx.secure ? 'https' : 'http'}://${ctx.req.headers.host}/checkin/${c.token}`;
+    return ctx.send(200, V.checkinCode({ me: ctx.me, csrf: ctx.csrf, ...c, org, svg: qrSvg(url, { label: 'Check-in code' }),
+      refresh: CHECKIN_REFRESH_SECONDS }));
+  } catch (e) {
+    if (e instanceof Invalid) return ctx.redirect(`/o/${org.slug}/attendance?error=${encodeURIComponent(e.message)}`);
+    throw e;
+  }
+});
+
+const checkinScreen = async (ctx, extra = {}) => {
+  if (!ctx.me) return ctx.redirect(`/signin?next=${encodeURIComponent('/checkin/' + ctx.params.token)}`);
+  const plan = await checkin.plan(ctx.me.accountId, ctx.params.token);
+  return ctx.send(extra.status ?? 200, V.checkinScreen({ me: ctx.me, csrf: ctx.csrf, token: ctx.params.token, ...plan, ...extra }));
+};
+get('/checkin/:token', async (ctx) => checkinScreen(ctx));
+post('/checkin/:token', async (ctx) => {
+  ctx.requireActor();
+  const form = await ctx.form();
+  const ids = Object.keys(form).filter((k) => k.startsWith('here_') && form[k] === '1').map((k) => k.slice(5));
+  try {
+    const out = await checkin.confirm(ctx.me.accountId, ctx.params.token, ids);
+    return ctx.send(200, V.checkinScreen({ me: ctx.me, csrf: ctx.csrf, token: ctx.params.token, ...out.plan, came: out.came }));
+  } catch (e) {
+    if (e instanceof Invalid) return checkinScreen(ctx, { error: e.message, status: 422 });
+    throw e;
+  }
 });
 
 get('/me/classes', async (ctx) => {

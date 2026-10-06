@@ -27,6 +27,7 @@ What it is for:
 - **Not seen in 30 days** lists members worth a kind word. It is not a penalty, and
   a brand-new member is not listed until they have had time to be missed.
 
+Members check themselves in by scanning a rotating code — see `membership-card.md`.
+
 Not built yet: classes that are not on the weekly timetable (a one-off seminar
-session), a member checking themselves in, and attendance for children being
-visible to their parents.
+session).

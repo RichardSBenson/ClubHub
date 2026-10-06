@@ -225,7 +225,7 @@ table.writing-help code{background:var(--soft);padding:2px 6px;border-radius:4px
  */
 const RAIL_MARKER = '<!--honbu:rail-->';
 
-function page({ title, me, body, csrf, query = '', wide = false }) {
+function page({ title, me, body, csrf, query = '', wide = false, head = '' }) {
   const search = me ? `<form method="get" action="/search" class="find" role="search">
     <label class="hide-sm" for="q">Find</label>
     <input id="q" name="q" type="search" placeholder="a name, a number, anything"
@@ -239,7 +239,7 @@ function page({ title, me, body, csrf, query = '', wide = false }) {
 
   return `<!DOCTYPE html><html lang="en-NZ"><head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>${esc(title)} — Honbu</title><style>${CSS}</style></head><body>
+<title>${esc(title)} — Honbu</title>${head}<style>${CSS}</style></head><body>
 <a class="skip" href="#main">Skip to the content</a>
 <div class="shell">
   ${me ? RAIL_MARKER : ''}
@@ -320,7 +320,7 @@ export { RAIL_MARKER };
 
 // ---------------------------------------------------------------------------
 
-export const signIn = ({ sent, error, csrf } = {}) => page({
+export const signIn = ({ sent, error, csrf, next = '' } = {}) => page({
   title: 'Sign in', me: null,
   body: `
   <h1>Sign in</h1>
@@ -332,6 +332,7 @@ export const signIn = ({ sent, error, csrf } = {}) => page({
   <p class="sub">No password. We email you a link.</p>
   <form method="post" action="/signin">
     <input type="hidden" name="_csrf" value="${esc(csrf ?? '')}">
+    ${next ? `<input type="hidden" name="next" value="${esc(next)}">` : ''}
     <label for="email">Email address</label>
     <input id="email" name="email" type="email" required autocomplete="email">
     <p><button class="btn" type="submit">Email me a link</button></p>
@@ -3515,7 +3516,8 @@ export const attendanceScreen = ({ me, csrf, org, today, day, classes = [], hasT
     classes.map((c) => `<tr><td>${esc(c.label)}</td><td>${esc(c.starts)}–${esc(c.ends)}</td>
       <td>${c.came == null ? '<span class="muted">not taken</span>' : esc(String(c.came))}</td>
       <td><a class="btn" href="/o/${esc(org.slug)}/attendance/${esc(c.id)}?date=${esc(day)}">${
-        c.came == null ? 'Take the roll' : 'Change'}</a></td></tr>`).join('')}</tbody></table>`
+        c.came == null ? 'Take the roll' : 'Change'}</a>${day === today
+        ? ` <a class="btn quiet" href="/o/${esc(org.slug)}/attendance/${esc(c.id)}/code">Check-in code</a>` : ''}</td></tr>`).join('')}</tbody></table>`
     : hasTimetable ? '<p class="muted">No class runs on this day.</p>'
     : `<div class="note">No classes yet. Add the times you train on <a href="/o/${esc(org.slug)}/club-page">the club's page</a>,
         then take the roll here.</div>`}
@@ -3969,7 +3971,7 @@ const personTiles = (p, csrf) => {
           x.standing ? `<span class="tag ${['current', 'exempt'].includes(x.standing) ? 'ok' : 'wait'}">${esc(STANDING_WORDS_[x.standing] ?? x.standing)}</span>` : ''}${
           x.paid_until ? ` <span class="muted">until ${esc(x.paid_until)}</span>` : ''}</p>`).join('')
         : '<p class="muted">Not on a club\'s roll.</p>'}
-      <p><a href="${base}">Details</a></p></div>
+      <p><a href="${base}">Details</a>${m.length ? ` · <a href="${base}/card">Membership card</a>` : ''}</p></div>
     <div class="tile"><h3>Current grade</h3>
       ${p.grade ? `<p class="big">${esc(p.grade.label)}</p><p class="muted">since ${esc(p.grade.awarded_on)}</p>`
         : '<p class="muted">No grade recorded yet.</p>'}
@@ -4103,3 +4105,84 @@ export const myClasses = ({ me, csrf, groups = [] }) => page({
   <p class="muted">Booking and cancelling a class are not available yet.</p>` });
 
 const DAY_NAMES_ = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+
+
+// ---------------------------------------------------------------------------
+// the digital card and class check-in
+// ---------------------------------------------------------------------------
+
+const cardCss = `<style>
+.idcard{max-width:340px;margin:16px auto;padding:20px;border-radius:14px;background:#1c1c1e;color:#fff;text-align:center}
+.idcard .org{font-size:.8rem;letter-spacing:.12em;text-transform:uppercase;color:#f0ce41}
+.idcard h2{margin:.4em 0 .1em;color:#fff}
+.idcard .qr{background:#fff;border-radius:8px;padding:4px;margin:14px auto 6px;max-width:260px}
+.idcard .qr svg{display:block;width:100%;height:auto}
+.idcard p{margin:.25em 0}.idcard .muted{color:#bbb}
+.idcard dl{display:grid;grid-template-columns:auto 1fr;gap:2px 12px;text-align:left;margin:12px 0}
+.idcard dt{color:#f0ce41;font-size:.8rem;text-transform:uppercase}.idcard dd{margin:0}
+.bigverdict{font-size:1.6rem;font-weight:700;margin:.2em 0}
+</style>`;
+
+export const memberCard = ({ me, csrf, how, issued, reason, member, validThrough, svg, url }) => page({
+  title: member ? `${member.name} — card` : 'Membership card', me, csrf, body: `${cardCss}
+  <p class="sub"><a href="/me">Back</a></p>
+  ${issued ? `<div class="idcard">
+    <div class="org">${esc(member.federation)}</div>
+    <h2>${esc(member.name)}</h2>
+    <dl><dt>Number</dt><dd>${esc(member.display_number)}</dd>
+      <dt>Club</dt><dd>${esc(member.club)}</dd>
+      ${member.grade ? `<dt>Grade</dt><dd>${esc(member.grade)}</dd>` : ''}
+      <dt>${member.fee_exempt ? 'Membership' : 'Paid until'}</dt><dd>${member.fee_exempt ? 'No fee' : esc(member.paid_until)}</dd></dl>
+    <div class="qr">${svg}</div>
+    <p class="muted">Show this at the door. This code works until ${esc(validThrough)} — open this page again for a fresh one.</p>
+  </div>
+  <p class="muted">${how === 'guardian' ? 'This is their card. Keep it on your own phone; it is not for printing.' : 'Keep this on your own phone rather than printing it.'}
+    The code carries your number and nothing about you; an official who scans it while signed in sees who you are and whether you are current.</p>`
+  : `<h1>Membership card</h1><div class="note">${esc(reason ?? 'No card is available.')}</div>`}` });
+
+export const cardVerdict = ({ me, csrf, token, verdict, official, stale, federation, member }) => page({
+  title: 'Card check', me, csrf, body: `${cardCss}
+  <div style="max-width:420px;margin:16px auto;text-align:center">
+    <div class="bigverdict" style="color:${verdict.ok ? '#0a7a2f' : '#b00020'}">${verdict.ok ? '✓ ' : '✗ '}${esc(verdict.headline)}</div>
+    ${federation ? `<p class="muted">${esc(federation)}</p>` : ''}
+    ${verdict.why ? `<p>${esc(verdict.why)}</p>` : ''}
+    ${member ? `<div class="idcard" style="text-align:left"><h2>${esc(member.name)}</h2>
+      <dl><dt>Number</dt><dd>${esc(member.number)}</dd><dt>Club</dt><dd>${esc(member.club)}</dd>
+      ${member.grade ? `<dt>Grade</dt><dd>${esc(member.grade)}</dd>` : ''}
+      <dt>${member.exempt ? 'Membership' : 'Paid until'}</dt><dd>${member.exempt ? 'No fee' : esc(member.paidUntil)}</dd></dl></div>
+      ${member.hasPhoto ? '' : '<p class="muted">No photograph on their record.</p>'}
+      <p><a href="/p/${esc(member.personId)}">Open their record</a></p>`
+    : me ? '<p class="muted">You are not an official of this member\'s club, so you only see whether the code is good.</p>'
+         : `<p class="muted">Officials: <a href="/signin?next=${encodeURIComponent('/v/' + token)}">sign in</a> to see who this is.</p>`}
+    ${stale && member ? '<div class="note">Their grade has changed since this code was made. Go by the record above.</div>' : ''}
+  </div>` });
+
+export const checkinCode = ({ me, csrf, org, session, date, here, svg, refresh }) => page({
+  title: `${session.label} — check-in`, me, csrf, head: `<meta http-equiv="refresh" content="${refresh}">`, body: `${cardCss}
+  <p><a href="/o/${esc(org.slug)}/attendance?date=${esc(date)}">← Attendance</a></p>
+  <h1>${esc(session.label)}</h1>
+  <p class="sub">${esc(session.starts)}–${esc(session.ends)} · ${esc(date)}</p>
+  <div style="max-width:420px;margin:0 auto;text-align:center">
+    <div class="qr" style="background:#fff;padding:8px;border-radius:8px">${svg}</div>
+    <p><strong>Scan to check in</strong></p>
+    <p class="muted">${here} checked in so far. This code changes every minute, so a photo of it is no use to someone at home.
+      Keep this page open on the tablet; it refreshes itself.</p>
+  </div>` });
+
+export const checkinScreen = ({ me, csrf, token, expired, session, date, people = [], came = null, error }) => page({
+  title: 'Check in', me, csrf, body: expired
+  ? `<h1>Check in</h1><div class="note">That code has run out. Scan the screen at the front of the class again.</div>`
+  : `<h1>${esc(session.label)}</h1>
+  <p class="sub">${esc(session.club)} · ${esc(session.starts)}–${esc(session.ends)}</p>
+  ${came ? `<div class="good">${came.length ? `Checked in: ${came.map(esc).join(', ')}.` : 'Nobody new to check in.'}</div>` : ''}
+  ${error ? `<div class="bad">${esc(error)}</div>` : ''}
+  ${people.some((p) => p.state === 'can') ? `<form method="post" action="/checkin/${esc(token)}">
+    <input type="hidden" name="_csrf" value="${esc(csrf ?? '')}">
+    <fieldset><legend>Who is here?</legend>
+    ${people.map((p) => p.state === 'can'
+      ? `<label class="check"><input type="checkbox" name="here_${esc(p.id)}" value="1" checked> ${esc(p.name)}</label>`
+      : `<p class="muted"><s>${esc(p.name)}</s> — ${esc(p.reason)}</p>`).join('')}
+    </fieldset>
+    <div class="actions"><button class="btn" type="submit">Check in</button></div></form>`
+  : `<fieldset><legend>Who is here?</legend>${people.map((p) => `<p>${p.state === 'here' ? '✓ ' : ''}${esc(p.name)} <span class="muted">— ${esc(p.reason)}</span></p>`).join('')
+      || '<p class="muted">Nobody on your account is on this club\'s roll.</p>'}</fieldset>`}` });
