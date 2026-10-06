@@ -286,6 +286,7 @@ export function rail({ org, vocabulary = {}, can = {}, path = '' }) {
     can.register && link(`${base}/members/import`, 'Import a roll'),
     can.register && link(`${base}/enquiries`, 'Enquiries'),
     isClub && can.register && link(`${base}/growth`, 'Trials and referrals'),
+    can.register && link(`${base}/terms`, 'School terms'),
     can.register && link(`${base}/gradings`, 'Grading events'),
     can.register && link(`${base}/compliance`, 'Compliance'),
     can.register && link(`${base}/grading`, vocabulary.grading ?? 'Grading'),
@@ -4006,6 +4007,7 @@ export const memberHome = ({ me, csrf, people = [], unread = 0, messages = [] })
   ${people.length ? `<h1>Kia ora, ${esc(people[0].person.preferred_name || people[0].person.first_name)}</h1>
   <p class="sub">${esc(people[0].person.display_number ?? '')}
     · <a href="/me/${esc(people[0].person.id)}">See and update my details</a>
+    · <a href="/me/terms">Term enrolment</a>
     · <a href="/me/refer">Refer a friend</a>
     · <a href="/me/messages">Messages${unread ? ` <span class="tag wait">${unread} new</span>` : ''}</a></p>
   ${people.length > 1 ? '<p class="muted">Children I look after are below.</p>' : ''}
@@ -4333,3 +4335,67 @@ export const growthScreen = ({ me, csrf, org, settings, trials = [], referrals =
     <div class="actions"><button class="btn" type="submit">Save</button></div></form>`
   : '<p class="muted">An administrator sets these.</p>'}` });
 };
+
+
+// ---------------------------------------------------------------------------
+// school terms
+// ---------------------------------------------------------------------------
+
+const TERM_STATE = { upcoming: 'Not open yet', open: 'Enrolment open', current: 'Running', closed: 'Enrolment closed', ended: 'Finished' };
+import { MID_TERM } from '../core/domain/terms.mjs';
+
+export const termsScreen = ({ me, csrf, org, today, country, years = [], midTerm, isClub, current, next, holiday, calendar, canManage, done, error }) => page({
+  title: `${org.name} — school terms`, me, csrf, body: `
+  <h1>School terms</h1>
+  <p class="sub">Children enrol class by class for each school term. Terms are set once, for a whole country or federation, and every club beneath uses them.</p>
+  ${done ? `<div class="good">${esc(done)}</div>` : ''}${error ? `<div class="bad">${esc(error)}</div>` : ''}
+  <p>${current ? `Right now: <strong>${esc(current.name)}</strong> (to ${esc(current.ends)}).` : holiday ? `Right now: <strong>school holidays</strong> until ${esc(holiday.to)}.` : 'No term is running today.'}
+    ${next ? ` Next: <strong>${esc(next.name)}</strong> starts ${esc(next.starts)}.` : ''}</p>
+  ${years.map((y) => `<h2>${y.year}</h2>
+    ${y.terms.length ? `<p class="muted">${y.inherited ? `Inherited from ${esc(y.owner.name)}.` : `Set here${y.terms[0].source === 'built-in' ? ` from the ${esc(calendar?.name ?? 'built-in')} calendar` : ''}.`}</p>
+    <table><thead><tr><th>Term</th><th>Starts</th><th>Ends</th><th>State</th>${isClub ? '<th>Enrolled</th>' : ''}<th></th></tr></thead><tbody>${y.terms.map((t) => `<tr>
+      <td>${esc(t.name)}</td><td>${esc(t.starts)}</td><td>${esc(t.ends)}</td><td>${esc(TERM_STATE[t.state] ?? t.state)}</td>
+      ${isClub ? `<td>${t.n}${t.n ? ` <span class="muted">(${t.paid} paid)</span>` : ''}</td>` : ''}
+      <td>${isClub ? `<a href="/o/${esc(org.slug)}/terms/${esc(t.id)}">Who</a>` : ''}
+        ${canManage && !y.inherited ? `<form method="post" action="/o/${esc(org.slug)}/terms/${esc(t.id)}/remove" style="display:inline"><input type="hidden" name="_csrf" value="${esc(csrf ?? '')}"><button class="btn quiet" type="submit">Remove</button></form>` : ''}</td></tr>`).join('')}</tbody></table>
+    ${y.holidays.length ? `<p class="muted">Holidays: ${y.holidays.map((h) => `${esc(h.from)} to ${esc(h.to)}`).join(' · ')}</p>` : ''}
+    ${calendar?.note && y.terms[0]?.source === 'built-in' ? `<p class="muted">${esc(calendar.note)} Source: ${esc(calendar.source)}.</p>` : ''}`
+    : `<div class="note">No terms for ${y.year} yet.${y.builtIn ? ` The ${esc(y.builtIn.name)} calendar is available.` : country ? ` There is no built-in calendar for ${esc(country)}: add the terms below once and every club beneath will use them.` : ''}</div>`}
+    ${canManage && y.builtIn && !(y.terms.length && !y.inherited) ? `<form method="post" action="/o/${esc(org.slug)}/terms/load"><input type="hidden" name="_csrf" value="${esc(csrf ?? '')}">
+      <input type="hidden" name="year" value="${y.year}"><button class="btn" type="submit">Use the ${esc(y.builtIn.name)} calendar for ${y.year}</button></form>` : ''}`).join('')}
+  ${canManage ? `<h2>Add a term</h2><form method="post" action="/o/${esc(org.slug)}/terms">
+    <input type="hidden" name="_csrf" value="${esc(csrf ?? '')}">
+    <label for="name">Name</label><input id="name" name="name" maxlength="40" placeholder="Term 1" required>
+    <label for="starts">First day <span class="muted">(2027-02-01)</span></label><input id="starts" name="starts" maxlength="10" required>
+    <label for="ends">Last day</label><input id="ends" name="ends" maxlength="10" required>
+    <div class="actions"><button class="btn" type="submit">Add term</button></div></form>
+    <p class="muted">Terms added here are used by this organisation and everything beneath it.</p>` : ''}
+  ${isClub ? `<h2>Joining part-way through a term</h2>
+    ${canManage ? `<form method="post" action="/o/${esc(org.slug)}/terms/rule"><input type="hidden" name="_csrf" value="${esc(csrf ?? '')}">
+      <select name="mid_term">${Object.entries(MID_TERM).map(([k, v]) => `<option value="${k}"${midTerm.mode === k ? ' selected' : ''}>${esc(v)}</option>`).join('')}</select>
+      <label>Reduced price $ <input name="fixed" value="${midTerm.fixedCents ? midTerm.fixedCents / 100 : ''}" size="6"></label>
+      <button class="btn" type="submit">Save</button></form>` : `<p>${esc(MID_TERM[midTerm.mode])}</p>`}
+    <p class="muted">The full-term price is your junior “Per term” price on the <a href="/o/${esc(org.slug)}/renewals">Renewals</a> screen. With no price set, enrolment is free.</p>` : ''}` });
+
+export const termRoster = ({ me, csrf, org, term, rows = [] }) => page({
+  title: `${term.name} — enrolled`, me, csrf, body: `
+  <p><a href="/o/${esc(org.slug)}/terms">← School terms</a></p>
+  <h1>${esc(term.name)} ${esc(term.year)}</h1><p class="sub">${esc(term.starts)} to ${esc(term.ends)}</p>
+  ${rows.length ? `<table><thead><tr><th>Child</th><th>Age</th><th>Enrolled</th><th>Price</th><th></th></tr></thead><tbody>${rows.map((r) => `<tr>
+    <td><a href="/p/${esc(r.person_id)}">${esc(r.name)}</a></td><td>${r.age ?? ''}</td><td>${esc(r.enrolled_on)}</td>
+    <td>${esc(cents(r.fee_cents, 'NZD'))}${r.price_note && r.price_note !== 'The full term' ? ` <span class="muted">${esc(r.price_note)}</span>` : ''}</td>
+    <td>${r.status === 'withdrawn' ? 'Withdrawn' : r.paid ? '<span class="tag ok">Paid</span>' : '<span class="tag wait">Not paid</span>'}</td></tr>`).join('')}</tbody></table>`
+    : '<p class="muted">Nobody is enrolled yet.</p>'}` });
+
+export const myTerms = ({ me, csrf, groups = [], error, done }) => page({
+  title: 'Term enrolment', me, csrf, body: `
+  <h1>Term enrolment</h1><p class="sub"><a href="/me">Back</a></p>
+  ${done ? `<div class="good">${esc(done)}</div>` : ''}${error ? `<div class="bad">${esc(error)}</div>` : ''}
+  ${groups.some((g) => g.items.length) ? groups.filter((g) => g.items.length).map((g) => `<h2>${esc(g.person.first_name)} <span class="muted">· ${esc(g.club)}</span></h2>
+    <table><tbody>${g.items.map((i) => `<tr><td><strong>${esc(i.term.name)}</strong> ${esc(i.term.year)}<div class="muted">${esc(i.term.starts)} to ${esc(i.term.ends)}</div></td>
+      <td>${i.enrolment?.status === 'enrolled' ? `<span class="tag ok">Enrolled</span>${i.enrolment.paid ? '' : ' <span class="tag wait">Not paid</span>'}`
+        : i.mayEnrol ? `${i.price.cents ? esc(cents(i.price.cents, 'NZD')) : 'Free'} <span class="muted">${esc(i.price.note)}</span>`
+        : i.state === 'upcoming' ? '<span class="muted">Opens soon</span>' : '<span class="muted">Not available</span>'}</td>
+      <td>${i.mayEnrol ? `<form method="post" action="/me/terms/${esc(i.term.id)}/${esc(g.person.id)}"><input type="hidden" name="_csrf" value="${esc(csrf ?? '')}"><button class="btn" type="submit">Enrol</button></form>`
+        : i.enrolment?.status === 'enrolled' && i.state !== 'current' ? `<form method="post" action="/me/terms/${esc(i.term.id)}/${esc(g.person.id)}/withdraw"><input type="hidden" name="_csrf" value="${esc(csrf ?? '')}"><button class="btn quiet" type="submit">Withdraw</button></form>` : ''}</td></tr>`).join('')}</tbody></table>`).join('')
+  : '<div class="note">There are no school terms to enrol in. They appear here for children who are members of a club that follows school terms.</div>'}` });

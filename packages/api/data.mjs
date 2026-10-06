@@ -3397,6 +3397,8 @@ async function settle(paymentId, ok, detail, { actor = null, ref = undefined, ma
   if (ok) {
     await pool.query(`update event_entry set paid = true, updated_at = now()
       where id in (select event_entry_id from payment_line where payment_id = $1)`, [paymentId]);
+    await pool.query(`update term_enrolment set paid = true
+      where id in (select term_enrolment_id from payment_line where payment_id = $1 and term_enrolment_id is not null)`, [paymentId]);
     const lines = await q(`select renews_affiliation_id as id, renews_months as months
       from payment_line where payment_id = $1 and renews_affiliation_id is not null`, [paymentId]);
     for (const l of lines) renewed.push(await renewMembership(l.id, l.months));
@@ -5073,6 +5075,7 @@ export const portal = {
       ? Math.round((Date.parse(`${trial.ends}T00:00:00Z`) - Date.parse(`${now.date}T00:00:00Z`)) / 864e5) : null;
     const actions = actionsFor({ personId: person.id, owed, closing, qualifications: quals,
       trial: trial ? { left: trialLeft } : null,
+      termsOpen: (await terms.forPerson(actor, person.id)).items.filter((i) => i.mayEnrol && !i.enrolment).slice(0, 1).map((i) => ({ name: i.term.name, first: person.first_name })),
       memberships: memberships.filter((m) => m.standing).map((m) => ({ name: m.name, standing: m.standing, paid_until: m.paid_until })),
       details: { emergencyContact: !!(priv?.emergency_name && priv?.emergency_phone) } });
 
@@ -5756,6 +5759,238 @@ export const growth = {
     const gone = stale;
     report.forgotten = gone.length;
     await q(`update member_trial set ip_hash = null where ip_hash is not null and created_at < now() - interval '2 days'`);
+    return report;
+  },
+};
+
+// ---------------------------------------------------------------------------
+// school terms
+//
+// A country's terms are set once, at the top of the tree, and inherited. A child's enrolment in a term is
+// its own record: a membership can run all year while the classes are paid for a term at a time.
+// ---------------------------------------------------------------------------
+
+import { builtInFor, builtInYears, yearToOffer, termState, mayEnrol, holidays as termHolidays, inHoliday, termPrice, readMidTerm,
+  problemsWithMidTerm, problemsWithTerm, offersDue, CALENDARS } from '../core/domain/terms.mjs';
+
+const termRow = `st.id, st.organisation_id, st.year, st.number, st.name, to_char(st.starts,'YYYY-MM-DD') as starts,
+  to_char(st.ends,'YYYY-MM-DD') as ends, st.source`;
+
+/** The terms that apply to this organisation for a year: its own, or the nearest ancestor's. */
+async function effectiveTerms(orgId, year) {
+  const rows = await q(`select ${termRow}, o.name as owner, nlevel(o.path) as depth
+    from school_term st join organisation o on o.id = st.organisation_id
+    join organisation me on me.id = $1 and me.path <@ o.path
+    where st.year = $2 order by nlevel(o.path) desc, st.number`, [orgId, year]);
+  if (!rows.length) return { terms: [], owner: null };
+  const top = rows[0].organisation_id;
+  const terms = rows.filter((r) => r.organisation_id === top);
+  return { terms, owner: { id: top, name: terms[0].owner }, inherited: top !== orgId };
+}
+
+/** The country an organisation is in: its own, or the nearest ancestor that says. */
+const countryOf = async (orgId) => (await one(`select o.country_code from organisation me join organisation o on me.path <@ o.path
+  where me.id = $1 and o.country_code is not null order by nlevel(o.path) desc limit 1`, [orgId]))?.country_code ?? null;
+
+const midTermOf = (org) => { const r = org.settings?.terms?.midTerm; return r?.mode ? { mode: r.mode, fixedCents: r.fixedCents ?? 0 } : { mode: 'weeks', fixedCents: 0 }; };
+
+export const terms = {
+  /** The calendar as this organisation sees it, this year and next. */
+  async overview(actor, orgId) {
+    await assertRole(actor, orgId, REGISTER);
+    const org = await one('select * from organisation where id = $1', [orgId]);
+    const today = await todayAt(org);
+    const y = Number(today.slice(0, 4));
+    const country = await countryOf(orgId);
+    const years = [];
+    for (const year of [y, y + 1]) {
+      const e = await effectiveTerms(orgId, year);
+      const counts = e.terms.length ? await q(`select term_id, count(*)::int as n, count(*) filter (where paid)::int as paid, coalesce(sum(fee_cents) filter (where paid),0)::int as cents
+        from term_enrolment where organisation_id = $1 and status = 'enrolled' and term_id = any($2::uuid[]) group by term_id`, [orgId, e.terms.map((t) => t.id)]) : [];
+      years.push({ year, ...e, terms: e.terms.map((t) => ({ ...t, state: termState(t, today), ...(counts.find((c) => c.term_id === t.id) ?? { n: 0, paid: 0, cents: 0 }) })),
+        holidays: termHolidays(e.terms), builtIn: !e.terms.length || !e.inherited ? builtInFor(country, year) : null });
+    }
+    const here = years.flatMap((yr) => yr.terms);
+    return { org, today, country, years, midTerm: midTermOf(org), isClub: org.type === 'club',
+      current: here.find((t) => t.starts <= today && today <= t.ends) ?? null,
+      next: here.find((t) => t.starts > today) ?? null,
+      holiday: inHoliday(here, today), calendar: CALENDARS[String(country ?? '').toUpperCase()] ?? null };
+  },
+
+  /** Load the country's own calendar for a year. */
+  async loadBuiltIn(actor, orgId, year, { quiet = false } = {}) {
+    if (!quiet) await assertRole(actor, orgId, MANAGE);
+    const country = await countryOf(orgId);
+    const cal = builtInFor(country, year);
+    if (!cal) throw new Invalid(`There is no built-in calendar for ${country ?? 'this country'} in ${year}. Add the terms yourself.`);
+    if ((await one('select 1 as x from school_term where organisation_id = $1 and year = $2', [orgId, year])))
+      throw new Invalid(`${year} already has terms here.`);
+    for (const t of cal.terms)
+      await pool.query(`insert into school_term (organisation_id, year, number, name, starts, ends, source) values ($1,$2,$3,$4,$5,$6,'built-in')`,
+        [orgId, year, t.number, t.name, t.starts, t.ends]);
+    await pool.query(`insert into audit_log (account_id, organisation_id, action, entity, entity_id, after)
+      values ($1,$2,'terms_loaded','organisation',$2,$3)`, [quiet ? null : actor, orgId, JSON.stringify({ year, country, source: cal.source })]);
+    return cal.terms.length;
+  },
+
+  async save(actor, orgId, input) {
+    await assertRole(actor, orgId, MANAGE);
+    const t = { id: input.id || null, name: String(input.name ?? '').trim().slice(0, 40), starts: String(input.starts ?? '').trim(), ends: String(input.ends ?? '').trim() };
+    const year = Number(t.starts.slice(0, 4));
+    const others = await q(`select id, to_char(starts,'YYYY-MM-DD') as starts, to_char(ends,'YYYY-MM-DD') as ends from school_term where organisation_id = $1`, [orgId]);
+    const problems = problemsWithTerm(t, others);
+    if (problems.length) throw new Invalid(problems.join(' '));
+    if (t.id) {
+      const row = await one(`update school_term set name=$3, starts=$4, ends=$5, year=$6, source='manual' where id=$1 and organisation_id=$2 returning id`, [t.id, orgId, t.name, t.starts, t.ends, year]);
+      if (!row) throw new NotFound('Term');
+    } else {
+      const n = (await one('select coalesce(max(number),0)+1 as n from school_term where organisation_id=$1 and year=$2', [orgId, year])).n;
+      await pool.query(`insert into school_term (organisation_id, year, number, name, starts, ends) values ($1,$2,$3,$4,$5,$6)`, [orgId, year, n, t.name, t.starts, t.ends]);
+    }
+    await pool.query(`insert into audit_log (account_id, organisation_id, action, entity, entity_id, after) values ($1,$2,'term_saved','organisation',$2,$3)`, [actor, orgId, JSON.stringify(t)]);
+  },
+
+  async remove(actor, orgId, termId) {
+    await assertRole(actor, orgId, MANAGE);
+    if ((await one(`select 1 as x from term_enrolment where term_id = $1 and status = 'enrolled'`, [termId])))
+      throw new Invalid('Children are enrolled in that term. Withdraw them first.');
+    const row = await one('delete from school_term where id = $1 and organisation_id = $2 returning id', [termId, orgId]);
+    if (!row) throw new NotFound('Term');
+  },
+
+  async setRule(actor, orgId, form) {
+    await assertRole(actor, orgId, MANAGE);
+    const org = await clubOnly(orgId);
+    const rule = readMidTerm(form);
+    const problems = problemsWithMidTerm(rule);
+    if (problems.length) throw new Invalid(problems.join(' '));
+    await pool.query(`update organisation set settings = coalesce(settings,'{}'::jsonb) || jsonb_build_object('terms',
+      coalesce(settings->'terms','{}'::jsonb) || jsonb_build_object('midTerm', $2::jsonb)), updated_at = now() where id = $1`, [org.id, JSON.stringify(rule)]);
+  },
+
+  /** Who is enrolled in one term at one club. */
+  async roster(actor, orgId, termId) {
+    await assertRole(actor, orgId, REGISTER);
+    const term = await one(`select ${termRow} from school_term st where st.id = $1`, [termId]);
+    if (!term) throw new NotFound('Term');
+    const rows = await q(`select e.id, e.status, e.paid, e.fee_cents, e.price_note, to_char(e.enrolled_on,'YYYY-MM-DD') as enrolled_on, p.id as person_id,
+        trim(concat_ws(' ', p.first_name, p.last_name)) as name, date_part('year', age(p.date_of_birth))::int as age
+      from term_enrolment e join person p on p.id = e.person_id where e.term_id = $1 and e.organisation_id = $2 order by e.status, p.last_name, p.first_name`, [termId, orgId]);
+    return { term, rows };
+  },
+
+  /** The terms a child could be enrolled in now, and what each costs them. */
+  async forPerson(actor, personId) {
+    const how = await family.assertMayActFor(actor, personId);
+    const person = await one(`select ${PERSON_COLUMNS} from person p where p.id = $1`, [personId]);
+    const home = await one(`select o.* from affiliation a join organisation o on o.id = a.organisation_id
+      where a.person_id = $1 and a.role = 'member' and a.status in ('active') and a.ends is null limit 1`, [personId]);
+    if (!home) return { how, person, club: null, items: [] };
+    const today = await todayAt(home);
+    const age = ageOnDate(person.date_of_birth, today);
+    if (age == null || age >= 18) return { how, person, club: null, items: [] };
+    const y = Number(today.slice(0, 4));
+    const grade = await one('select rank_order from person_current_grade where person_id = $1', [personId]);
+    const sessions = await q('select weekday, min_age, max_age, min_grade_id from training_session where organisation_id = $1', [home.id]);
+    const weekdays = [...new Set(sessions.filter((s) => (s.min_age == null || age >= s.min_age) && (s.max_age == null || age <= s.max_age)).map((s) => s.weekday))];
+    const schedule = await feeRows(home.id);
+    const fee = feeFor(schedule, { ageYears: age, period: 'term', today });
+    const rule = midTermOf(home);
+    const items = [];
+    for (const year of [y, y + 1]) {
+      for (const t of (await effectiveTerms(home.id, year)).terms) {
+        if (t.ends < today) continue;
+        const enrolment = await one(`select id, status, paid, fee_cents, price_note from term_enrolment where term_id = $1 and person_id = $2`, [t.id, personId]);
+        const state = termState(t, today);
+        const price = fee ? termPrice({ fullCents: fee.amount_cents, term: t, today, rule, weekdays }) : { cents: 0, kind: 'free', note: 'No term fee set' };
+        items.push({ term: t, state, enrolment, price, mayEnrol: mayEnrol(t, today) && !!price && (!enrolment || enrolment.status === 'withdrawn') });
+      }
+    }
+    return { how, person, club: home.name, items, fee, rule };
+  },
+
+  async enrol(actor, personId, termId) {
+    const info = await this.forPerson(actor, personId);
+    const item = info.items.find((i) => i.term.id === termId);
+    if (!item) throw new NotFound('Term');
+    if (!item.mayEnrol) throw new Invalid(item.enrolment?.status === 'enrolled' ? 'Already enrolled.' : item.price ? 'Enrolment is not open for that term yet.' : 'The club does not take enrolments part-way through this term.');
+    const home = await one(`select o.id, o.timezone from affiliation a join organisation o on o.id = a.organisation_id where a.person_id=$1 and a.role='member' and a.status='active' and a.ends is null`, [personId]);
+    const today = await todayAt(home);
+    const cents = item.price.cents;
+    const client = await pool.connect();
+    try {
+      await client.query('begin');
+      const { rows: [e] } = await client.query(`insert into term_enrolment (term_id, person_id, organisation_id, status, fee_cents, price_note, paid, enrolled_on, enrolled_by)
+        values ($1,$2,$3,'enrolled',$4,$5,$6,$7::date,$8)
+        on conflict (term_id, person_id) do update set status='enrolled', fee_cents=$4, price_note=$5, paid=$6, enrolled_on=$7::date, enrolled_by=$8 returning id`,
+        [termId, personId, home.id, cents, item.price.note, cents === 0, today, actor]);
+      let paymentId = null;
+      if (cents > 0) {
+        const { rows: [pay] } = await client.query(`insert into payment (organisation_id, person_id, amount_cents, currency, status, requested_by)
+          values ($1,$2,$3,$4,'pending',$5) returning id`, [home.id, personId, cents, info.fee?.currency ?? 'NZD', actor]);
+        await client.query(`insert into payment_line (payment_id, kind, description, amount_cents, term_enrolment_id) values ($1,'dojo_fee',$2,$3,$4)`,
+          [pay.id, `${item.term.name} ${item.term.year} classes — ${info.person.first_name}${item.price.kind === 'full' ? '' : ` (${item.price.note})`}`, cents, e.id]);
+        paymentId = pay.id;
+      }
+      await client.query(`insert into audit_log (account_id, organisation_id, action, entity, entity_id, after) values ($1,$2,'term_enrolled','term_enrolment',$3,$4)`,
+        [actor, home.id, e.id, JSON.stringify({ term: item.term.name, year: item.term.year, cents })]);
+      await client.query('commit');
+      return { paymentId };
+    } catch (e) { await client.query('rollback'); throw e; } finally { client.release(); }
+  },
+
+  /** Withdraw before the term starts. An unpaid bill is cancelled; a paid one is left for the club to refund. */
+  async withdraw(actor, personId, termId) {
+    await family.assertMayActFor(actor, personId);
+    const e = await one(`select e.id, e.paid, e.organisation_id, to_char(st.starts,'YYYY-MM-DD') as starts, o.timezone from term_enrolment e
+      join school_term st on st.id = e.term_id join organisation o on o.id = e.organisation_id
+      where e.term_id = $1 and e.person_id = $2 and e.status = 'enrolled'`, [termId, personId]);
+    if (!e) throw new NotFound('Enrolment');
+    if ((await todayAt(e)) >= e.starts) throw new Invalid('The term has started. Please ask the club.');
+    await pool.query(`update payment set status='void', updated_at=now() where status in ('pending','failed') and id in (select payment_id from payment_line where term_enrolment_id = $1)`, [e.id]);
+    await pool.query(`update term_enrolment set status='withdrawn' where id=$1`, [e.id]);
+    await pool.query(`insert into audit_log (account_id, organisation_id, action, entity, entity_id, after) values ($1,$2,'term_withdrawn','term_enrolment',$3,$4)`,
+      [actor, e.organisation_id, e.id, JSON.stringify({ paid: e.paid })]);
+    return { paid: e.paid };
+  },
+
+  /** Daily: load each country's next calendar where it is known, and offer the next term to families. */
+  async run({ messenger, baseFrom, origin }) {
+    const report = { loaded: [], offered: 0 };
+    const roots = await q(`select id, name, country_code, settings from organisation where parent_id is null and status = 'active' and country_code is not null`);
+    for (const r of roots) {
+      if (r.settings?.terms?.auto === false) continue;
+      const today = await todayAt({ timezone: (await one('select timezone from organisation where id=$1', [r.id])).timezone });
+      const loaded = (await q('select distinct year from school_term where organisation_id = $1', [r.id])).map((x) => x.year);
+      const year = yearToOffer(loaded, today);
+      if (year && builtInYears(r.country_code).includes(year)) {
+        try { await this.loadBuiltIn(null, r.id, year, { quiet: true }); report.loaded.push(`${r.name} ${year}`); } catch { /* already there */ }
+      }
+    }
+    const clubs = await q(`select * from organisation where type = 'club' and status = 'active'`);
+    for (const club of clubs) {
+      const today = await todayAt(club);
+      const y = Number(today.slice(0, 4));
+      const all = [...(await effectiveTerms(club.id, y)).terms, ...(await effectiveTerms(club.id, y + 1)).terms];
+      const due = offersDue(all, today);
+      if (!due) continue;
+      if (await one('select 1 as x from term_offer where term_id = $1 and organisation_id = $2', [due.next.id, club.id])) continue;
+      const kids = await q(`select p.id, p.first_name, p.email::text as email,
+          coalesce((select json_agg(g.email::text) from guardian_link gl join person g on g.id = gl.guardian_id where gl.child_id = p.id and gl.ended_on is null and g.email is not null), '[]'::json) as guardians
+        from term_enrolment e join person p on p.id = e.person_id
+        where e.term_id = $1 and e.organisation_id = $2 and e.status = 'enrolled'
+          and not exists (select 1 from term_enrolment n where n.term_id = $3 and n.person_id = p.id)
+          and exists (select 1 from affiliation a where a.person_id = p.id and a.organisation_id = $2 and a.status = 'active' and a.ends is null)`,
+        [due.prev.id, club.id, due.next.id]);
+      const byAddress = new Map();
+      for (const k of kids) for (const addr of (k.guardians.length ? k.guardians : [k.email]).filter(Boolean)) byAddress.set(addr, [...(byAddress.get(addr) ?? []), k.first_name]);
+      await pool.query('insert into term_offer (term_id, organisation_id) values ($1,$2) on conflict do nothing', [due.next.id, club.id]);
+      for (const [to, names] of byAddress) {
+        const sent = await clubMail(club, { messenger, baseFrom }, to, `${due.next.name} enrolment is open at ${club.name}`,
+          `Hello,\n\nEnrolment for ${due.next.name} (${due.next.starts} to ${due.next.ends}) is open for ${names.join(' and ')}.\nEnrol online: ${origin}/me/terms\n\nSee you in class.`);
+        if (sent) report.offered++;
+      }
+    }
     return report;
   },
 };

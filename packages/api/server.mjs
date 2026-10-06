@@ -33,7 +33,7 @@
 import crypto from 'node:crypto';
 import { URL } from 'node:url';
 import { pool, orgs, people, rank, events, competition, pages, assets, news,
-         instructors, navigation, audit, cards, checkin, search, clubPages, appearance, clubs, clubProfile, family, myself, memberEvents, messages, emailPreferences, payments, fees, renewals, reminders, attendance, newcomers, reports, gradings, qualifications, portal, enquiries, scheduledPublishing, TooMany, outsiders, trials, referrals, growth, clubMailer,
+         instructors, navigation, audit, cards, checkin, search, clubPages, appearance, clubs, clubProfile, family, myself, memberEvents, messages, emailPreferences, payments, fees, renewals, reminders, attendance, newcomers, reports, gradings, qualifications, portal, enquiries, scheduledPublishing, TooMany, outsiders, trials, referrals, growth, clubMailer, terms,
          Forbidden, NotFound, Invalid } from './data.mjs';
 import * as auth from './auth.mjs';
 import * as V from './views.mjs';
@@ -435,6 +435,68 @@ get('/me/messages/:id', async (ctx) => {
   ctx.requireActor();
   if (!UUID_RE.test(ctx.params.id)) throw new NotFound('Message');
   return ctx.send(200, V.messageView({ me: ctx.me, csrf: ctx.csrf, message: await portal.message(ctx.me.accountId, ctx.params.id) }));
+});
+
+// ---- school terms -------------------------------------------------------------
+
+get('/me/terms', async (ctx) => {
+  ctx.requireActor();
+  const { self, dependants } = await family.mine(ctx.me.accountId);
+  const groups = [];
+  for (const p of [self, ...dependants].filter(Boolean)) groups.push(await terms.forPerson(ctx.me.accountId, p.id));
+  return ctx.send(200, V.myTerms({ me: ctx.me, csrf: ctx.csrf, groups, done: ctx.url.searchParams.get('done'), error: ctx.url.searchParams.get('error') }));
+});
+
+post('/me/terms/:termId/:personId', async (ctx) => {
+  ctx.requireActor();
+  await ctx.form();
+  if (!UUID_RE.test(ctx.params.termId) || !UUID_RE.test(ctx.params.personId)) throw new NotFound('Term');
+  try {
+    const out = await terms.enrol(ctx.me.accountId, ctx.params.personId, ctx.params.termId);
+    return ctx.redirect(out.paymentId ? `/me/payments/${out.paymentId}` : `/me/terms?done=${encodeURIComponent('Enrolled.')}`);
+  } catch (e) {
+    if (e instanceof Invalid) return ctx.redirect(`/me/terms?error=${encodeURIComponent(e.message)}`);
+    throw e;
+  }
+});
+
+post('/me/terms/:termId/:personId/withdraw', async (ctx) => {
+  ctx.requireActor();
+  await ctx.form();
+  if (!UUID_RE.test(ctx.params.termId) || !UUID_RE.test(ctx.params.personId)) throw new NotFound('Term');
+  try {
+    const out = await terms.withdraw(ctx.me.accountId, ctx.params.personId, ctx.params.termId);
+    return ctx.redirect(`/me/terms?done=${encodeURIComponent(out.paid ? 'Withdrawn. The club will arrange any refund.' : 'Withdrawn.')}`);
+  } catch (e) {
+    if (e instanceof Invalid) return ctx.redirect(`/me/terms?error=${encodeURIComponent(e.message)}`);
+    throw e;
+  }
+});
+
+async function termsScreen(ctx, org, extra = {}) {
+  return ctx.send(extra.status ?? 200, V.termsScreen({ me: ctx.me, csrf: ctx.csrf, ...(await terms.overview(ctx.me.accountId, org.id)),
+    canManage: await mayManageAt(ctx, org.id), done: ctx.url.searchParams.get('done'), ...extra }));
+}
+get('/o/:slug/terms', async (ctx) => termsScreen(ctx, await organisationFor(ctx, { toRegister: true })));
+const termAction = (path, fn, okText) => post(path, async (ctx) => {
+  const org = await organisationFor(ctx);
+  const form = await ctx.form();
+  try {
+    await fn(ctx, org, form);
+    return ctx.redirect(`/o/${org.slug}/terms?done=${encodeURIComponent(okText)}`);
+  } catch (e) {
+    if (e instanceof Invalid) return termsScreen(ctx, org, { status: 422, error: e.message });
+    throw e;
+  }
+});
+termAction('/o/:slug/terms', (ctx, org, f) => terms.save(ctx.me.accountId, org.id, f), 'Term added.');
+termAction('/o/:slug/terms/load', (ctx, org, f) => terms.loadBuiltIn(ctx.me.accountId, org.id, Number(f.year)), 'Terms loaded.');
+termAction('/o/:slug/terms/rule', (ctx, org, f) => terms.setRule(ctx.me.accountId, org.id, f), 'Saved.');
+termAction('/o/:slug/terms/:termId/remove', (ctx, org) => { if (!UUID_RE.test(ctx.params.termId)) throw new NotFound('Term'); return terms.remove(ctx.me.accountId, org.id, ctx.params.termId); }, 'Term removed.');
+get('/o/:slug/terms/:termId', async (ctx) => {
+  const org = await organisationFor(ctx, { toRegister: true });
+  if (!UUID_RE.test(ctx.params.termId)) throw new NotFound('Term');
+  return ctx.send(200, V.termRoster({ me: ctx.me, csrf: ctx.csrf, org, ...(await terms.roster(ctx.me.accountId, org.id, ctx.params.termId)) }));
 });
 
 // ---- adult free trials and referrals ----------------------------------------
@@ -2056,8 +2118,9 @@ get('/cron/renewals', async (ctx) => {
     origin: process.env.VERCEL_PROJECT_PRODUCTION_URL ? `https://${process.env.VERCEL_PROJECT_PRODUCTION_URL}` : originOf(ctx) });
   const origin = process.env.VERCEL_PROJECT_PRODUCTION_URL ? `https://${process.env.VERCEL_PROJECT_PRODUCTION_URL}` : originOf(ctx);
   const report = await reminders.run({ messenger: messengerFrom(), baseFrom: sendingAddress(), origin });
+  const termsReport = await terms.run({ messenger: messengerFrom(), baseFrom: sendingAddress(), origin });
   const growthReport = await growth.run({ messenger: messengerFrom(), baseFrom: sendingAddress(), origin, signInLink: signInLinkFor(origin) });
-  return ctx.send(200, `<pre>${JSON.stringify({ report, qualifications: qualReport, newcomersForgotten: forgotten, enquiriesDeleted, growth: growthReport }, null, 1).replace(/</g, '&lt;')}</pre>`);
+  return ctx.send(200, `<pre>${JSON.stringify({ report, qualifications: qualReport, newcomersForgotten: forgotten, enquiriesDeleted, growth: growthReport, terms: termsReport }, null, 1).replace(/</g, '&lt;')}</pre>`);
 });
 
 post('/o/:slug/renewals/fees', async (ctx) => {

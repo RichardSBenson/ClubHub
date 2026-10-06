@@ -196,6 +196,9 @@ const theirPayment = await one(`
 await pool.query(`insert into payment_line (payment_id, kind, description, amount_cents)
   values ($1,'uniform','Private uniform order',5000)`, [theirPayment.id]);
 
+const theirTerm = (await pool.query(`insert into school_term (organisation_id, year, number, name, starts, ends)
+  values ($1, 2030, 1, 'Their Term', '2030-02-01', '2030-04-01') returning id`, [theirs.id])).rows[0];
+
 // ---------------------------------------------------------------------------
 // every route, walked
 // ---------------------------------------------------------------------------
@@ -225,6 +228,7 @@ function pathFor(pattern) {
     affiliationId: theirAffiliation.id,
     sessionId: theirSession.id,
     feeId: theirFee.id,
+    termId: theirTerm.id,
     recordId: theirRecord.id,
     awardId: theirAward.id,
     entryId: '00000000-0000-0000-0000-000000000000',
@@ -281,6 +285,9 @@ const SCOPED = new Map([
   ['GET /me/messages', 'messages written to the signed-in person or about their children; scoped by portal.inbox'],
   ['GET /me/messages/:id', 'one message; the recipient row must belong to the signed-in person or their children, otherwise not found'],
   ['GET /me/classes', 'the timetable of the clubs the signed-in person and their children belong to; scoped by portal.timetable'],
+  ['GET /me/terms', 'the terms open to the signed-in person and their children; scoped by terms.forPerson'],
+  ['POST /me/terms/:termId/:personId', 'enrols only the signed-in person or a child they look after; family.mayActFor'],
+  ['POST /me/terms/:termId/:personId/withdraw', 'the same'],
   ['GET /me/refer', 'a member\'s own referral code and history; scoped to the signed-in person'],
   ['GET /me/:personId/join', 'joining after a trial; family.mayActFor'],
   ['POST /me/:personId/join', 'asking for the first membership payment; family.mayActFor'],

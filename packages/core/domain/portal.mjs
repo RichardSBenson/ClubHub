@@ -45,7 +45,7 @@ export function nextSession(sessions, now, who = {}) {
  * `details` { emergencyContact: bool }
  */
 export function actionsFor({ personId, owed = [], memberships = [], closing = [], qualifications = [],
-                             details = { emergencyContact: true }, trial = null }) {
+                             details = { emergencyContact: true }, trial = null, termsOpen = [] }) {
   const out = [];
   if (trial && trial.left != null)
     out.push({ kind: 'trial', urgent: trial.left <= 3, href: `/me/${personId}/join`,
@@ -63,6 +63,8 @@ export function actionsFor({ personId, owed = [], memberships = [], closing = []
     else if (m.standing === 'due')
       out.push({ kind: 'membership', urgent: false, href: '/me/payments', text: `Your ${m.name} membership runs out on ${m.paid_until}` });
   }
+  for (const t of termsOpen)
+    out.push({ kind: 'term', urgent: false, href: '/me/terms', text: `${t.name} enrolment is open for ${t.first}` });
   for (const c of closing)
     out.push({ kind: 'event', urgent: false, href: '/me/events', text: `Entries for ${c.title} close soon` });
   for (const q of qualifications) {
