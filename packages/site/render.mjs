@@ -208,6 +208,8 @@ nav.main a:hover{border-bottom-color:var(--primary)}
   box-shadow:0 6px 18px rgba(0,0,0,.25)}
 .btn.ghost{background:rgba(0,0,0,.25);color:var(--canvas);border-color:var(--canvas)}
 .btn.ghost:hover{background:var(--canvas);color:var(--ink)}
+.btn.outline{background:transparent;color:var(--ink);border-color:var(--ink)}
+.btn.outline:hover{background:var(--ink);color:var(--canvas);border-color:var(--ink)}
 .btn.light{background:var(--canvas);color:var(--ink);border-color:var(--canvas)}
 
 .facts{background:var(--ink);color:var(--canvas)}
@@ -751,7 +753,7 @@ ${eventBanner(ev, { logoUrl, federationName: federation.name })}
     ${ev.status === 'cancelled' ? '<div class="notice">This event has been cancelled.</div>' : ''}
     ${String(ev.description ?? '').split(/\n{2,}/).map((p) => p.trim()).filter(Boolean)
       .map((p) => `<p class="evdesc">${esc(p).replace(/\n/g, '<br>')}</p>`).join('')}
-    ${ev.status === 'cancelled' ? '' : `<p><a class="btn ghost" href="${at(`${path ?? `/events/${ev.slug}`}/event.ics`)}" download>Add to calendar</a></p>`}
+    ${ev.status === 'cancelled' ? '' : `<p><a class="btn outline" href="${at(`${path ?? `/events/${ev.slug}`}/event.ics`)}" download>Add to calendar</a></p>`}
     ${canEnter ? `<p><a class="btn" href="/enter/${esc(ev.from_slug ?? '')}/${esc(raw)}">Enter this event</a></p>` : ''}
     ${ev.from_org ? `<p class="muted">Run by ${esc(ev.from_org)}.</p>` : ''}
   </div>
