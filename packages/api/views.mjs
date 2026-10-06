@@ -195,21 +195,42 @@ table.writing-help code{background:var(--soft);padding:2px 6px;border-radius:4px
   text-transform:uppercase;color:var(--muted)}
 
 @media(max-width:860px){
-  .shell{grid-template-columns:minmax(0,1fr);grid-template-areas:"rail" "stage"}
-  .rail{width:auto;position:static;height:auto;border-right:0;border-bottom:1px solid var(--line);
-    padding:14px 16px}
-  .rail .brand{padding-bottom:10px}
-  .rail .here{margin-bottom:8px}
-  .rail h6{display:none}
-  .rail nav{display:flex;flex-wrap:wrap;gap:2px 4px}
-  .rail .all{margin-top:6px;padding-top:6px}
+  .shell{grid-template-columns:minmax(0,1fr);grid-template-areas:"stage"}
+  /* The menu is a drawer that slides in from the left, opened by the button at the top right.
+     No script: the button is a label for a hidden checkbox. */
+  .railtoggle{position:absolute;opacity:0;pointer-events:none}
+  .rail{position:fixed;top:0;left:0;bottom:0;z-index:30;width:min(84vw,300px);height:100%;
+    border-right:1px solid var(--line);padding:18px 14px 28px;overflow-y:auto;
+    transform:translateX(-102%);visibility:hidden;
+    transition:transform .2s ease,visibility 0s linear .2s;box-shadow:none}
+  .railtoggle:checked ~ .rail{transform:none;visibility:visible;transition:transform .2s ease;
+    box-shadow:6px 0 28px rgba(0,0,0,.22)}
+  .railscrim{position:fixed;top:0;left:0;right:0;bottom:0;width:100%;height:100%;margin:0;z-index:20;background:rgba(10,10,12,.45);display:none}
+  .railtoggle:checked ~ .railscrim{display:block}
+  .railtoggle:focus-visible ~ .rail{outline:3px solid var(--accent);outline-offset:-3px}
+  .railclose{position:absolute;top:10px;right:10px;width:40px;height:40px;display:flex;
+    align-items:center;justify-content:center;font-size:28px;line-height:1;cursor:pointer;
+    color:var(--ink-2);border-radius:8px;margin:0}
+  .railclose:hover{background:var(--soft)}
+  .rail .brand{padding-bottom:12px}
+  .rail nav a{padding:11px 10px;font-size:16px}
+  .rail .all{margin-top:20px}
+  .railbtn{display:flex;order:1;margin:0 0 0 auto;width:44px;height:44px;align-items:center;
+    justify-content:center;flex-direction:column;gap:5px;cursor:pointer;border:1px solid var(--line-2);
+    border-radius:8px;background:var(--canvas)}
+  .railbtn i{display:block;width:20px;height:2px;background:var(--ink);border-radius:2px}
   .top{padding:10px 16px;flex-wrap:wrap}
+  .shell:has(.rail) .top .brand{display:block;order:0;flex:1 1 calc(100% - 70px)}
+  .top > .btn,.top .who{order:2}
   .top .find{margin-left:0;flex:1 1 100%;order:3}
   .top .find input{min-width:0;flex:1}
   .page{padding:4px 16px 48px}
   footer.foot{padding:0 16px 28px}
   .times-edit .t{grid-template-columns:1fr 1fr;}
   .times-edit .head{display:none}
+}
+@media(min-width:861px){
+  .railtoggle,.railscrim,.railclose,.railbtn{display:none}
 }
 @media(max-width:600px){
   table{font-size:14px} td,th{padding:9px 10px}
@@ -226,6 +247,7 @@ table.writing-help code{background:var(--soft);padding:2px 6px;border-radius:4px
  * sign-in page — simply has no rail.
  */
 const RAIL_MARKER = '<!--honbu:rail-->';
+const MENU_BUTTON_MARKER = '<!--honbu:menubutton-->';
 
 function page({ title, me, body, csrf, query = '', wide = false, head = '' }) {
   const search = me ? `<form method="get" action="/search" class="find" role="search">
@@ -248,7 +270,7 @@ function page({ title, me, body, csrf, query = '', wide = false, head = '' }) {
   <div class="stage">
     <header class="top">
       <a class="brand" href="${me ? '/dashboard' : '/signin'}">Honbu</a>
-      ${search}${me?.personId ? '<a class="btn quiet" href="/me">My details</a>' : ''}${who}
+      ${me ? MENU_BUTTON_MARKER : ''}${search}${me?.personId ? '<a class="btn quiet" href="/me">My details</a>' : ''}${who}
     </header>
     <main id="main" class="page${wide ? ' wide' : ''}">${body}</main>
     <footer class="foot">Honbu — federation register</footer>
@@ -278,7 +300,10 @@ export function rail({ org, vocabulary = {}, can = {}, path = '' }) {
       shown.join('')}</nav>` : '';
   };
 
-  return `<aside class="rail">
+  return `<input type="checkbox" id="railtoggle" class="railtoggle" aria-label="Open the menu">
+<label class="railscrim" for="railtoggle" aria-hidden="true"></label>
+<aside class="rail">
+  <label class="railclose" for="railtoggle" aria-hidden="true">×</label>
   <a class="brand" href="/dashboard">Honbu</a>
   <div class="here"><strong>${esc(org.name)}</strong>
     <span>${isClub ? esc(club) : 'Federation'}</span></div>
@@ -321,7 +346,10 @@ export function rail({ org, vocabulary = {}, can = {}, path = '' }) {
 </aside>`;
 }
 
-export { RAIL_MARKER };
+/** The button that opens the menu on a phone. Only where there is a menu to open. */
+export const menuButton = () => '<label class="railbtn" for="railtoggle" aria-hidden="true"><i></i><i></i><i></i></label>';
+
+export { RAIL_MARKER, MENU_BUTTON_MARKER };
 
 // ---------------------------------------------------------------------------
 

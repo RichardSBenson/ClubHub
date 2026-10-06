@@ -3969,6 +3969,8 @@ export async function handler(req, res) {
       // server knows. Screens leave a marker; this fills it, or removes it.
       if (typeof html === 'string' && html.includes(V.RAIL_MARKER))
         html = html.replace(V.RAIL_MARKER, () => this.rail ? V.rail(this.rail) : '');
+      if (typeof html === 'string' && html.includes(V.MENU_BUTTON_MARKER))
+        html = html.replace(V.MENU_BUTTON_MARKER, () => this.rail ? V.menuButton() : '');
       res.writeHead(status, {
         'content-type': 'text/html; charset=utf-8',
         ...SECURITY_HEADERS,
