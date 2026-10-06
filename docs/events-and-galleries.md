@@ -37,6 +37,17 @@ layout the federation saved. Sizes are in `website-images.md` (aim for 1200 × 8
 Adding a new picture needs an owner or administrator (uploading is limited to them); choosing one already in the
 library does not.
 
+## About this event
+The event form has an **About this event** box (up to 4000 characters). A blank line starts a new paragraph and a
+single line break is kept. It is plain text: anything that looks like markup is shown as written, never run. It
+sits under the one-line summary on the event page and is also put into the calendar entry.
+
+## Add to calendar
+Every event page that is not cancelled has an **Add to calendar** button. It downloads a small `.ics` file
+(`/events/<event>/event.ics`, or `/<dojo>/events/<event>/event.ics`) that every phone and desktop calendar
+opens. Times go out in UTC and the calendar shows them in the visitor's own time zone. An event with no end time is
+left without one rather than given an invented length. The entry carries the title, the one-line summary and the
+description, the venue and address, and a link back to the page.
+
 ## Not built yet
-A written description for an event beyond the one-line summary, an "add to calendar" file, a gallery for the
-federation's own pages, and a photo block inside pages.
+A gallery for the federation's own pages, a photo block inside pages, and recurring events.

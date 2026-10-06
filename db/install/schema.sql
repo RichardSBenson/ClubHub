@@ -1955,3 +1955,5 @@ alter table instructor_profile
   -- Showing that somebody is police vetted or first-aid trained is a statement about them, so it is
   -- the instructor's choice, per club, and off until somebody turns it on.
   add column if not exists show_checks boolean not null default false;
+
+alter table event_detail add column if not exists description text;

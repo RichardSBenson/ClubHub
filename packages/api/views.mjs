@@ -1110,6 +1110,10 @@ export const eventForm = ({ me, csrf, org, values = {}, zone, error,
     <input id="summary" name="summary" maxlength="300"
       value="${esc(v('summary'))}" style="max-width:560px">
 
+    <label for="description">About this event
+      <span class="hint">Optional. What happens, who it is for, what to bring. A blank line starts a new paragraph.</span></label>
+    <textarea id="description" name="description" rows="8" maxlength="4000" style="max-width:640px">${esc(v('description'))}</textarea>
+
     <fieldset><legend>Where, who to ask and what it costs</legend>
       <div class="row">
         <div><label for="contactName">Contact name</label>
@@ -2840,7 +2844,7 @@ export const error = ({ me, csrf, status, message }) => page({
  * Import is paste-a-file rather than upload, so the screen works without
  * JavaScript and the file is read by the same validator the build uses.
  */
-export const appearanceEditor = ({ me, csrf, org, current, builtIn = [],
+export const appearanceEditor = ({ me, csrf, org, current, builtIn = [], home = {},
                                    preview = null, pasted = '', problems = [],
                                    done, error, rebuild }) => {
   const swatches = (t) => ['primary', 'accent', 'ink', 'canvas', 'neutral']
@@ -2866,6 +2870,27 @@ export const appearanceEditor = ({ me, csrf, org, current, builtIn = [],
     <p class="hint">At least 600 pixels high, with nothing but the crest in the picture.</p>
     <p><button class="btn" type="submit">Use this crest</button>
       <button class="btn" type="submit" name="remove" value="1">Remove the crest</button></p>
+  </form>
+
+  <h2>Home page</h2>
+  <form method="post" action="${action}/home" enctype="multipart/form-data" class="card" style="margin-bottom:24px">
+    <input type="hidden" name="_csrf" value="${esc(csrf ?? '')}">
+    <label for="heroHeading">Heading</label>
+    <input id="heroHeading" name="heroHeading" maxlength="80" value="${esc(home.heroHeading ?? '')}" placeholder="Everyone starts somewhere.">
+    <label for="heroText">Line under the heading</label>
+    <input id="heroText" name="heroText" maxlength="300" value="${esc(home.heroText ?? '')}">
+    <label for="heroButton">Button</label>
+    <input id="heroButton" name="heroButton" maxlength="80" value="${esc(home.heroButton ?? '')}" placeholder="Find your dojo">
+    <p class="hint">Leave a box empty to use the standard words.</p>
+    <p><label>Big picture at the top${home.heroAssetId ? ' (one is set — choosing another replaces it)' : ''}<br>
+      <input type="file" name="heroFile" accept="image/png,image/jpeg,image/webp"></label></p>
+    <p class="hint">${esc(slotHint('hero'))}</p>
+    <p><label>Picture shown when the site is shared${home.shareAssetId ? ' (one is set)' : ''}<br>
+      <input type="file" name="shareFile" accept="image/png,image/jpeg,image/webp"></label></p>
+    <p class="hint">${esc(slotHint('share'))}</p>
+    <p><button class="btn" type="submit">Save the home page</button>
+      ${home.heroAssetId ? '<button class="btn quiet" type="submit" name="removeHero" value="1">Remove the big picture</button>' : ''}
+      ${home.shareAssetId ? '<button class="btn quiet" type="submit" name="removeShare" value="1">Remove the share picture</button>' : ''}</p>
   </form>
 
   <h2>Now</h2>

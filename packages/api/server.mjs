@@ -2279,6 +2279,7 @@ async function appearanceScreen(ctx, org, extra = {}) {
   const q = ctx.url.searchParams;
   return ctx.send(extra.status ?? 200, V.appearanceEditor({
     me: ctx.me, org, csrf: ctx.csrf, builtIn: builtInList(),
+    home: await appearance.home(ctx.me.accountId, org.id),
     current: stored ? (readTheme(stored).theme ?? null) : null,
     done: q.get('done'), error: q.get('error'), rebuild: q.get('rebuild'),
     ...extra,
@@ -2339,6 +2340,46 @@ post('/o/:slug/appearance/logo', async (ctx) => {
     await appearance.setLogo(ctx.me.accountId, org.id, assetId);
     const rebuild = await requestRebuild({ reason: `crest ${org.slug}` });
     return ctx.redirect(`${back}?done=${encodeURIComponent(assetId ? 'Crest set.' : 'Crest removed.')}&rebuild=${encodeURIComponent(rebuild.detail)}`);
+  } catch (e) {
+    if (e instanceof NotAnImage || e instanceof BadUpload || e instanceof Invalid)
+      return ctx.redirect(`${back}?error=${encodeURIComponent(e.message)}`);
+    throw e;
+  }
+});
+
+/**
+ * The top of the home page: the big picture, the three lines of words, and the picture that
+ * shows when the site is shared. Federation screens only; a club uses its federation's.
+ * The permission check comes before the upload is read.
+ */
+post('/o/:slug/appearance/home', async (ctx) => {
+  const org = await organisationFor(ctx, { toWrite: true });
+  if (org.type === 'club') throw new Forbidden('A club uses its federation\'s home page.');
+  if (!await mayManageAt(ctx, org.id)) throw new Forbidden('Only an owner or administrator can change the home page.');
+  const { fields, files } = await ctx.upload({ maxBytes: MAX_BYTES + 256 * 1024 });
+  const back = `/o/${org.slug}/appearance`;
+  try {
+    const change = {
+      heroHeading: fields.heroHeading ?? '', heroText: fields.heroText ?? '', heroButton: fields.heroButton ?? '',
+    };
+    const add = async (field, alt) => {
+      const file = files.find((f) => f.field === field && f.bytes.length);
+      if (!file) return undefined;
+      const identified = identify(file.bytes, { filename: file.filename });
+      const created = await assets.create(ctx.me.accountId, org.id, {
+        bytes: file.bytes, identified, filename: file.filename, altText: alt });
+      return { id: created.id, identified };
+    };
+    const warnings = [];
+    const hero = await add('heroFile', `${org.name} home page`);
+    if (hero) { change.heroAssetId = hero.id; warnings.push(...fitFor('hero', hero.identified)); }
+    else if (fields.removeHero) change.heroAssetId = null;
+    const share = await add('shareFile', `${org.name} link preview`);
+    if (share) { change.shareAssetId = share.id; warnings.push(...fitFor('share', share.identified)); }
+    else if (fields.removeShare) change.shareAssetId = null;
+    await appearance.setHome(ctx.me.accountId, org.id, change);
+    const rebuild = await requestRebuild({ reason: `home page ${org.slug}` });
+    return ctx.redirect(`${back}?done=${encodeURIComponent(['Home page saved.', ...warnings].join(' '))}&rebuild=${encodeURIComponent(rebuild.detail)}`);
   } catch (e) {
     if (e instanceof NotAnImage || e instanceof BadUpload || e instanceof Invalid)
       return ctx.redirect(`${back}?error=${encodeURIComponent(e.message)}`);
@@ -3638,7 +3679,7 @@ function eventFieldsFrom(form, zone) {
 }
 
 const detailAsForm = (d) => d ? { eventType: d.type_key ?? '', contactName: d.contact_name ?? '', contactEmail: d.contact_email ?? '',
-  contactPhone: d.contact_phone ?? '', costNote: d.cost_note ?? '', infoUrl: d.info_url ?? '',
+  contactPhone: d.contact_phone ?? '', costNote: d.cost_note ?? '', infoUrl: d.info_url ?? '', description: d.description ?? '',
   latitude: d.latitude ?? '', longitude: d.longitude ?? '' } : {};
 
 /** An Event back into what the form wants: local wall-clock strings. */

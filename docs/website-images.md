@@ -25,6 +25,16 @@ A dojo that offers a free first class gets "Book your free class" in the hero, a
 bar that stays at the bottom of a phone screen. It links to that club's trial form. Otherwise the
 button is "Come to a class".
 
+## The home page
+**Appearance → Home page** (federation owner or administrator) sets the heading, the line under it, the button
+words and two pictures: the big picture behind the heading (2400 × 1000) and the link-preview picture (1200 × 630).
+An empty words box falls back to the deployment's settings file, then to the standard wording. A club uses its
+federation's home page and cannot change it. Each save is in the audit log.
+
+## Link-preview pictures
+The picture set on the home page is what Facebook and chat apps show when any page of the site is shared
+(`og:image`, with a large-image card). A dojo page offers its own top picture instead when it has one. Pages
+with no picture say so, and sites are shared as a plain card.
+
 ## Not built yet
-Dojo photo gallery, link-preview pictures, the federation's home-page picture upload screen (the
-renderer already shows `homePage.heroAssetId` if set), and an events form for dojo operators.
+A gallery on the federation's own pages, and a link-preview picture chosen per event.

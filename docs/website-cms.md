@@ -10,6 +10,14 @@ Written in the page editor's one box:
 
     {{contact kind=trial heading="Try a free class" intro="Tell us who it's for."}}
 
+## The free-trial panel
+A big "try a free class" panel that can be dropped into any page:
+
+    {{trial club=whanganui heading=Try_a_free_class text=Your_first_class_is_free button=Book_now}}
+
+With `club=` the button goes to that club's trial enquiry form (`/enquire/<club>?kind=trial`); without it, to
+Find a dojo so the visitor can pick their nearest. Underscores stand for spaces. Everything is optional.
+
 `kind=trial` adds a "who is it for" field and does not require a message. The FAQ is also published as
 schema.org JSON-LD so search engines can show the answers.
 

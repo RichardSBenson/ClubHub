@@ -55,6 +55,7 @@ export function problemsWithDetail(d) {
   if (d.infoUrl && !SAFE_URL.test(d.infoUrl)) out.push('The more-information link must start with https://.');
   if (d.latitude != null && !(d.latitude >= -90 && d.latitude <= 90)) out.push('Latitude must be between -90 and 90.');
   if (d.longitude != null && !(d.longitude >= -180 && d.longitude <= 180)) out.push('Longitude must be between -180 and 180.');
+  if (d.description && d.description.length > 4000) out.push('The description is too long (4000 characters at most).');
   if ((d.latitude == null) !== (d.longitude == null)) out.push('Give both latitude and longitude for the map pin, or neither.');
   return out;
 }

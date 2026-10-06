@@ -15,6 +15,7 @@ import { menuFor } from '../content/navigation.mjs';
 import { loadSettings, SettingsError } from './settings.mjs';
 import { readTheme, lookOf } from './theme.mjs';
 import * as R from './render.mjs';
+import { eventToIcs } from '../core/domain/calendar-file.mjs';
 
 // Relative to the repository, not the working directory — so it lands in the
 // same place whether run locally, from a script, or by Vercel at the repo root.
@@ -386,7 +387,15 @@ for (const target of SITES) {
 
   // The crest: one image the federation chose, used in the header and on every event banner.
   const logoUrl = assets[federation.settings?.logoAssetId] ?? null;
-  const shared = { federation: { ...federation, logoUrl }, fonts, nav, base, vocabulary, origin: ORIGIN };
+  const shareUrl = assets[orgSettings.homePage?.shareAssetId] ?? null;
+  const shared = { federation: { ...federation, logoUrl, shareUrl }, fonts, nav, base, vocabulary, origin: ORIGIN };
+
+  // "Add to calendar": one small file beside each event page that is not cancelled.
+  const writeCalendar = async (ev, dir, at) => {
+    if (ev.status === 'cancelled') return;
+    const ics = eventToIcs(ev, { url: `${ORIGIN}${base}${at}`, host: new URL(ORIGIN).hostname });
+    if (ics) await write(`${dir}/event.ics`, ics);
+  };
 
   await write('theme.css', R.themeCss(tokens, fonts));
 
@@ -415,8 +424,11 @@ for (const target of SITES) {
     // A dojo's own events get their page under the dojo, so a local event needs nobody's
     // permission to be on the website. Ones that reached the federation's calendar are there too.
     for (const ev of dojoEvents.filter((e) => e.is_own))
-      await write(`${dojo.slug}/events/${ev.slug}/index.html`,
-        R.eventPage({ ev, ...shared, path: `/${dojo.slug}/events/${ev.slug}` }));
+    {
+      const at = `/${dojo.slug}/events/${ev.slug}`;
+      await write(`${dojo.slug}/events/${ev.slug}/index.html`, R.eventPage({ ev, ...shared, path: at }));
+      await writeCalendar(ev, `${dojo.slug}/events/${ev.slug}`, at);
+    }
     await write(`${dojo.slug}/index.html`,
       R.dojoPage({ dojo, events: dojoEvents, ...shared, instructors: teachers.filter((x) => x.organisationSlug === dojo.slug),
         gallery: (galleryRows.get(dojo.id) ?? []).map((g) => ({ url: assets[g.asset_id], alt: g.alt_text, caption: g.caption })).filter((g) => g.url),
@@ -431,6 +443,7 @@ for (const target of SITES) {
 
   for (const ev of evs) {
     await write(`events/${ev.slug}/index.html`, R.eventPage({ ev, ...shared }));
+    await writeCalendar(ev, `events/${ev.slug}`, `/events/${ev.slug}`);
   }
   await write('events/index.html', R.eventsPage({ events: evs, ...shared }));
 
@@ -458,9 +471,11 @@ for (const target of SITES) {
 
   await write('index.html', R.homePage({
     dojos, events: evs, articles,
-    homeCopy: atRoot ? (rootSettings.homePage ?? {}) : strip(orgSettings.homePage ?? {}),
+    // The file supplies defaults at the root; what the federation stored wins.
+    homeCopy: { ...(atRoot ? strip(rootSettings.homePage ?? {}) : {}), ...strip(orgSettings.homePage ?? {}) },
     sections: homeSections,
-    heroUrl: assets[(atRoot ? rootSettings.homePage : orgSettings.homePage)?.heroAssetId] ?? null,
+    heroUrl: assets[orgSettings.homePage?.heroAssetId]
+      ?? (atRoot ? assets[rootSettings.homePage?.heroAssetId] : null) ?? null,
     ...shared,
   }));
 

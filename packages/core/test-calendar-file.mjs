@@ -1,0 +1,22 @@
+import { eventToIcs, escapeText, fold, utc } from './domain/calendar-file.mjs';
+let pass = 0, fail = 0;
+const ok = (n, c) => { c ? pass++ : (fail++, console.log('  ✗', n)); };
+const ev = { id: 'abc', title: 'Kyu Grading, Whanganui', summary: 'Grading day', description: 'Bring a gi.\n\nArrive 15 minutes early; wear a belt.',
+  starts_at: '2026-11-14T20:00:00Z', ends_at: '2026-11-15T03:00:00Z', venue_name: 'Collegiate Gym', address_line: '1 Hospital Road, Whanganui' };
+const ics = eventToIcs(ev, { url: 'https://example.nz/events/kyu', host: 'example.nz', now: new Date('2026-10-01T00:00:00Z') });
+ok('it is a calendar with one event', /^BEGIN:VCALENDAR\r\n/.test(ics) && /END:VCALENDAR\r\n$/.test(ics) && (ics.match(/BEGIN:VEVENT/g) ?? []).length === 1);
+ok('lines end with CRLF and nothing else', !/[^\r]\n/.test(ics));
+ok('times are in UTC', /DTSTART:20261114T200000Z/.test(ics) && /DTEND:20261115T030000Z/.test(ics) && utc('2026-01-02T03:04:05Z') === '20260102T030405Z');
+ok('commas and semicolons are escaped', /SUMMARY:Kyu Grading\\, Whanganui/.test(ics) && /arrive 15 minutes early[\\][;] wear/i.test(ics.replace(/\r\n /g, '')));
+ok('line breaks in the text become \\n', /Grading day\\n\\nBring a gi\.\\n\\nArrive/.test(ics.replace(/\r\n /g, '')));
+ok('the place and address are the location', /LOCATION:Collegiate Gym\\, 1 Hospital Road\\, Whanganui/.test(ics));
+ok('it has a stable id and the page address', /UID:abc@example\.nz/.test(ics) && /URL:https:\/\/example\.nz\/events\/kyu/.test(ics));
+ok('no line is longer than 75 bytes', ics.split('\r\n').every((l) => Buffer.byteLength(l) <= 75));
+ok('folding does not split a character', fold('X'.repeat(74) + 'é' + 'Y'.repeat(30)).split('\r\n').every((l) => !/�/.test(l)) && fold('X'.repeat(74) + 'é').replace(/\r\n /g, '') === 'X'.repeat(74) + 'é');
+ok('no end time means no end line', !/DTEND/.test(eventToIcs({ ...ev, ends_at: null })));
+ok('an end before the start is left out', !/DTEND/.test(eventToIcs({ ...ev, ends_at: '2026-11-14T10:00:00Z' })));
+ok('a cancelled event says so', /STATUS:CANCELLED/.test(eventToIcs({ ...ev, status: 'cancelled' })) && /STATUS:CONFIRMED/.test(ics));
+ok('no start, no file', eventToIcs({ title: 'x' }) === null && eventToIcs({ title: 'x', starts_at: 'nonsense' }) === null);
+ok('a missing description is simply absent', !/DESCRIPTION/.test(eventToIcs({ ...ev, summary: null, description: null })));
+ok('escaping handles backslashes', escapeText('a\\b') === 'a\\\\b');
+console.log(`${pass} passed, ${fail} failed`); process.exit(fail ? 1 : 0);

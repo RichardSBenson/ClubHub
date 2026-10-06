@@ -2571,6 +2571,44 @@ export const appearance = {
     return (await one('select settings from organisation where id=$1', [orgId]))?.settings?.logoAssetId ?? null;
   },
 
+  /** What the home page says and shows at the top. Blank words fall back to the defaults. */
+  async home(actor, orgId) {
+    await assertRole(actor, orgId, WRITE_PAGES);
+    const h = (await one('select settings from organisation where id=$1', [orgId]))?.settings?.homePage ?? {};
+    return { heroAssetId: h.heroAssetId ?? null, heroHeading: h.heroHeading ?? '',
+             heroText: h.heroText ?? '', heroButton: h.heroButton ?? '',
+             shareAssetId: h.shareAssetId ?? null };
+  },
+
+  /**
+   * Set the home-page top picture, wording and link-preview picture. `undefined` leaves a
+   * field alone; null or '' clears it. Pictures must be this organisation's own.
+   */
+  async setHome(actor, orgId, { heroAssetId, shareAssetId, heroHeading, heroText, heroButton }) {
+    await assertRole(actor, orgId, MANAGE);
+    for (const [label, v] of [['heading', heroHeading], ['button', heroButton]])
+      if (v != null && String(v).length > 80) throw new Invalid(`The ${label} is too long (80 characters at most).`);
+    if (heroText != null && String(heroText).length > 300) throw new Invalid('The text under the heading is too long (300 characters at most).');
+    for (const id of [heroAssetId, shareAssetId].filter(Boolean)) {
+      const a = await one('select organisation_id from asset where id = $1', [id]);
+      if (!a || a.organisation_id !== orgId) throw new Invalid('Choose one of this organisation\'s own pictures.');
+    }
+    const before = (await one('select settings from organisation where id=$1', [orgId]))?.settings?.homePage ?? {};
+    const next = { ...before };
+    const put = (k, v) => {
+      if (v === undefined) return;
+      const s = typeof v === 'string' ? v.trim() : v;
+      if (s === null || s === '') delete next[k]; else next[k] = s;
+    };
+    put('heroAssetId', heroAssetId); put('shareAssetId', shareAssetId);
+    put('heroHeading', heroHeading); put('heroText', heroText); put('heroButton', heroButton);
+    await one(`update organisation set settings = jsonb_set(settings, '{homePage}', $2::jsonb, true),
+        updated_at = now() where id = $1 returning id`, [orgId, JSON.stringify(next)]);
+    await pool.query(`insert into audit_log (account_id, organisation_id, action, entity, entity_id, before, after)
+      values ($1,$2,'home_page_set','organisation',$2,$3,$4)`,
+      [actor, orgId, JSON.stringify(before), JSON.stringify(next)]);
+  },
+
   /** Back to the deployment's own look (settings file, then defaults). */
   async reset(actor, orgId) {
     await assertRole(actor, orgId, MANAGE);
@@ -6039,7 +6077,7 @@ import { readType, problemsWithDetail } from '../core/domain/event-types.mjs';
 
 export const eventDetails = {
   async forEvent(eventId) {
-    return one(`select type_key, contact_name, contact_email, contact_phone, cost_note, info_url,
+    return one(`select type_key, contact_name, contact_email, contact_phone, cost_note, info_url, description,
       latitude::float as latitude, longitude::float as longitude from event_detail where event_id = $1`, [eventId]);
   },
 
@@ -6049,6 +6087,7 @@ export const eventDetails = {
     const n = (k) => { const v = t(k); return v == null ? null : Number(v); };
     const d = { typeKey: readType(form.eventType), contactName: t('contactName'), contactEmail: t('contactEmail'),
       contactPhone: t('contactPhone'), costNote: t('costNote'), infoUrl: t('infoUrl'),
+      description: (String(form.description ?? '').replace(/\r\n?/g, '\n').trim() || null),
       latitude: n('latitude'), longitude: n('longitude') };
     if ((d.latitude != null && Number.isNaN(d.latitude)) || (d.longitude != null && Number.isNaN(d.longitude)))
       return { d, problems: ['Latitude and longitude must be numbers, such as -39.93 and 175.05.'] };
@@ -6059,11 +6098,11 @@ export const eventDetails = {
   async save(eventId, d) {
     const empty = Object.values(d).every((v) => v == null);
     if (empty) { await pool.query('delete from event_detail where event_id = $1', [eventId]); return; }
-    await pool.query(`insert into event_detail (event_id, type_key, contact_name, contact_email, contact_phone, cost_note, info_url, latitude, longitude)
-      values ($1,$2,$3,$4,$5,$6,$7,$8,$9)
+    await pool.query(`insert into event_detail (event_id, type_key, contact_name, contact_email, contact_phone, cost_note, info_url, latitude, longitude, description)
+      values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
       on conflict (event_id) do update set type_key=$2, contact_name=$3, contact_email=$4, contact_phone=$5,
-        cost_note=$6, info_url=$7, latitude=$8, longitude=$9`,
-      [eventId, d.typeKey, d.contactName, d.contactEmail, d.contactPhone, d.costNote, d.infoUrl, d.latitude, d.longitude]);
+        cost_note=$6, info_url=$7, latitude=$8, longitude=$9, description=$10`,
+      [eventId, d.typeKey, d.contactName, d.contactEmail, d.contactPhone, d.costNote, d.infoUrl, d.latitude, d.longitude, d.description]);
   },
 };
 

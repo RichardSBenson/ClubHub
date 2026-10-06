@@ -244,6 +244,8 @@ table.times td:last-child{text-align:right;color:var(--muted)}
 .grid a:hover{transform:translateY(-3px);box-shadow:0 10px 24px rgba(0,0,0,.28)}
 .grid strong{display:block;font-family:var(--display);font-size:20px}
 .grid span{font-size:14px;opacity:.9}
+.trialcta{background:var(--primary);color:#fff;text-align:center;padding:36px 24px;border-radius:12px;margin:32px 0}
+.trialcta h2{color:#fff;margin:0 0 10px}.trialcta h2::after{display:none}.trialcta p{margin:0 auto 20px;max-width:46ch;opacity:.92}
 .cta{background:var(--primary);color:#fff;text-align:center;padding:48px 0}
 .cta h2{color:#fff;margin:0 0 18px}.cta h2::after{display:none}
 .stickycta{display:none}
@@ -358,9 +360,13 @@ footer.site a{color:var(--neutral)}
  * federation's page once there are three.
  */
 export function layout({ title, description, canonical, body, jsonLd = [],
-                         federation, fonts, nav = [], base = '', vocabulary = {}, logoUrl = null }) {
+                         federation, fonts, nav = [], base = '', vocabulary = {}, logoUrl = null, image = null }) {
   const at = (p) => `${base}${p}`;
   logoUrl = logoUrl ?? federation.logoUrl ?? null;
+  // The picture a chat app or Facebook shows when the page is shared. A page can offer its own;
+  // otherwise it is the federation's share picture. It has to be an absolute address.
+  let shareHref = null;
+  try { const pic = image ?? federation.shareUrl; if (pic) shareHref = new URL(pic, canonical).href; } catch { /* no picture */ }
   const clubsWord = vocabulary.clubPlural ?? vocabulary.club ?? 'Clubs';
   // Anton has one weight; asking Google for more makes the whole request fail.
   const fontHref = [...[fonts.display, fonts.body].filter(Boolean)
@@ -378,7 +384,8 @@ export function layout({ title, description, canonical, body, jsonLd = [],
 <meta property="og:description" content="${esc(description)}">
 <meta property="og:url" content="${esc(canonical)}">
 <meta property="og:type" content="website">
-<link rel="preconnect" href="https://fonts.googleapis.com">
+<meta name="twitter:card" content="${shareHref ? 'summary_large_image' : 'summary'}">
+${shareHref ? `<meta property="og:image" content="${esc(shareHref)}">\n<meta name="twitter:image" content="${esc(shareHref)}">\n` : ''}<link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?${fontHref}&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="${at('/theme.css')}">
@@ -530,6 +537,7 @@ export function dojoPage({ dojo, federation, events, origin, fonts, nav,
       (groups.length ? ` ${daysLine} at ${dojo.venue_name}.` : ''),
     canonical: `${origin}${at(`/${dojo.slug}`)}`,
     jsonLd: [dojoJsonLd(dojo, federation, origin, base)],
+    image: dojo.hero_url ?? null,
     federation, fonts, nav, base, vocabulary, logoUrl, body,
   });
 }
@@ -733,6 +741,9 @@ ${eventBanner(ev, { logoUrl, federationName: federation.name })}
   <div>
     ${ev.summary ? `<p style="font-size:20px">${esc(ev.summary)}</p>` : ''}
     ${ev.status === 'cancelled' ? '<div class="notice">This event has been cancelled.</div>' : ''}
+    ${String(ev.description ?? '').split(/\n{2,}/).map((p) => p.trim()).filter(Boolean)
+      .map((p) => `<p class="evdesc">${esc(p).replace(/\n/g, '<br>')}</p>`).join('')}
+    ${ev.status === 'cancelled' ? '' : `<p><a class="btn ghost" href="${at(`${path ?? `/events/${ev.slug}`}/event.ics`)}" download>Add to calendar</a></p>`}
     ${canEnter ? `<p><a class="btn" href="/enter/${esc(ev.from_slug ?? '')}/${esc(raw)}">Enter this event</a></p>` : ''}
     ${ev.from_org ? `<p class="muted">Run by ${esc(ev.from_org)}.</p>` : ''}
   </div>

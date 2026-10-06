@@ -334,7 +334,7 @@ export class PostgresSiteContent {
                   then e.slug || '-' || o.slug else e.slug end as slug,
              e.kind, e.summary, e.starts_at, e.ends_at,
              e.venue_name, e.address_line, e.visibility, e.entries_close,
-             d.type_key, d.contact_name, d.contact_email, d.contact_phone, d.cost_note, d.info_url,
+             d.type_key, d.contact_name, d.contact_email, d.contact_phone, d.cost_note, d.info_url, d.description,
              coalesce(d.latitude, e.latitude)::float as latitude, coalesce(d.longitude, e.longitude)::float as longitude,
              o.name as from_org, o.slug as from_slug, (o.id = target.id) as is_own
       from organisation target

@@ -40,6 +40,7 @@
  *     {{events kind=grading limit=3}}
  *     {{honours award=Kokoro}}
  *     {{video youtube=dQw4w9WgXcQ}}
+ *     {{trial club=whanganui heading=Try_a_free_class button=Book_now}}
  *
  * The round trip is the thing to get right. A document read into text and
  * written back must be the same document, or somebody opens an old page in
@@ -127,6 +128,10 @@ function blockToText(block, names) {
       return `{{contact${attrs({ heading: block.heading, intro: block.intro,
                                  kind: block.kind === 'trial' ? 'trial' : '' })}}}`;
 
+    case 'trialCta':
+      return `{{trial${attrs({ heading: block.heading, text: block.text, button: block.button,
+                               club: block.club })}}}`;
+
     default:
       // A block type nobody taught this about must survive being edited in
       // the one-box editor. Losing it silently is exactly the failure this
@@ -183,6 +188,10 @@ function liveBlock(inner) {
     case 'enquiry':
       return { type: 'contactForm', heading: a.heading ?? '', intro: a.intro ?? '',
                kind: a.kind === 'trial' ? 'trial' : 'contact' };
+
+    case 'trial':
+      return { type: 'trialCta', heading: a.heading ?? '', text: a.text ?? '',
+               button: a.button ?? '', club: a.club ?? '' };
 
     case 'video': {
       const provider = a.vimeo ? 'vimeo' : 'youtube';

@@ -39,6 +39,9 @@ export const BLOCKS = {
   faq:       { fields: { heading: 'string', items: 'faq[]' } },
   // A form that writes to the organisation's enquiries inbox.
   contactForm: { fields: { heading: 'string', intro: 'string', kind: 'enum:contact,trial' } },
+  // A big "try a free class" panel. With a club it goes to that club's enquiry form; without one
+  // it goes to the list of clubs so the visitor can choose their nearest.
+  trialCta:  { fields: { heading: 'string', text: 'string', button: 'string', club: 'string' } },
 };
 
 const MARKS = new Set(['strong', 'em', 'link']);
@@ -276,6 +279,14 @@ export function renderBlocks(doc, data = {}, { origin = '' } = {}) {
           `<div style="position:absolute;left:-9999px" aria-hidden="true"><label>Leave this empty` +
           `<input name="website" tabindex="-1" autocomplete="off"></label></div>` +
           `<button type="submit">${trial ? 'Ask about a free class' : 'Send'}</button></form>`;
+      }
+
+      case 'trialCta': {
+        const club = /^[a-z0-9]+(-[a-z0-9]+)*$/.test(b.club ?? '') ? b.club : null;
+        const href = club ? `/enquire/${club}?kind=trial` : '/find-a-dojo';
+        return `<div class="trialcta"><h2>${esc(b.heading || 'Try a free class')}</h2>`
+          + (b.text ? `<p>${esc(b.text)}</p>` : '')
+          + `<a class="btn light" href="${esc(href)}">${esc(b.button || (club ? 'Book a free class' : 'Find your nearest club'))}</a></div>`;
       }
 
       default:
