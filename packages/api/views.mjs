@@ -460,8 +460,8 @@ export const person = ({ me, csrf, person, history, affiliations, eligibility,
     <h3 style="margin-top:0">Photograph</h3>
     <p><input type="file" name="photo" accept="image/png,image/jpeg,image/webp"></p>
     <p class="hint">${esc(slotHint('portrait'))} The same photograph is used on their membership card and, if they are shown on the website, on their instructor card.</p>
-    <label style="display:flex;gap:8px;align-items:flex-start"><input type="checkbox" name="consent">
-      <span>They (or their parent or guardian) agree to this photograph being kept on their record.</span></label>
+    <label class="check"><input type="checkbox" name="consent">
+      They (or their parent or guardian) agree to this photograph being kept on their record.</label>
     <p><button class="btn" type="submit">Save photograph</button>
       ${person.photo_asset_id ? '<button class="btn quiet" type="submit" name="remove" value="1">Remove photograph</button>' : ''}</p>
   </form>` : ''}
