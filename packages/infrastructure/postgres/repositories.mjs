@@ -294,6 +294,24 @@ export class PostgresSiteContent {
       addressLine: r.address_line, whoTrains: r.who_trains }));
   }
 
+  /**
+   * The pictures each club under this federation has put in its gallery, in
+   * order. A database that has not had db/038 yet has none, and the build says nothing.
+   */
+  async galleryFor(rootSlug) {
+    try {
+      const { rows } = await this.pool.query(`
+        select g.organisation_id, g.asset_id, g.caption, g.position, a.alt_text
+        from club_gallery g
+        join asset a on a.id = g.asset_id
+        join organisation o on o.id = g.organisation_id
+        join organisation root on o.path <@ root.path
+        where root.slug = $1
+        order by g.organisation_id, g.position`, [rootSlug]);
+      return rows;
+    } catch (e) { if (e.code === '42P01') return []; throw e; }
+  }
+
   async eventsFor(orgSlug) {
     // Three ways onto a calendar: it is this organisation's own; an ancestor
     // published it downward; or a descendant asked to be on it and this
@@ -309,10 +327,13 @@ export class PostgresSiteContent {
              case when o.path <@ target.path and o.id <> target.id
                   then e.slug || '-' || o.slug else e.slug end as slug,
              e.kind, e.summary, e.starts_at, e.ends_at,
-             e.venue_name, e.visibility, e.entries_close,
+             e.venue_name, e.address_line, e.visibility, e.entries_close,
+             d.type_key, d.contact_name, d.contact_email, d.contact_phone, d.cost_note, d.info_url,
+             coalesce(d.latitude, e.latitude)::float as latitude, coalesce(d.longitude, e.longitude)::float as longitude,
              o.name as from_org, o.slug as from_slug, (o.id = target.id) as is_own
       from organisation target
       join event e on true
+      left join event_detail d on d.event_id = e.id
       join organisation o on o.id = e.organisation_id
       where target.slug = $1 and e.status='published' and e.visibility='public'
         and (

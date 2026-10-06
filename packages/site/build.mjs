@@ -356,6 +356,9 @@ for (const target of SITES) {
   const dojos = everyClub.filter((d) => d.published === true);
   const unlisted = everyClub.length - dojos.length;
 
+  const galleryRows = new Map();
+  for (const g of (site.galleryFor ? await site.galleryFor(target.slug) : []))
+    galleryRows.set(g.organisation_id, [...(galleryRows.get(g.organisation_id) ?? []), g]);
   const evs = await site.eventsFor(target.slug);
   const articles = await site.articles(federation.id);
   const authored = await site.pages(federation.id);
@@ -381,7 +384,9 @@ for (const target of SITES) {
     vocabulary,
   });
 
-  const shared = { federation, fonts, nav, base, vocabulary, origin: ORIGIN };
+  // The crest: one image the federation chose, used in the header and on every event banner.
+  const logoUrl = assets[federation.settings?.logoAssetId] ?? null;
+  const shared = { federation: { ...federation, logoUrl }, fonts, nav, base, vocabulary, origin: ORIGIN };
 
   await write('theme.css', R.themeCss(tokens, fonts));
 
@@ -401,8 +406,13 @@ for (const target of SITES) {
 
   for (const dojo of dojos) {
     const dojoEvents = await site.eventsFor(dojo.slug);
+    // A dojo's own events get their page under the dojo, so a local event needs nobody's
+    // permission to be on the website. Ones that reached the federation's calendar are there too.
+    for (const ev of dojoEvents.filter((e) => e.is_own))
+      await write(`${dojo.slug}/events/${ev.slug}/index.html`,
+        R.eventPage({ ev, ...shared, path: `/${dojo.slug}/events/${ev.slug}` }));
     await write(`${dojo.slug}/index.html`,
-      R.dojoPage({ dojo, events: dojoEvents, ...shared,
+      R.dojoPage({ dojo, events: dojoEvents, ...shared, gallery: (galleryRows.get(dojo.id) ?? []).map((g) => ({ url: assets[g.asset_id], alt: g.alt_text, caption: g.caption })).filter((g) => g.url),
         sections: dojoSections, startAnyWeekText: dojoCopy.startAnyWeekText ?? null,
         showFirstClassFree: dojoCopy.showFirstClassFree !== false }));
   }

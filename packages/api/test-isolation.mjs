@@ -196,6 +196,9 @@ const theirPayment = await one(`
 await pool.query(`insert into payment_line (payment_id, kind, description, amount_cents)
   values ($1,'uniform','Private uniform order',5000)`, [theirPayment.id]);
 
+const theirGallery = (await pool.query(`insert into club_gallery (organisation_id, asset_id, caption, position)
+  values ($1,$2,'Their photo',0) returning id`, [theirs.id, theirAsset.id])).rows[0];
+
 const theirTerm = (await pool.query(`insert into school_term (organisation_id, year, number, name, starts, ends)
   values ($1, 2030, 1, 'Their Term', '2030-02-01', '2030-04-01') returning id`, [theirs.id])).rows[0];
 
@@ -229,6 +232,7 @@ function pathFor(pattern) {
     sessionId: theirSession.id,
     feeId: theirFee.id,
     termId: theirTerm.id,
+    galleryId: theirGallery.id,
     recordId: theirRecord.id,
     awardId: theirAward.id,
     entryId: '00000000-0000-0000-0000-000000000000',

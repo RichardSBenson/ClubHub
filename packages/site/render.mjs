@@ -13,6 +13,7 @@
  * way to turn a date into 'YYYY-MM-DD' is what put a wrong founding date — in
  * fact no founding date — into the structured data on every page.
  */
+import { bannerLines, typeFor, mapLinks } from '../core/domain/event-types.mjs';
 import { CalendarDay } from '../core/domain/values.mjs';
 
 const esc = (s = '') => String(s)
@@ -31,6 +32,36 @@ const time = (t) => {
 
 const date = (d, tz = 'Pacific/Auckland') => new Date(d).toLocaleDateString('en-NZ',
   { weekday:'long', day:'numeric', month:'long', timeZone: tz });
+
+const clock = (d, tz = 'Pacific/Auckland') => new Date(d).toLocaleTimeString('en-NZ',
+  { hour: 'numeric', minute: '2-digit', hour12: true, timeZone: tz }).replace(/\s/g, '').toLowerCase();
+
+/** "3 October", or "3–5 October" across days, or "30 Oct – 2 Nov" across months. */
+function shortRange(starts, ends, tz = 'Pacific/Auckland') {
+  const f = (d, o) => new Date(d).toLocaleDateString('en-NZ', { timeZone: tz, ...o });
+  const a = new Date(starts);
+  if (!ends || f(starts, { dateStyle: 'short' }) === f(ends, { dateStyle: 'short' })) return `${f(a, { day: 'numeric' })} ${f(a, { month: 'long' })}`;
+  if (f(starts, { month: 'long' }) === f(ends, { month: 'long' }))
+    return `${f(starts, { day: 'numeric' })}–${f(ends, { day: 'numeric' })} ${f(starts, { month: 'long' })}`;
+  return `${f(starts, { day: 'numeric', month: 'short' })} – ${f(ends, { day: 'numeric', month: 'short' })}`;
+}
+
+/**
+ * The announcement for an event, made of text: the federation's crest and up to
+ * three lines. Nothing here is a picture of words, so a changed date is a
+ * changed line, and it stays sharp, searchable and readable by a screen reader.
+ */
+function eventBanner(ev, { logoUrl = null, federationName = '', small = false } = {}) {
+  const { top, main } = bannerLines(ev);
+  return `<div class="evbanner${small ? ' small' : ''}">
+  ${logoUrl ? `<img class="crest" src="${esc(logoUrl)}" alt="${esc(federationName)} crest">` : ''}
+  <div class="evtext">
+    ${top ? `<span class="evtop">${esc(top)}</span>` : ''}
+    <span class="evmain">${esc(main)}</span>
+    <span class="evwhen">${esc(shortRange(ev.starts_at, ev.ends_at))}</span>
+  </div>
+</div>`;
+}
 
 /** Group sessions so 'Tuesday & Thursday, 5.30-6.30pm' appears once, not twice. */
 function groupSessions(sessions) {
@@ -147,7 +178,7 @@ img{max-width:100%;display:block}
 header.site{background:var(--ink);color:var(--canvas)}
 header.site .wrap{display:flex;align-items:center;gap:16px;padding-top:14px;padding-bottom:14px}
 header.site a{color:var(--canvas);text-decoration:none}
-.brandmark{font-family:var(--display);font-weight:700;font-size:19px;line-height:1.2}
+.brandmark{display:flex;align-items:center;gap:10px;font-family:var(--display);font-weight:700;font-size:19px;line-height:1.2}
 .brandmark span{display:block;font-family:var(--body);font-size:11.5px;
   color:var(--neutral);letter-spacing:.09em;font-weight:400}
 nav.main{margin-left:auto;display:flex;gap:20px;font-size:15px;font-weight:500}
@@ -217,6 +248,40 @@ table.times td:last-child{text-align:right;color:var(--muted)}
 .cta h2{color:#fff;margin:0 0 18px}.cta h2::after{display:none}
 .stickycta{display:none}
 
+.sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+.evbanner{background:#000;display:flex;align-items:center;justify-content:center;gap:clamp(20px,5vw,72px);
+  padding:clamp(28px,6vw,64px) clamp(16px,4vw,48px);color:var(--neutral);
+  font-family:"Anton","Oswald",Impact,"Arial Narrow",sans-serif;text-transform:none}
+.evbanner .crest{height:clamp(140px,26vw,300px);width:auto;max-width:44%;object-fit:contain}
+.evtext{display:flex;flex-direction:column;line-height:1.02;letter-spacing:.01em}
+.evtop{font-size:clamp(28px,5.4vw,68px);color:var(--neutral)}
+.evmain{font-size:clamp(34px,7vw,92px);color:var(--accent);text-transform:uppercase}
+.evwhen{font-size:clamp(26px,5vw,64px);color:var(--neutral)}
+.evbanner.small{justify-content:flex-start;padding:16px 20px;gap:16px}
+.evbanner.small .crest{height:72px;max-width:30%}
+.evbanner.small .evtop{font-size:20px}.evbanner.small .evmain{font-size:26px}.evbanner.small .evwhen{font-size:18px}
+a.evcard{display:block;text-decoration:none;border-bottom:4px solid var(--primary);border-radius:2px;overflow:hidden;
+  transition:transform .15s ease,box-shadow .15s ease}
+a.evcard:hover{transform:translateY(-2px);box-shadow:0 10px 24px rgba(0,0,0,.25)}
+.evcards{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:18px}
+.evgrid{display:grid;grid-template-columns:minmax(0,1.6fr) minmax(0,1fr);gap:40px;align-items:start}
+.evside{background:var(--canvas-alt);padding:22px 24px;border-top:4px solid var(--primary)}
+.evside h2{font-size:22px}.evside h2::after{display:none}
+.evside dt{font-family:var(--display);font-weight:700;font-size:13px;letter-spacing:.06em;text-transform:uppercase;
+  color:var(--muted);margin-top:16px}
+.evside dd{margin:2px 0 0}
+.evmap{margin-top:20px}.evmap iframe{width:100%;height:260px;border:0;display:block;background:#ddd}
+.evmap .links{display:flex;gap:14px;flex-wrap:wrap;margin-top:8px;font-size:15px}
+.gallery{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;margin:0;padding:0;list-style:none}
+.gallery li{margin:0}
+.gallery img{width:100%;aspect-ratio:3/2;object-fit:cover;border-radius:2px}
+.gallery figcaption{font-size:14px;color:var(--muted);margin-top:4px}
+.gallery figure{margin:0}
+.crestmark{height:40px;width:auto;flex:none}
+@media (max-width:860px){.evgrid{grid-template-columns:1fr}.evcards{grid-template-columns:1fr}.gallery{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media (max-width:600px){.evbanner{flex-direction:column;text-align:center}.evbanner .crest{max-width:70%}
+  .evbanner.small{flex-direction:row;text-align:left}.evbanner.small .crest{max-width:30%}}
+
 ul.events{list-style:none;padding:0;margin:0}
 ul.events li{display:grid;grid-template-columns:96px 1fr;gap:20px;padding:18px 0;
   border-bottom:1px solid var(--neutral)}
@@ -279,11 +344,13 @@ footer.site a{color:var(--neutral)}
  * federation's page once there are three.
  */
 export function layout({ title, description, canonical, body, jsonLd = [],
-                         federation, fonts, nav = [], base = '', vocabulary = {} }) {
+                         federation, fonts, nav = [], base = '', vocabulary = {}, logoUrl = null }) {
   const at = (p) => `${base}${p}`;
+  logoUrl = logoUrl ?? federation.logoUrl ?? null;
   const clubsWord = vocabulary.clubPlural ?? vocabulary.club ?? 'Clubs';
-  const fontHref = [fonts.display, fonts.body].filter(Boolean)
-    .map((f) => `family=${f.replace(/ /g, '+')}:wght@400;500;700`).join('&');
+  // Anton has one weight; asking Google for more makes the whole request fail.
+  const fontHref = [...[fonts.display, fonts.body].filter(Boolean)
+    .map((f) => `family=${f.replace(/ /g, '+')}:wght@400;500;700`), 'family=Anton'].join('&');
 
   return `<!DOCTYPE html>
 <html lang="en-NZ">
@@ -305,7 +372,7 @@ ${jsonLd.map((l) => `<script type="application/ld+json">${JSON.stringify(l)}</sc
 </head>
 <body>
 <header class="site"><div class="wrap">
-  <a class="brandmark" href="${at('/')}">${esc(federation.name)}<span>${esc(federation.country_code ?? '')}</span></a>
+  <a class="brandmark" href="${at('/')}">${logoUrl ? `<img class="crestmark" src="${esc(logoUrl)}" alt="">` : ''}<div>${esc(federation.name)}<span>${esc(federation.country_code ?? '')}</span></div></a>
   <input type="checkbox" class="navtoggle" id="navtoggle" aria-label="Open the menu">
   <label class="navbtn" for="navtoggle" aria-hidden="true"><i></i><i></i><i></i></label>
   <label class="navscrim" for="navtoggle" aria-hidden="true"></label>
@@ -323,7 +390,7 @@ ${body}
 // pages
 // ---------------------------------------------------------------------------
 
-export const DOJO_DEFAULT = ['hero', 'facts', 'startAnyWeek', 'times', 'about', 'events', 'findUs'];
+export const DOJO_DEFAULT = ['hero', 'facts', 'startAnyWeek', 'times', 'about', 'gallery', 'events', 'findUs'];
 export const HOME_DEFAULT = ['hero', 'dojoGrid', 'events', 'news'];
 
 /**
@@ -351,9 +418,10 @@ function arrange(order, parts, bands) {
 }
 
 export function dojoPage({ dojo, federation, events, origin, fonts, nav,
-                           base = '', vocabulary = {},
+                           base = '', vocabulary = {}, logoUrl = null, gallery = [],
                            sections = DOJO_DEFAULT, startAnyWeekText = null,
                            showFirstClassFree = true }) {
+  logoUrl = logoUrl ?? federation.logoUrl ?? null;
   const at = (p) => `${base}${p}`;
   const groups = groupSessions(dojo.sessions ?? []);
   const town = dojo.name;
@@ -407,15 +475,13 @@ export function dojoPage({ dojo, federation, events, origin, fonts, nav,
     <p>${esc(dojo.blurb)}</p>
     ${dojo.who_trains ? `<p>${esc(dojo.who_trains)}</p>` : ''}` : '',
 
+    gallery: () => gallery.length ? `<h2 style="margin-top:40px">In the dojo</h2>
+  <ul class="gallery">${gallery.map((g) => `<li><figure><img src="${esc(g.url)}" alt="${esc(g.alt ?? '')}" loading="lazy">${
+    g.caption ? `<figcaption>${esc(g.caption)}</figcaption>` : ''}</figure></li>`).join('')}</ul>` : '',
+
     events: () => events.length ? `<h2 style="margin-top:40px">What's on</h2>
-  <ul class="events">${events.map((e) => {
-    const d = new Date(e.starts_at);
-    return `<li>
-      <div class="d"><b>${d.getDate()}</b><span>${d.toLocaleDateString('en-NZ',{month:'short'})}</span></div>
-      <div>${e.is_own ? '' : `<span class="tag">${esc(e.from_org)}</span>`}
-        <h3><a href="${at(`/events/${esc(e.slug)}`)}">${esc(e.title)}</a></h3>
-        <p>${esc(e.venue_name ?? '')}</p></div></li>`;
-  }).join('')}</ul>` : '',
+  <div class="evcards" style="grid-template-columns:1fr">${events.map((e) => `<a class="evcard" href="${at(e.is_own ? `/${esc(dojo.slug)}/events/${esc(e.slug)}` : `/events/${esc(e.slug)}`)}">
+    ${eventBanner(e, { logoUrl, federationName: federation.name, small: true })}</a>`).join('')}</div>` : '',
 
     findUs: () => `<h2 id="visit" style="margin-top:40px">Finding us</h2>
   <p>${esc(dojo.venue_name ?? '')}<br>${esc([dojo.address_line, dojo.suburb, dojo.city].filter(Boolean).join(', '))}
@@ -428,6 +494,8 @@ export function dojoPage({ dojo, federation, events, origin, fonts, nav,
   const order = [...sections];
   if (!order.includes('facts')) order.splice(Math.min(1, order.length), 0, 'facts');
   if (!order.includes('findUs')) order.push('findUs');
+  // A gallery appears once a dojo has pictures, whatever layout the federation saved before galleries existed.
+  if (gallery.length && !order.includes('gallery')) order.splice(Math.max(0, order.indexOf('events')) || order.length - 1, 0, 'gallery');
 
   const trial = free ? `/enquire/${esc(dojo.slug)}?kind=trial` : '#visit';
   const body = arrange(order, parts, new Set(['hero', 'facts']))
@@ -442,7 +510,7 @@ export function dojoPage({ dojo, federation, events, origin, fonts, nav,
       (groups.length ? ` ${daysLine} at ${dojo.venue_name}.` : ''),
     canonical: `${origin}${at(`/${dojo.slug}`)}`,
     jsonLd: [dojoJsonLd(dojo, federation, origin, base)],
-    federation, fonts, nav, base, vocabulary, body,
+    federation, fonts, nav, base, vocabulary, logoUrl, body,
   });
 }
 
@@ -601,26 +669,53 @@ export function findADojoPage({ dojos, federation, origin, fonts, nav,
 }
 
 export function eventPage({ ev, federation, origin, fonts, nav,
-                            base = '', vocabulary = {} }) {
+                            base = '', vocabulary = {}, logoUrl = null, path = null }) {
+  logoUrl = logoUrl ?? federation.logoUrl ?? null;
   const at = (p) => `${base}${p}`;
+  const map = mapLinks({ latitude: ev.latitude, longitude: ev.longitude, venue: ev.venue_name, address: ev.address_line });
+  const raw = !ev.is_own && ev.from_slug && ev.slug.endsWith(`-${ev.from_slug}`)
+    ? ev.slug.slice(0, -(ev.from_slug.length + 1)) : ev.slug;
+  const canEnter = ev.entries_close && new Date(ev.entries_close) > new Date();
+  const when = ev.all_day
+    ? date(ev.starts_at)
+    : `${date(ev.starts_at)}, ${clock(ev.starts_at)}${ev.ends_at ? ` – ${clock(ev.ends_at)}` : ''}`;
+  const detail = [
+    ['When', esc(when)],
+    ev.venue_name || ev.address_line ? ['Where', `${ev.venue_name ? `<strong>${esc(ev.venue_name)}</strong><br>` : ''}${esc(ev.address_line ?? '')}`] : null,
+    ev.cost_note ? ['Cost', esc(ev.cost_note)] : null,
+    ev.entries_close ? ['Entries close', esc(date(ev.entries_close))] : null,
+    ev.contact_name || ev.contact_phone || ev.contact_email ? ['Contact',
+      [ev.contact_name ? esc(ev.contact_name) : '',
+       ev.contact_phone ? `<a href="tel:${esc(String(ev.contact_phone).replace(/[^+\d]/g, ''))}">${esc(ev.contact_phone)}</a>` : '',
+       ev.contact_email ? `<a href="mailto:${esc(ev.contact_email)}">${esc(ev.contact_email)}</a>` : ''].filter(Boolean).join('<br>')] : null,
+    ev.info_url ? ['More information', `<a href="${esc(ev.info_url)}" rel="noopener">${esc(ev.info_url.replace(/^https:\/\//, ''))}</a>`] : null,
+  ].filter(Boolean);
+
   const body = `
-<div class="hero small"><div class="wrap">
-  <span class="tag">${esc(ev.kind.replace('_',' ').toUpperCase())}</span>
-  <h1>${esc(ev.title)}</h1>
-  <p>${esc(date(ev.starts_at))}${ev.venue_name ? ' · ' + esc(ev.venue_name) : ''}</p>
-</div></div>
-<section><div class="wrap narrow">
-  ${ev.summary ? `<p style="font-size:19px">${esc(ev.summary)}</p>` : ''}
-  ${ev.entries_close ? `<div class="notice">Entries close ${esc(date(ev.entries_close))}.</div>` : ''}
-  <p><a class="btn" href="#">Enter</a></p>
+<h1 class="sr">${esc(ev.title)}</h1>
+${eventBanner(ev, { logoUrl, federationName: federation.name })}
+<section><div class="wrap evgrid">
+  <div>
+    ${ev.summary ? `<p style="font-size:20px">${esc(ev.summary)}</p>` : ''}
+    ${ev.status === 'cancelled' ? '<div class="notice">This event has been cancelled.</div>' : ''}
+    ${canEnter ? `<p><a class="btn" href="/enter/${esc(ev.from_slug ?? '')}/${esc(raw)}">Enter this event</a></p>` : ''}
+    ${ev.from_org ? `<p class="muted">Run by ${esc(ev.from_org)}.</p>` : ''}
+  </div>
+  <aside class="evside" aria-label="Event details">
+    <h2>Details</h2>
+    <dl style="margin:0">${detail.map(([k, v]) => `<dt>${k}</dt><dd>${v}</dd>`).join('')}</dl>
+    ${map ? `<div class="evmap">${map.embed
+      ? `<iframe src="${esc(map.embed)}" title="Map of ${esc(ev.venue_name ?? 'the venue')}" loading="lazy" referrerpolicy="no-referrer"></iframe>` : ''}
+      <div class="links"><a href="${esc(map.google)}" rel="noopener">Open in Google Maps</a><a href="${esc(map.osm)}" rel="noopener">OpenStreetMap</a></div></div>` : ''}
+  </aside>
 </div></section>`;
 
   return layout({
     title: `${ev.title} — ${federation.name}`,
     description: ev.summary ?? `${ev.title}, ${date(ev.starts_at)}.`,
-    canonical: `${origin}${at(`/events/${ev.slug}`)}`,
+    canonical: `${origin}${at(path ?? `/events/${ev.slug}`)}`,
     jsonLd: [eventJsonLd(ev, federation, origin, base)],
-    federation, fonts, nav, base, vocabulary, body,
+    federation, fonts, nav, base, vocabulary, logoUrl, body,
   });
 }
 
@@ -634,7 +729,8 @@ export function eventPage({ ev, federation, origin, fonts, nav,
  * a menu with one fewer item.
  */
 export function eventsPage({ events, federation, origin, fonts, nav,
-                             base = '', vocabulary = {} }) {
+                             base = '', vocabulary = {}, logoUrl = null }) {
+  logoUrl = logoUrl ?? federation.logoUrl ?? null;
   const at = (p) => `${base}${p}`;
   const body = `
 <div class="hero small"><div class="wrap">
@@ -643,13 +739,10 @@ export function eventsPage({ events, federation, origin, fonts, nav,
     ? `${events.length} coming up.`
     : 'Nothing on the calendar at the moment.'}</p>
 </div></div>
-<section><div class="wrap narrow">
-  ${events.length ? `<ul class="list">${events.map((e) => `<li>
-    <h3><a href="${at(`/events/${esc(e.slug)}`)}">${esc(e.title)}</a></h3>
-    <p class="muted">${esc(date(e.starts_at))}${
-      e.venue_name ? ' · ' + esc(e.venue_name) : ''}</p>
-    ${e.summary ? `<p>${esc(e.summary)}</p>` : ''}
-  </li>`).join('')}</ul>`
+<section><div class="wrap">
+  ${events.length ? `<div class="evcards">${events.map((e) => `<a class="evcard" href="${at(`/events/${esc(e.slug)}`)}">
+    ${eventBanner(e, { logoUrl, federationName: federation.name, small: true })}
+  </a>`).join('')}</div>`
   : '<p>Check back closer to the season.</p>'}
 </div></section>`;
 
@@ -657,7 +750,7 @@ export function eventsPage({ events, federation, origin, fonts, nav,
     title: `Events — ${federation.name}`,
     description: `Gradings, tournaments, camps and seminars run by ${federation.name}.`,
     canonical: `${origin}${at('/events')}`,
-    federation, fonts, nav, base, vocabulary, body,
+    federation, fonts, nav, base, vocabulary, logoUrl, body,
   });
 }
 

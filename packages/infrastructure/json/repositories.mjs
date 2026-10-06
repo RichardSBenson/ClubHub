@@ -315,6 +315,9 @@ export class JsonSiteContent {
 
   async dojos(rootSlug) { return this.orgs.publicDojos(rootSlug); }
 
+  /** The files store has no galleries; a federation that wants them runs a database. */
+  async galleryFor() { return []; }
+
   async eventsFor(orgSlug) {
     const orgs = this.data.read('organisations');
     const target = orgs.find((o) => o.slug === orgSlug);
@@ -332,7 +335,8 @@ export class JsonSiteContent {
       .map((e) => {
         const from = orgs.find((o) => o.id === e.organisationId);
         return { ...e, starts_at: e.startsAt, ends_at: e.endsAt,
-                 venue_name: e.venueName, entries_close: e.entriesClose,
+                 venue_name: e.venueName, address_line: e.addressLine, entries_close: e.entriesClose,
+                 ...(e.detail ?? {}),
                  from_org: from.name, from_slug: from.slug,
                  is_own: from.id === target.id,
                  slug: from.id !== target.id && descendsFrom(from, target, orgs)

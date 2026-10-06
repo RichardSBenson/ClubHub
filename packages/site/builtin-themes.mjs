@@ -12,7 +12,7 @@
  */
 
 const HOME = ['hero', 'dojoGrid', 'events', 'news'];
-const DOJO = ['hero', 'facts', 'startAnyWeek', 'times', 'about', 'events', 'findUs'];
+const DOJO = ['hero', 'facts', 'startAnyWeek', 'times', 'about', 'gallery', 'events', 'findUs'];
 
 export const BUILT_IN = Object.freeze({
   // The look MOKNZ launched with, as a theme: the crest's red and gold on

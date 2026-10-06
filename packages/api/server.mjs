@@ -32,7 +32,7 @@
 
 import crypto from 'node:crypto';
 import { URL } from 'node:url';
-import { pool, orgs, people, rank, events, competition, pages, assets, news,
+import { eventDetails, gallery, MAX_GALLERY, pool, orgs, people, rank, events, competition, pages, assets, news,
          instructors, navigation, audit, cards, checkin, search, clubPages, appearance, clubs, clubProfile, family, myself, memberEvents, messages, emailPreferences, payments, fees, renewals, reminders, attendance, newcomers, reports, gradings, qualifications, portal, enquiries, scheduledPublishing, TooMany, outsiders, trials, referrals, growth, clubMailer, terms,
          Forbidden, NotFound, Invalid } from './data.mjs';
 import * as auth from './auth.mjs';
@@ -70,6 +70,7 @@ import { destinations, menuFor, MAX_ITEMS } from '../content/navigation.mjs';
 import { ACTIONS as AUDIT_ACTIONS } from '../content/audit.mjs';
 import { documentFromText, textFromDocument }
   from '../content/document-text.mjs';
+import { typeFor, readType, defaultTitle } from '../core/domain/event-types.mjs';
 import { fitFor } from '../content/image-slots.mjs';
 import { identify, NotAnImage, ACCEPTED, MAX_BYTES }
   from '../content/images.mjs';
@@ -2272,6 +2273,37 @@ post('/o/:slug/appearance', async (ctx) => {
     + '&rebuild=' + encodeURIComponent(rebuild.detail));
 });
 
+/**
+ * The crest. One picture, set by the federation, used in the site header and on every
+ * event banner. It comes from the federation's own image library, or is added here.
+ */
+post('/o/:slug/appearance/logo', async (ctx) => {
+  const org = await organisationFor(ctx, { toWrite: true });
+  if (org.type === 'club') throw new Forbidden('A club uses its federation\'s crest.');
+  const { fields, files } = await ctx.upload({ maxBytes: MAX_BYTES + 256 * 1024 });
+  const back = `/o/${org.slug}/appearance`;
+  try {
+    if (!await mayManageAt(ctx, org.id)) throw new Forbidden('Only an owner or administrator can set the crest.');
+    let assetId = UUID_RE.test(fields.assetId ?? '') ? fields.assetId : null;
+    const file = files.find((f) => f.field === 'logoFile' && f.bytes.length);
+    if (file) {
+      const created = await assets.create(ctx.me.accountId, org.id, {
+        bytes: file.bytes, identified: identify(file.bytes, { filename: file.filename }),
+        filename: file.filename, altText: `${org.name} crest` });
+      assetId = created.id;
+    }
+    if (fields.remove) assetId = null;
+    else if (!assetId) return ctx.redirect(`${back}?error=${encodeURIComponent('Choose a picture or add one.')}`);
+    await appearance.setLogo(ctx.me.accountId, org.id, assetId);
+    const rebuild = await requestRebuild({ reason: `crest ${org.slug}` });
+    return ctx.redirect(`${back}?done=${encodeURIComponent(assetId ? 'Crest set.' : 'Crest removed.')}&rebuild=${encodeURIComponent(rebuild.detail)}`);
+  } catch (e) {
+    if (e instanceof NotAnImage || e instanceof BadUpload || e instanceof Invalid)
+      return ctx.redirect(`${back}?error=${encodeURIComponent(e.message)}`);
+    throw e;
+  }
+});
+
 post('/o/:slug/appearance/reset', async (ctx) => {
   const org = await organisationFor(ctx, { toWrite: true });
   if (org.type === 'club') throw new Forbidden('A club uses its federation\'s look.');
@@ -2425,6 +2457,7 @@ get('/o/:slug/club-page/preview', async (ctx) => {
     dojo, federation, events: await site.eventsFor(club.slug), origin,
     fonts: brand?.fonts ?? { display: 'Bitter', body: 'Source Sans 3' },
     nav: [], base: '', vocabulary,
+    gallery: (await gallery.list(ctx.me.accountId, club.id)).map((g) => ({ url: `/a/${g.asset_id}`, alt: g.alt_text, caption: g.caption })),
   });
 
   ctx.res.writeHead(200, {
@@ -2737,6 +2770,59 @@ async function articlePost(ctx, { org, article = null }) {
 }
 
 // ---- media ------------------------------------------------------------------
+
+/** A dojo's photo gallery. Pictures come from its own library, or are added here. */
+async function galleryScreen(ctx, org, extra = {}) {
+  if (org.type !== 'club') return ctx.redirect(`/o/${org.slug}/club-pages`);
+  const q = ctx.url.searchParams;
+  return ctx.send(extra.status ?? 200, V.galleryScreen({
+    me: ctx.me, org, csrf: ctx.csrf, max: MAX_GALLERY,
+    items: await gallery.list(ctx.me.accountId, org.id),
+    library: await assets.list(ctx.me.accountId, org.id),
+    done: q.get('done'), error: q.get('error'), rebuild: q.get('rebuild'), ...extra,
+  }));
+}
+
+get('/o/:slug/gallery', async (ctx) => galleryScreen(ctx, await organisationFor(ctx, { toWrite: true })));
+
+post('/o/:slug/gallery', async (ctx) => {
+  const org = await organisationFor(ctx, { toWrite: true });
+  const { fields, files } = await ctx.upload({ maxBytes: MAX_BYTES + 256 * 1024 });
+  const back = `/o/${org.slug}/gallery`;
+  try {
+    let assetId = UUID_RE.test(fields.assetId ?? '') ? fields.assetId : null;
+    let warning = '';
+    const file = files.find((f) => f.field === 'file' && f.bytes.length);
+    if (file) {
+      const identified = identify(file.bytes, { filename: file.filename });
+      const created = await assets.create(ctx.me.accountId, org.id, {
+        bytes: file.bytes, identified, filename: file.filename, altText: fields.alt_text || fields.caption || null });
+      assetId = created.id;
+      warning = fitFor('gallery', identified)[0] ?? '';
+    }
+    if (!assetId) return ctx.redirect(`${back}?error=${encodeURIComponent('Choose a picture or add one.')}`);
+    await gallery.add(ctx.me.accountId, org.id, assetId, fields.caption);
+    const rebuild = await requestRebuild({ reason: `gallery ${org.slug}` });
+    return ctx.redirect(`${back}?done=${encodeURIComponent('Added.' + (warning ? ' ' + warning : ''))}&rebuild=${encodeURIComponent(rebuild.detail)}`);
+  } catch (e) {
+    if (e instanceof NotAnImage || e instanceof BadUpload || e instanceof Invalid)
+      return ctx.redirect(`${back}?error=${encodeURIComponent(e.message)}`);
+    throw e;
+  }
+});
+
+for (const action of ['remove', 'move', 'caption']) {
+  post(`/o/:slug/gallery/:galleryId/${action}`, async (ctx) => {
+    const org = await organisationFor(ctx, { toWrite: true });
+    const form = await ctx.form();
+    if (!UUID_RE.test(ctx.params.galleryId)) throw new NotFound('Picture');
+    if (action === 'remove') await gallery.remove(ctx.me.accountId, org.id, ctx.params.galleryId);
+    if (action === 'move') await gallery.move(ctx.me.accountId, org.id, ctx.params.galleryId, form.direction === 'up' ? -1 : 1);
+    if (action === 'caption') await gallery.caption(ctx.me.accountId, org.id, ctx.params.galleryId, form.caption);
+    const rebuild = await requestRebuild({ reason: `gallery ${org.slug}` });
+    return ctx.redirect(`/o/${org.slug}/gallery?done=${encodeURIComponent('Saved.')}&rebuild=${encodeURIComponent(rebuild.detail)}`);
+  });
+}
 
 get('/o/:slug/media', async (ctx) => {
   const org = await organisationFor(ctx, { toWrite: true });
@@ -3481,9 +3567,10 @@ async function gradesFor(org) {
 function eventFieldsFrom(form, zone) {
   const text = (k) => (form[k]?.trim() ? form[k].trim() : null);
   const number = (k) => (form[k]?.trim() ? form[k].trim() : null);
+  const type = typeFor(readType(form.eventType));
   return {
-    title: form.title ?? '',
-    kind: form.kind,
+    title: form.title?.trim() || (type ? defaultTitle(type.key) : ''),
+    kind: type ? type.kind : form.kind,
     slug: text('slug'),
     summary: text('summary'),
     startsAt: toInstant(text('startsAt'), zone),
@@ -3506,6 +3593,10 @@ function eventFieldsFrom(form, zone) {
     guestsAllowed: !!form.guestsAllowed,
   };
 }
+
+const detailAsForm = (d) => d ? { eventType: d.type_key ?? '', contactName: d.contact_name ?? '', contactEmail: d.contact_email ?? '',
+  contactPhone: d.contact_phone ?? '', costNote: d.cost_note ?? '', infoUrl: d.info_url ?? '',
+  latitude: d.latitude ?? '', longitude: d.longitude ?? '' } : {};
 
 /** An Event back into what the form wants: local wall-clock strings. */
 const eventAsForm = (e, zone) => ({
@@ -3566,11 +3657,14 @@ post('/o/:slug/events/new', async (ctx) => {
   const { schedule } = await calendar();
 
   try {
+    const detail = eventDetails.read(form);
+    if (detail.problems.length) throw Object.assign(new Error(detail.problems.join(' ')), { status: 422 });
     const saved = await schedule.execute({
       actorId: ctx.me.accountId, organisationId: org.id,
       ...eventFieldsFrom(form, org.timezone),
       status: form.status === 'published' ? 'published' : 'draft',
     });
+    await eventDetails.save(saved.id, detail.d);
     const rebuild = await requestRebuild({ reason: `event ${org.slug}` });
     return ctx.redirect(`/o/${org.slug}/events?done=`
       + encodeURIComponent(`"${saved.title}" saved.`)
@@ -3595,7 +3689,7 @@ get('/o/:slug/events/:eventSlug/edit', async (ctx) => {
   return ctx.send(200, V.eventForm({
     me: ctx.me, org, csrf: ctx.csrf, isNew: false, status: event.status,
     zone: org.timezone, grades: await gradesFor(org),
-    values: eventAsForm(event, org.timezone),
+    values: { ...eventAsForm(event, org.timezone), ...detailAsForm(await eventDetails.forEvent(event.id)) },
   }));
 });
 
@@ -3608,11 +3702,14 @@ post('/o/:slug/events/:eventSlug/edit', async (ctx) => {
   if (!existing) throw new NotFound('Event');
 
   try {
+    const detail = eventDetails.read(form);
+    if (detail.problems.length) throw Object.assign(new Error(detail.problems.join(' ')), { status: 422 });
     const saved = await revise.execute({
       actorId: ctx.me.accountId, eventId: existing.id,
       ...eventFieldsFrom(form, org.timezone),
       status: form.status,
     });
+    await eventDetails.save(existing.id, detail.d);
     const rebuild = await requestRebuild({ reason: `event ${org.slug}` });
     return ctx.redirect(`/o/${org.slug}/events?done=`
       + encodeURIComponent(`"${saved.title}" updated.`)

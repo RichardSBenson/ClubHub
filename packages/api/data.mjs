@@ -2537,6 +2537,25 @@ export const appearance = {
     return read;
   },
 
+  /** The crest: the picture used in the site header and on every event banner. null removes it. */
+  async setLogo(actor, orgId, assetId) {
+    await assertRole(actor, orgId, MANAGE);
+    if (assetId) {
+      const a = await one('select organisation_id from asset where id = $1', [assetId]);
+      if (!a || a.organisation_id !== orgId) throw new Invalid('Choose one of this organisation\'s own pictures.');
+    }
+    await one(`update organisation set settings = case when $2::text is null then settings - 'logoAssetId'
+        else jsonb_set(settings, '{logoAssetId}', to_jsonb($2::text), true) end, updated_at = now()
+      where id = $1 returning id`, [orgId, assetId]);
+    await pool.query(`insert into audit_log (account_id, organisation_id, action, entity, entity_id, after)
+      values ($1,$2,'crest_set','organisation',$2,$3)`, [actor, orgId, JSON.stringify({ assetId })]);
+  },
+
+  async logo(actor, orgId) {
+    await assertRole(actor, orgId, WRITE_PAGES);
+    return (await one('select settings from organisation where id=$1', [orgId]))?.settings?.logoAssetId ?? null;
+  },
+
   /** Back to the deployment's own look (settings file, then defaults). */
   async reset(actor, orgId) {
     await assertRole(actor, orgId, MANAGE);
@@ -5992,5 +6011,92 @@ export const terms = {
       }
     }
     return report;
+  },
+};
+
+// ---------------------------------------------------------------------------
+// How an event is announced: its type, contacts, cost and map pin
+// ---------------------------------------------------------------------------
+
+import { readType, problemsWithDetail } from '../core/domain/event-types.mjs';
+
+export const eventDetails = {
+  async forEvent(eventId) {
+    return one(`select type_key, contact_name, contact_email, contact_phone, cost_note, info_url,
+      latitude::float as latitude, longitude::float as longitude from event_detail where event_id = $1`, [eventId]);
+  },
+
+  /** Read the extra fields off a submitted form; says what is wrong with them. */
+  read(form) {
+    const t = (k) => (String(form[k] ?? '').trim() || null);
+    const n = (k) => { const v = t(k); return v == null ? null : Number(v); };
+    const d = { typeKey: readType(form.eventType), contactName: t('contactName'), contactEmail: t('contactEmail'),
+      contactPhone: t('contactPhone'), costNote: t('costNote'), infoUrl: t('infoUrl'),
+      latitude: n('latitude'), longitude: n('longitude') };
+    if ((d.latitude != null && Number.isNaN(d.latitude)) || (d.longitude != null && Number.isNaN(d.longitude)))
+      return { d, problems: ['Latitude and longitude must be numbers, such as -39.93 and 175.05.'] };
+    return { d, problems: problemsWithDetail(d) };
+  },
+
+  /** Written after the event itself is saved, by whoever was allowed to save it. */
+  async save(eventId, d) {
+    const empty = Object.values(d).every((v) => v == null);
+    if (empty) { await pool.query('delete from event_detail where event_id = $1', [eventId]); return; }
+    await pool.query(`insert into event_detail (event_id, type_key, contact_name, contact_email, contact_phone, cost_note, info_url, latitude, longitude)
+      values ($1,$2,$3,$4,$5,$6,$7,$8,$9)
+      on conflict (event_id) do update set type_key=$2, contact_name=$3, contact_email=$4, contact_phone=$5,
+        cost_note=$6, info_url=$7, latitude=$8, longitude=$9`,
+      [eventId, d.typeKey, d.contactName, d.contactEmail, d.contactPhone, d.costNote, d.infoUrl, d.latitude, d.longitude]);
+  },
+};
+
+// ---------------------------------------------------------------------------
+// A dojo's photo gallery
+// ---------------------------------------------------------------------------
+
+export const MAX_GALLERY = 24;
+
+export const gallery = {
+  async list(actor, orgId) {
+    await assertRole(actor, orgId, TEACH);
+    return q(`select g.id, g.asset_id, g.caption, g.position, a.filename, a.width, a.height, a.alt_text
+      from club_gallery g join asset a on a.id = g.asset_id
+      where g.organisation_id = $1 order by g.position, g.created_at`, [orgId]);
+  },
+
+  async add(actor, orgId, assetId, caption = null) {
+    await assertRole(actor, orgId, TEACH);
+    const a = await one('select organisation_id, alt_text from asset where id = $1', [assetId]);
+    if (!a || a.organisation_id !== orgId) throw new Invalid('Choose one of this club\'s own pictures.');
+    const count = (await one('select count(*)::int as n from club_gallery where organisation_id = $1', [orgId])).n;
+    if (count >= MAX_GALLERY) throw new Invalid(`A gallery holds up to ${MAX_GALLERY} pictures. Remove one first.`);
+    if (await one('select 1 as x from club_gallery where organisation_id = $1 and asset_id = $2', [orgId, assetId]))
+      throw new Invalid('That picture is already in the gallery.');
+    const cap = String(caption ?? '').trim().slice(0, 160) || null;
+    await pool.query('insert into club_gallery (organisation_id, asset_id, caption, position) values ($1,$2,$3,$4)', [orgId, assetId, cap, count]);
+    await pool.query(`insert into audit_log (account_id, organisation_id, action, entity, entity_id) values ($1,$2,'gallery_added','asset',$3)`, [actor, orgId, assetId]);
+  },
+
+  async remove(actor, orgId, id) {
+    await assertRole(actor, orgId, TEACH);
+    await pool.query('delete from club_gallery where id = $1 and organisation_id = $2', [id, orgId]);
+    await pool.query(`update club_gallery g set position = s.rn from (select id, row_number() over (order by position, created_at) - 1 as rn
+      from club_gallery where organisation_id = $1) s where g.id = s.id`, [orgId]);
+  },
+
+  async caption(actor, orgId, id, caption) {
+    await assertRole(actor, orgId, TEACH);
+    await pool.query('update club_gallery set caption = $3 where id = $1 and organisation_id = $2',
+      [id, orgId, String(caption ?? '').trim().slice(0, 160) || null]);
+  },
+
+  /** direction -1 = earlier, +1 = later. Swaps with its neighbour. */
+  async move(actor, orgId, id, direction) {
+    await assertRole(actor, orgId, TEACH);
+    const rows = await q('select id from club_gallery where organisation_id = $1 order by position, created_at', [orgId]);
+    const i = rows.findIndex((r) => r.id === id), j = i + (direction < 0 ? -1 : 1);
+    if (i < 0 || j < 0 || j >= rows.length) return;
+    [rows[i], rows[j]] = [rows[j], rows[i]];
+    for (let k = 0; k < rows.length; k++) await pool.query('update club_gallery set position = $2 where id = $1', [rows[k].id, k]);
   },
 };

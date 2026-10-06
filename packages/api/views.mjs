@@ -4,6 +4,7 @@ import { describe as auditDescribe, weight as auditWeight }
 import { highlight as searchHighlight, linkTo as searchLinkTo }
   from '../content/search.mjs';
 import { REASON_WORDS } from '../core/domain/repeat-entry.mjs';
+import { EVENT_TYPES } from '../core/domain/event-types.mjs';
 import { slotHint, slotTable } from '../content/image-slots.mjs';
 import { WRITING_HELP } from '../content/document-text.mjs';
 import path from 'node:path';
@@ -303,6 +304,7 @@ export function rail({ org, vocabulary = {}, can = {}, path = '' }) {
     link(`${base}/pages`, 'Pages'),
     link(`${base}/news`, 'News'),
     link(`${base}/media`, 'Images'),
+    isClub && link(`${base}/gallery`, 'Gallery'),
     link(`${base}/menu`, 'Menu'),
     !isClub && can.manage && link(`${base}/appearance`, 'Appearance'),
     link(`${base}/instructors`, 'Instructors'),
@@ -1050,8 +1052,16 @@ export const eventForm = ({ me, csrf, org, values = {}, zone, error,
   <form method="post" action="${esc(action)}">
     <input type="hidden" name="_csrf" value="${esc(csrf ?? '')}">
 
-    <label for="title">Title</label>
-    <input id="title" name="title" required maxlength="200"
+    <label for="eventType">What sort of event is it?
+      <span class="hint">The website announces it with a banner made from this and the date.</span></label>
+    <select id="eventType" name="eventType" style="max-width:360px">
+      <option value="">Something else</option>
+      ${EVENT_TYPES.map((t) => option(t.key, t.label, v('eventType'))).join('')}
+    </select>
+
+    <label for="title">Title
+      <span class="hint">Leave blank to use the type's name. For a seminar, say what it is: it shows above the word SEMINAR.</span></label>
+    <input id="title" name="title" maxlength="200"
       value="${esc(v('title'))}" style="max-width:560px">
 
     <div class="row">
@@ -1073,6 +1083,31 @@ export const eventForm = ({ me, csrf, org, values = {}, zone, error,
     <label for="summary">One line about it</label>
     <input id="summary" name="summary" maxlength="300"
       value="${esc(v('summary'))}" style="max-width:560px">
+
+    <fieldset><legend>Where, who to ask and what it costs</legend>
+      <div class="row">
+        <div><label for="contactName">Contact name</label>
+          <input id="contactName" name="contactName" maxlength="120" value="${esc(v('contactName'))}"></div>
+        <div><label for="contactPhone">Contact phone</label>
+          <input id="contactPhone" name="contactPhone" maxlength="40" value="${esc(v('contactPhone'))}"></div>
+      </div>
+      <label for="contactEmail">Contact email</label>
+      <input id="contactEmail" name="contactEmail" type="email" maxlength="200" value="${esc(v('contactEmail'))}" style="max-width:420px">
+      <label for="costNote">Cost
+        <span class="hint">In words: "$60 adults, $40 juniors. Includes lunch."</span></label>
+      <input id="costNote" name="costNote" maxlength="300" value="${esc(v('costNote'))}" style="max-width:560px">
+      <label for="infoUrl">Link for more information
+        <span class="hint">Starts with https://</span></label>
+      <input id="infoUrl" name="infoUrl" maxlength="300" value="${esc(v('infoUrl'))}" style="max-width:560px">
+      <div class="row">
+        <div><label for="latitude">Map pin: latitude
+          <span class="hint">Optional. Right-click the place in Google Maps and copy the numbers.</span></label>
+          <input id="latitude" name="latitude" inputmode="decimal" value="${esc(v('latitude'))}" placeholder="-39.9301"></div>
+        <div><label for="longitude">longitude</label>
+          <input id="longitude" name="longitude" inputmode="decimal" value="${esc(v('longitude'))}" placeholder="175.0479"></div>
+      </div>
+      <p class="hint">Without a pin the map links use the venue name and address above.</p>
+    </fieldset>
 
     <fieldset>
       <legend>When</legend>
@@ -2788,6 +2823,16 @@ export const appearanceEditor = ({ me, csrf, org, current, builtIn = [],
   ${problems.length ? `<div class="bad"><strong>That theme was not used:</strong><ul>${
     problems.map((p) => `<li>${esc(p)}</li>`).join('')}</ul></div>` : ''}
 
+  <h2>Crest</h2>
+  <form method="post" action="${action}/logo" enctype="multipart/form-data" class="card" style="margin-bottom:24px">
+    <input type="hidden" name="_csrf" value="${esc(csrf ?? '')}">
+    <p>Your crest shows in the site header and on every event banner. A transparent PNG on a dark background works best.</p>
+    <p><label>Add a crest<br><input type="file" name="logoFile" accept="image/png,image/jpeg,image/webp"></label></p>
+    <p class="hint">At least 600 pixels high, with nothing but the crest in the picture.</p>
+    <p><button class="btn" type="submit">Use this crest</button>
+      <button class="btn" type="submit" name="remove" value="1">Remove the crest</button></p>
+  </form>
+
   <h2>Now</h2>
   ${current
     ? `<p><strong>${esc(current.name)}</strong> ${swatches(current)}
@@ -4411,3 +4456,47 @@ export const myTerms = ({ me, csrf, groups = [], error, done }) => page({
       <td>${i.mayEnrol ? `<form method="post" action="/me/terms/${esc(i.term.id)}/${esc(g.person.id)}"><input type="hidden" name="_csrf" value="${esc(csrf ?? '')}"><button class="btn" type="submit">Enrol</button></form>`
         : i.enrolment?.status === 'enrolled' && i.state !== 'current' ? `<form method="post" action="/me/terms/${esc(i.term.id)}/${esc(g.person.id)}/withdraw"><input type="hidden" name="_csrf" value="${esc(csrf ?? '')}"><button class="btn quiet" type="submit">Withdraw</button></form>` : ''}</td></tr>`).join('')}</tbody></table>`).join('')
   : '<div class="note">There are no school terms to enrol in. They appear here for children who are members of a club that follows school terms.</div>'}` });
+
+/** A dojo's photo gallery: what is in it, in order, and a way to add more. */
+export const galleryScreen = ({ me, csrf, org, items = [], library = [], max = 24, done, error, rebuild }) => page({
+  title: `Gallery — ${org.name}`, me, csrf, body: `
+  <h1>Gallery</h1>
+  <p class="sub">${esc(org.name)} · the photo strip on your page. ${items.length} of ${max}.
+    <a href="/o/${esc(org.slug)}/club-page/preview">See your page</a></p>
+  ${done ? `<div class="good">${esc(done)}</div>` : ''}
+  ${error ? `<div class="bad">${esc(error)}</div>` : ''}
+  ${rebuild ? `<div class="note">${esc(rebuild)}</div>` : ''}
+
+  <form method="post" action="/o/${esc(org.slug)}/gallery" enctype="multipart/form-data" class="card" style="margin-bottom:24px">
+    <input type="hidden" name="_csrf" value="${esc(csrf ?? '')}">
+    <h3>Add a picture</h3>
+    <p><label>Add a new one<br><input type="file" name="file" accept="image/png,image/jpeg,image/gif,image/webp"></label></p>
+    <p class="hint">${esc(slotHint('gallery'))}</p>
+    ${library.length ? `<p><label>…or choose one you have already uploaded<br>
+      <select name="assetId"><option value="">—</option>${library.map((a) =>
+        `<option value="${esc(a.id)}">${esc(a.filename ?? a.id)}</option>`).join('')}</select></label></p>` : ''}
+    <p><label>Caption <span class="muted">optional</span><br>
+      <input name="caption" maxlength="160" style="max-width:420px" placeholder="Juniors after a grading"></label></p>
+    <p><label>Describe it for somebody who cannot see it <span class="muted">for a new picture</span><br>
+      <input name="alt_text" maxlength="300" style="max-width:560px"></label></p>
+    <p class="muted">Only photographs you have permission to show, especially of children.</p>
+    <p><button class="btn" type="submit">Add to gallery</button></p>
+  </form>
+
+  ${items.length ? `<div class="grid">${items.map((g, i) => `
+    <div class="card">
+      <img src="/a/${esc(g.asset_id)}" alt="${esc(g.alt_text ?? '')}" style="max-width:100%;height:auto;display:block;margin-bottom:8px">
+      <form method="post" action="/o/${esc(org.slug)}/gallery/${esc(g.id)}/caption">
+        <input type="hidden" name="_csrf" value="${esc(csrf ?? '')}">
+        <input name="caption" maxlength="160" value="${esc(g.caption ?? '')}" placeholder="Caption" aria-label="Caption">
+        <button class="btn" type="submit">Save caption</button>
+      </form>
+      <p style="display:flex;gap:8px;margin-top:8px">
+        ${['up', 'down'].map((d) => `<form method="post" action="/o/${esc(org.slug)}/gallery/${esc(g.id)}/move">
+          <input type="hidden" name="_csrf" value="${esc(csrf ?? '')}"><input type="hidden" name="direction" value="${d}">
+          <button class="btn" type="submit"${(d === 'up' && i === 0) || (d === 'down' && i === items.length - 1) ? ' disabled' : ''}>${d === 'up' ? 'Earlier' : 'Later'}</button></form>`).join('')}
+        <form method="post" action="/o/${esc(org.slug)}/gallery/${esc(g.id)}/remove">
+          <input type="hidden" name="_csrf" value="${esc(csrf ?? '')}"><button class="btn" type="submit">Remove</button></form>
+      </p>
+    </div>`).join('')}</div>` : '<p class="muted">No pictures yet. The gallery shows on your page once it has one.</p>'}
+`, });

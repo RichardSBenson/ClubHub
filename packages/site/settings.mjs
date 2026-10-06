@@ -27,7 +27,7 @@ const HEX = /^#[0-9a-fA-F]{6}$/;
 // accepted here for a long time and rendered nothing, so a site that listed one
 // looked exactly like a site that did not.
 const HOME_SECTIONS = ['hero','dojoGrid','events','news'];
-const DOJO_SECTIONS = ['hero','facts','startAnyWeek','times','about','events','findUs'];
+const DOJO_SECTIONS = ['hero','facts','startAnyWeek','times','about','gallery','events','findUs'];
 
 /**
  * The neutral words. A federation overrides whichever it uses differently —
