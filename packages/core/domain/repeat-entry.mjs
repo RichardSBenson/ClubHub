@@ -88,5 +88,6 @@ export const REASON_WORDS = Object.freeze({
   discipline_missing: 'Something you entered last time is not offered here. Check what you want.',
   not_placed: 'We could not place you in a division with these details.',
   division_changed: 'Your division is different from last time.',
+  grade_unknown: 'Please say what grade you are. It is not checked against a register, so it is marked as your own word.',
   problems: 'A few things need your attention.',
 });

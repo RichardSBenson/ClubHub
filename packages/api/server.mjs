@@ -33,10 +33,12 @@
 import crypto from 'node:crypto';
 import { URL } from 'node:url';
 import { pool, orgs, people, rank, events, competition, pages, assets, news,
-         instructors, navigation, audit, search, clubPages, appearance, clubs, clubProfile, family, myself, memberEvents, messages, emailPreferences, payments, fees, renewals, reminders, attendance, newcomers, reports, gradings, qualifications, enquiries, scheduledPublishing, TooMany,
+         instructors, navigation, audit, search, clubPages, appearance, clubs, clubProfile, family, myself, memberEvents, messages, emailPreferences, payments, fees, renewals, reminders, attendance, newcomers, reports, gradings, qualifications, enquiries, scheduledPublishing, TooMany, outsiders,
          Forbidden, NotFound, Invalid } from './data.mjs';
 import * as auth from './auth.mjs';
 import * as V from './views.mjs';
+import { readOutsider } from '../core/domain/outsider.mjs';
+import { signEntryToken, readEntryToken } from './entry-token.mjs';
 import { repeatFromLast, decideQuick } from '../core/domain/repeat-entry.mjs';
 import { readEnquiry, looksLikeRobot, sameSite } from '../core/domain/enquiry.mjs';
 import { readSelfEdit } from '../core/domain/family.mjs';
@@ -468,6 +470,13 @@ async function memberEntryPlan(ctx, form = {}, { fromLast = false } = {}) {
   const { dependants } = await family.mine(ctx.me.accountId);
   const relationship = dependants.find((d) => d.id === personId)?.relationship ?? null;
 
+  // Somebody on no roll is entering an open event: their club and grade are what
+  // they say, labelled as unverified, and the price is the non-member one.
+  const outsider = open.home_org == null;
+  const grades = outsider ? await gradesFor({ id: open.host_id }) : [];
+  const gradeBy = (key) => grades.find((g) => String(g.rankOrder) === String(key)
+    || g.label.toLowerCase() === String(key ?? '').trim().toLowerCase()) ?? null;
+
   // Entering again: what they said last time stands in for the form. Age,
   // grade and experience are never carried; they are worked out below.
   let last = null, repeat = null;
@@ -475,7 +484,12 @@ async function memberEntryPlan(ctx, form = {}, { fromLast = false } = {}) {
     last = await memberEvents.lastEntry(personId);
     const today = new Date().toLocaleDateString('en-CA', { timeZone: open.host_timezone });
     repeat = repeatFromLast(last, setup.disciplines, today);
+    const claimed = outsider ? gradeBy(last?.declaredGrade) : null;
+    if (outsider && last && !claimed) {
+      repeat = { ...repeat, oneClick: false, reasons: [...repeat.reasons, 'grade_unknown'] };
+    }
     form = { ...form,
+      ...(outsider ? { club: last?.clubName ?? '', grade: claimed?.rankOrder ?? '' } : {}),
       ...Object.fromEntries(repeat.chosen.map((id) => [`disc_${id}`, '1'])),
       weight: repeat.weightKg ?? '', height: repeat.heightCm ?? '',
       // Pressing the button on the one-click screen is the agreement; the
@@ -491,13 +505,18 @@ async function memberEntryPlan(ctx, form = {}, { fromLast = false } = {}) {
   const competitor = new Competitor({
     personId, name: `${mine.person.first_name} ${mine.person.last_name}`,
     dateOfBirth: mine.person.date_of_birth, gender: mine.person.gender,
-    rankOrder: mine.grade?.rank_order ?? null, weightKg, heightCm,
+    rankOrder: outsider ? (gradeBy(form.grade)?.rankOrder ?? null) : (mine.grade?.rank_order ?? null),
+    weightKg, heightCm,
     yearsTraining: experience.yearsTraining, priorEvents: experience.priorEvents,
-    clubName: open.home_name, isMember: true });
+    clubName: outsider ? (String(form.club ?? '').trim() || null) : open.home_name, isMember: !outsider });
   const need = consentNeeded(competitor, { eventDate, guardianUnder: event.guardianUnder ?? null });
 
   const problems = [];
   let placements = [], amountCents = null, ready = true, reasons = [];
+  if (outsider && setup.disciplines.length) {
+    if (!String(form.club ?? '').trim()) problems.push('Tell us which club or school you train at ("none" is fine).');
+    if (grades.length && !gradeBy(form.grade)) problems.push('Choose your grade, as best you know it.');
+  }
   if (setup.disciplines.length) {
     if (!chosen.length) problems.push('Choose at least one thing to enter.');
     else {
@@ -507,16 +526,18 @@ async function memberEntryPlan(ctx, form = {}, { fromLast = false } = {}) {
       placements = placed.placements; ready = placed.ready;
       reasons = placed.placements.filter((p) => p.outcome !== 'placed')
         .map((p) => `${p.discipline.name}: ${p.reasons.join('; ')}`);
-      amountCents = priceFor(chosen.length, setup.enginePrices, { isMember: true }).amountCents;
+      amountCents = priceFor(chosen.length, setup.enginePrices, { isMember: !outsider }).amountCents;
     }
   }
 
   if (event.consentVersion) {
     problems.push(...problemsWithConsent({ accepted: !!form.accepted,
       acceptedName: form.acceptedName, version: event.consentVersion,
-      guardianName: how === 'guardian' ? form.acceptedName : '',
+      guardianName: (how === 'guardian' || outsider) ? form.acceptedName : '',
       guardianContact: ctx.me.email }, need).map((t) => `${t[0].toUpperCase()}${t.slice(1)}.`));
-    if (need.guardian && how === 'self')
+    // On a roll, a parent signs in as themselves. Somebody entering from outside
+    // has one sign-in, the address given, which is the parent's for a child.
+    if (need.guardian && how === 'self' && !outsider)
       problems.push('Because of their age, a parent or guardian has to make this entry. '
         + 'Ask them to sign in and enter you.');
   }
@@ -524,7 +545,7 @@ async function memberEntryPlan(ctx, form = {}, { fromLast = false } = {}) {
 
   const plan = { how, open, event, setup, mine, eventDate, relationship, competitor, need,
            chosen, weightKg, heightCm, placements, amountCents, problems, form, last, repeat,
-           experience, currency: setup.prices[0]?.currency ?? 'NZD' };
+           experience, outsider, grades, claimedGrade: outsider ? gradeBy(form.grade) : null, currency: setup.prices[0]?.currency ?? 'NZD' };
   if (repeat) plan.quick = decideQuick({ repeat, last, placements, ready, problems });
   return plan;
 }
@@ -542,6 +563,7 @@ get('/me/events/:eventId/:personId', async (ctx) => {
   if (plan.quick.ok && ctx.url.searchParams.get('edit') !== '1')
     return ctx.send(200, V.memberQuickEntry({ me: ctx.me, csrf: ctx.csrf, ...plan }));
   const values = { weight: plan.weightKg ?? '', height: plan.heightCm ?? '',
+    club: plan.form.club ?? '', grade: plan.form.grade ?? '',
     ...Object.fromEntries(plan.chosen.map((id) => [`disc_${id}`, '1'])) };
   return ctx.send(200, memberEntryView(ctx, plan,
     { problems: [], values, reasons: plan.quick.reasons, changed: plan.quick.changed }));
@@ -582,7 +604,9 @@ async function commitMemberEntry(ctx, plan, form = plan.form) {
     await competition.enterCompetitor(ctx.me.accountId, plan.event.id, {
       personId: ctx.params.personId, byFamily: true,
       allowNoPlacements: !plan.setup.disciplines.length,
-      weightKg: plan.weightKg, heightCm: plan.heightCm, clubName: plan.open.home_name,
+      weightKg: plan.weightKg, heightCm: plan.heightCm,
+      clubName: plan.outsider ? (String(form.club ?? '').trim() || null) : plan.open.home_name,
+      declaredGrade: plan.claimedGrade?.label ?? null,
       yearsTraining: plan.experience.yearsTraining, priorEvents: plan.experience.priorEvents,
       amountCents: plan.amountCents, currency: plan.currency,
       placements: plan.placements.map((p) => ({
@@ -591,7 +615,7 @@ async function commitMemberEntry(ctx, plan, form = plan.form) {
       consent: plan.event.consentVersion ? {
         version: plan.event.consentVersion, acceptedName: form.acceptedName, ip: ctx.ip,
         guardian: plan.need.guardian
-          ? { name: form.acceptedName, relationship: plan.relationship ?? 'guardian',
+          ? { name: form.acceptedName, relationship: plan.relationship ?? (plan.outsider ? 'declared guardian' : 'guardian'),
               contact: ctx.me.email }
           : null } : null,
     });
@@ -1627,6 +1651,117 @@ post('/p/:id/qualifications/:awardId/remove', async (ctx) => {
   return ctx.redirect(`/p/${ctx.params.id}/qualifications?done=${encodeURIComponent('Removed.')}`);
 });
 
+
+
+// ---- entering an open event from outside ------------------------------------------
+//
+// "Have you entered before?" — an email or mobile. A known person is sent a
+// sign-in link that lands on their one-click screen; an unknown one is sent a
+// link to say who they are. Both get the same answer on screen, so the form
+// cannot be used to find out who is on the register.
+
+const ENTER_NOTE = 'If we know you, a link is on its way to the email address we have. '
+  + 'If we do not, a link to get you started is. Either way, open it on this device. It works for 60 minutes.';
+
+async function openEventOr404(ctx) {
+  const ev = await outsiders.eventFor(ctx.params.slug, ctx.params.eventSlug);
+  if (!ev) throw new NotFound('Event');
+  return ev;
+}
+
+const enterBase = (ev) => `/enter/${ev.host_slug}/${ev.slug}`;
+
+get('/enter/:slug/:eventSlug', async (ctx) => {
+  const ev = await openEventOr404(ctx);
+  if (ctx.me?.personId) return ctx.redirect(`${enterBase(ev)}/go`);
+  return ctx.send(200, V.enterStart({ csrf: ctx.csrf, ev, action: enterBase(ev),
+    sent: ctx.url.searchParams.get('sent') === '1', note: ENTER_NOTE }));
+});
+
+post('/enter/:slug/:eventSlug', async (ctx) => {
+  const ev = await openEventOr404(ctx);
+  const form = await ctx.form();
+  if (looksLikeRobot(form)) return ctx.redirect(`${enterBase(ev)}?sent=1`);
+  const contact = String(form.contact ?? '').trim().slice(0, 120);
+  if (!contact) return ctx.send(422, V.enterStart({ csrf: ctx.csrf, ev, action: enterBase(ev),
+    error: 'Please give your email address or mobile number.' }));
+
+  const origin = process.env.VERCEL_PROJECT_PRODUCTION_URL
+    ? `https://${process.env.VERCEL_PROJECT_PRODUCTION_URL}` : originOf(ctx);
+  const messenger = messengerFrom();
+  const say = (to, subject, lines) => messenger.send({ to, subject,
+    text: ['Kia ora,', '', ...lines, '', 'If you did not ask for this, ignore it.'].join('\n'), kind: 'sign-in' });
+
+  try {
+    const known = await outsiders.addressesFor(contact);
+    if (known.length) {
+      for (const email of known) {
+        const account = await outsiders.ensureAccount(email);
+        if (!account) continue;
+        const issue = await auth.requestLink(email, { ip: ctx.ip, redirectTo: `${enterBase(ev)}/go` });
+        if (issue.token) await say(email, `Your entry to ${ev.title}`,
+          [`Here is your link to enter ${ev.title}:`, '', `${origin}/signin/${issue.token}`,
+           '', 'It works once and expires in 15 minutes.']);
+      }
+    } else if (contact.includes('@')) {
+      const token = signEntryToken({ email: contact.toLowerCase(), eventId: ev.id });
+      if (token) await say(contact, `Start your entry to ${ev.title}`,
+        [`Here is your link to start your entry to ${ev.title}:`, '', `${origin}${enterBase(ev)}/new?t=${token}`,
+         '', 'It expires in 60 minutes.']);
+    }
+    // A mobile number we do not know has nowhere to send a link, and says nothing different.
+  } catch (e) {
+    if (e.status !== 429 && e.name !== 'RateLimited') {
+      if (e.name === 'MessengerError') {
+        console.error('entry link not sent:', e.message);
+        return ctx.send(503, V.enterStart({ csrf: ctx.csrf, ev, action: enterBase(ev),
+          error: 'We could not send the link just now. Try again shortly.' }));
+      }
+      throw e;
+    }
+  }
+  return ctx.redirect(`${enterBase(ev)}?sent=1`);
+});
+
+/** Signed in and known: straight to the one-click screen or the form. */
+get('/enter/:slug/:eventSlug/go', async (ctx) => {
+  const ev = await openEventOr404(ctx);
+  if (!ctx.me?.personId) return ctx.redirect(enterBase(ev));
+  return ctx.redirect(`/me/events/${ev.id}/${ctx.me.personId}`);
+});
+
+/** A person we have not met. The link proves the address is theirs. */
+get('/enter/:slug/:eventSlug/new', async (ctx) => {
+  const ev = await openEventOr404(ctx);
+  const t = readEntryToken(ctx.url.searchParams.get('t'), { eventId: ev.id });
+  if (!t) return ctx.send(403, V.enterStart({ csrf: ctx.csrf, ev, action: enterBase(ev),
+    error: 'That link has expired or is not valid. Ask for another.' }));
+  return ctx.send(200, V.enterNew({ csrf: ctx.csrf, ev, action: `${enterBase(ev)}/new`,
+    token: ctx.url.searchParams.get('t'), values: { email: t.email } }));
+});
+
+post('/enter/:slug/:eventSlug/new', async (ctx) => {
+  const ev = await openEventOr404(ctx);
+  const form = await ctx.form();
+  const t = readEntryToken(form.t, { eventId: ev.id });
+  if (!t) return ctx.send(403, V.enterStart({ csrf: ctx.csrf, ev, action: enterBase(ev),
+    error: 'That link has expired or is not valid. Ask for another.' }));
+  const input = { ...readOutsider(form), email: t.email };
+  try {
+    const made = await outsiders.register(input);
+    // They proved the address by opening the link; sign them in now.
+    const issue = await auth.requestLink(made.email, { ip: ctx.ip });
+    const { token } = await auth.redeemLink(issue.token, { userAgent: ctx.req.headers['user-agent'], ip: ctx.ip });
+    ctx.cookie(`${SESSION_COOKIE}=${token}; HttpOnly; SameSite=Lax; Path=/; `
+      + `Max-Age=${auth.SESSION_TTL_DAYS * 86400}${ctx.secure ? '; Secure' : ''}`);
+    return ctx.redirect(`/me/events/${ev.id}/${made.personId}`);
+  } catch (e) {
+    if (e instanceof Invalid)
+      return ctx.send(422, V.enterNew({ csrf: ctx.csrf, ev, action: `${enterBase(ev)}/new`,
+        token: form.t, values: input, error: e.message }));
+    throw e;
+  }
+});
 
 // ---- website enquiries -----------------------------------------------------------
 //

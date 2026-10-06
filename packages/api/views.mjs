@@ -3055,7 +3055,7 @@ const consentBlock = ({ event, need, how, values = {} }) => event.consentVersion
   </fieldset>` : '';
 
 export const memberEntryForm = ({ me, csrf, how, open, event, setup, mine, eventDate,
-                                  need, problems = [], values = {}, reasons = [], changed = [] }) => page({
+                                  need, problems = [], values = {}, reasons = [], changed = [], outsider = false, grades = [] }) => page({
   title: `Enter — ${event.title}`, me, csrf, body: `
   <h1>${esc(event.title)}</h1>
   <p class="sub">${esc(when(open.starts_at, open.host_timezone))} · ${esc(open.host_name)} ·
@@ -3073,6 +3073,13 @@ export const memberEntryForm = ({ me, csrf, how, open, event, setup, mine, event
       ${setup.disciplines.map((d) => `<label><input type="checkbox" name="disc_${esc(d.id)}"
         value="1"${values[`disc_${d.id}`] ? ' checked' : ''}> ${esc(d.name)}${
         d.summary ? ` <span class="muted">— ${esc(d.summary)}</span>` : ''}</label>`).join('')}
+      ${outsider ? `<div class="row">
+        <div><label for="club">Club or school you train at</label>
+          <input id="club" name="club" maxlength="100" value="${esc(values.club ?? '')}"></div>
+        <div><label for="grade">Your grade <span class="muted">(your own word — not checked)</span></label>
+          <select id="grade" name="grade"><option value="">Choose…</option>${grades.map((g) =>
+            `<option value="${esc(g.rankOrder)}"${String(values.grade ?? '') === String(g.rankOrder) ? ' selected' : ''}>${esc(g.label)}</option>`).join('')}</select></div>
+      </div>` : ''}
       <div class="row">
         <div><label for="weight">Weight (kg)</label>
           <input id="weight" name="weight" type="number" step="0.01" min="0" max="400" value="${esc(values.weight ?? '')}"></div>
@@ -3879,3 +3886,53 @@ export const enquiryPage = ({ csrf, club, kind = 'contact', action, values = {},
     <label for="message">Message</label><textarea id="message" name="message" rows="5" maxlength="2000">${esc(values.message ?? '')}</textarea>
     <button class="btn" type="submit">Send</button>
   </form>`}` });
+
+
+// ---- entering an open event from outside ------------------------------------------
+
+const eventLine = (ev) => `${esc(when(ev.starts_at, ev.host_timezone))} · ${esc(ev.host_name)}`;
+
+export const enterStart = ({ csrf, ev, action, sent = false, note = '', error }) => page({
+  title: `Enter — ${ev.title}`, me: null, csrf, body: `
+  <h1>${esc(ev.title)}</h1>
+  <p class="sub">${eventLine(ev)}</p>
+  ${sent ? `<div class="good">Check your email. ${esc(note)}</div>` : ''}
+  ${error ? `<div class="bad">${esc(error)}</div>` : ''}
+  <h2>Have you entered before?</h2>
+  <p>Give the email address or mobile number you used last time. We will send you a link that
+    brings your details back, so you only confirm what has changed. New here? Use your email
+    and we will start you off.</p>
+  <form method="post" action="${esc(action)}">
+    <input type="hidden" name="_csrf" value="${esc(csrf ?? '')}">
+    <div style="position:absolute;left:-9999px" aria-hidden="true"><label>Leave this empty <input name="website" tabindex="-1" autocomplete="off"></label></div>
+    <label for="contact">Email address or mobile number</label>
+    <input id="contact" name="contact" maxlength="120" autocomplete="email" required>
+    <div class="actions"><button class="btn" type="submit">Send me a link</button></div>
+  </form>` });
+
+export const enterNew = ({ csrf, ev, action, token, values = {}, error }) => page({
+  title: `Enter — ${ev.title}`, me: null, csrf, body: `
+  <h1>${esc(ev.title)}</h1>
+  <p class="sub">${eventLine(ev)}</p>
+  <h2>Tell us who you are</h2>
+  <p>You only do this once. Next time, one click.</p>
+  ${error ? `<div class="bad">${esc(error)}</div>` : ''}
+  <form method="post" action="${esc(action)}">
+    <input type="hidden" name="_csrf" value="${esc(csrf ?? '')}">
+    <input type="hidden" name="t" value="${esc(token ?? '')}">
+    <p>Email: <strong>${esc(values.email ?? '')}</strong></p>
+    <div class="row">
+      <div><label for="firstName">First name</label><input id="firstName" name="firstName" maxlength="60" required value="${esc(values.firstName ?? '')}"></div>
+      <div><label for="lastName">Last name</label><input id="lastName" name="lastName" maxlength="60" required value="${esc(values.lastName ?? '')}"></div>
+    </div>
+    <div class="row">
+      <div><label for="dateOfBirth">Date of birth <span class="muted">(YYYY-MM-DD)</span></label>
+        <input id="dateOfBirth" name="dateOfBirth" type="date" required value="${esc(values.dateOfBirth ?? '')}"></div>
+      <div><label for="gender">Gender</label><select id="gender" name="gender" required>
+        <option value="">Choose…</option>${[['M', 'M'], ['F', 'F']].map(([v, l]) => `<option value="${v}"${values.gender === v ? ' selected' : ''}>${l}</option>`).join('')}</select></div>
+    </div>
+    <label for="phone">Mobile <span class="muted">(optional — lets us recognise you next time)</span></label>
+    <input id="phone" name="phone" maxlength="30" value="${esc(values.phone ?? '')}">
+    <p class="muted">Entering for a child? Use your own email, and give the child's details above.</p>
+    <div class="actions"><button class="btn" type="submit">Continue</button></div>
+  </form>` });

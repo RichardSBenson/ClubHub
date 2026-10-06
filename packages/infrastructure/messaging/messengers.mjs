@@ -57,6 +57,9 @@ export class LogMessenger {
 }
 
 /** For tests. Keeps everything, sends nothing. */
+/** What MESSENGER_PROVIDER=none sends into, so a test that drives the server can read the mail. */
+export const sharedMemoryMessenger = () => (globalThis.__honbuMemoryMessenger ??= new MemoryMessenger());
+
 export class MemoryMessenger {
   constructor() { this.sent = []; }
 
@@ -196,7 +199,7 @@ export function messengerFrom(env = process.env) {
   const provider = env.MESSENGER_PROVIDER;
 
   if (!provider || provider === 'log') return new LogMessenger();
-  if (provider === 'none') return new MemoryMessenger();
+  if (provider === 'none') return sharedMemoryMessenger();
 
   // Three things are the federation's, not the transport's: who the mail is
   // from, the name shown beside that address, and the secret that proves we may

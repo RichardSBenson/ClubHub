@@ -183,6 +183,8 @@ export function describe(entry) {
       return `entered somebody for ${a.grade ? quote(a.grade) : 'a grade'} at ${a.event ? quote(a.event) : 'a grading'}`;
     case 'grading_finalised':
       return `finalised the grading ${a.title ? quote(a.title) : ''}: ${a.passed ?? 0} of ${a.entered ?? 0} awarded`.replace('  ', ' ');
+    case 'entrant_registered':
+      return 'registered as a new competitor';
     case 'publish_scheduled':
       return `scheduled ${a.title ? quote(a.title) : 'something'} to go live on ${a.date ?? '?'}`;
     case 'publish_unscheduled':
@@ -288,6 +290,7 @@ export const ACTIONS = Object.freeze([
   ['club_profile_saved', 'Club details changed'],
   ['message_sent', 'Message sent'],
   ['roll_taken', 'Roll taken'],
+  ['entrant_registered', 'Competitor registered'],
   ['publish_scheduled', 'Publishing scheduled'],
   ['publish_unscheduled', 'Schedule cancelled'],
   ['published_on_schedule', 'Published on schedule'],

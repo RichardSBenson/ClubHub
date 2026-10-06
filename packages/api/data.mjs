@@ -2328,7 +2328,7 @@ const ENTERABLE_KINDS = ['grading', 'tournament', 'fight_night', 'seminar', 'cam
 async function memberEventsQuery(personId, eventId = null) {
     const { rows } = await pool.query(`
       select e.id, e.title, e.slug, e.kind, e.summary, e.starts_at, e.venue_name,
-             e.entries_open, e.entries_close, e.visibility,
+             e.entries_open, e.entries_close, e.visibility, e.organisation_id as host_id,
              o.name as host_name, o.timezone as host_timezone,
              club.id as home_org, club.name as home_name,
              exists (select 1 from event_entry x
@@ -2353,7 +2353,28 @@ async function memberEventsQuery(personId, eventId = null) {
                  and coalesce(g.rank_order, -1) >= coalesce(e.min_rank_order, 0)))
         and ($2::uuid is null or e.id = $2)
       order by e.starts_at`, [personId, eventId, ENTERABLE_KINDS]);
-    return rows;
+
+    // Somebody on no roll at all may enter an event its organiser has opened to
+    // outsiders. A member is not offered these here: theirs come through their club.
+    const { rows: open } = await pool.query(`
+      select e.id, e.title, e.slug, e.kind, e.summary, e.starts_at, e.venue_name,
+             e.entries_open, e.entries_close, e.visibility, e.organisation_id as host_id,
+             o.name as host_name, o.timezone as host_timezone,
+             null::uuid as home_org, null::text as home_name,
+             exists (select 1 from event_entry x
+                      where x.event_id = e.id and x.person_id = $1
+                        and x.status in ('entered','confirmed')) as already_entered
+      from event e join organisation o on o.id = e.organisation_id
+      where e.status = 'published' and e.guests_allowed and e.visibility = 'public'
+        and e.kind = any($3::event_kind[])
+        and e.starts_at > now()
+        and (e.entries_open is null or e.entries_open <= now())
+        and (e.entries_close is null or e.entries_close > now())
+        and not exists (select 1 from affiliation a where a.person_id = $1 and a.ends is null
+                         and a.role = 'member' and a.status = 'active')
+        and ($2::uuid is null or e.id = $2)
+      order by e.starts_at`, [personId, eventId, ENTERABLE_KINDS]);
+    return [...rows, ...open].sort((a, b) => new Date(a.starts_at) - new Date(b.starts_at));
 }
 
 export const memberEvents = {
@@ -2374,7 +2395,7 @@ export const memberEvents = {
    */
   async lastEntry(personId) {
     const row = await one(`
-      select x.weight_kg::float8 as weight_kg, x.height_cm,
+      select x.weight_kg::float8 as weight_kg, x.height_cm, x.club_name, x.declared_grade,
              to_char(x.created_at at time zone 'Pacific/Auckland','YYYY-MM-DD') as entered_on,
              coalesce((select json_agg(json_build_object('discipline', d.name, 'division', v.label) order by d.sort_order)
                          from entry_selection s join event_discipline d on d.id = s.discipline_id
@@ -2383,7 +2404,8 @@ export const memberEvents = {
       from event_entry x
       where x.person_id = $1 and x.status in ('entered','confirmed') and x.weight_kg is not null
       order by x.created_at desc limit 1`, [personId]);
-    return row ? { weightKg: row.weight_kg, heightCm: row.height_cm, enteredOn: row.entered_on, picks: row.picks } : null;
+    return row ? { weightKg: row.weight_kg, heightCm: row.height_cm, enteredOn: row.entered_on, picks: row.picks,
+      clubName: row.club_name, declaredGrade: row.declared_grade } : null;
   },
 
   /** Experience, derived from the record rather than asked: past fights and years on the roll. */
@@ -4876,5 +4898,91 @@ export const enquiries = {
   async tidy() {
     await q(`update enquiry set ip_hash = null where ip_hash is not null and created_at < now() - interval '2 days'`);
     return (await q(`delete from enquiry where created_at < now() - make_interval(days => $1) returning 1`, [ENQUIRY_RETAIN_DAYS])).length;
+  },
+};
+
+
+// ---------------------------------------------------------------------------
+// people who are not on any roll: finding them again, and registering them once
+//
+// The persistent identity is the PERSON. A returning competitor is recognised by
+// the email or mobile they gave before and signs in with a link; a new one is
+// created once. Nobody gets a second record because they used another door.
+// ---------------------------------------------------------------------------
+
+import { problemsWithOutsider, phoneKey } from '../core/domain/outsider.mjs';
+
+export const outsiders = {
+  /** The event, if it is open to people who are not on a roll. */
+  async eventFor(hostSlug, eventSlug) {
+    return one(`
+      select e.id, e.title, e.slug, e.kind, e.starts_at, e.venue_name, e.summary,
+             o.name as host_name, o.slug as host_slug, o.timezone as host_timezone
+      from event e join organisation o on o.id = e.organisation_id
+      where o.slug = $1 and e.slug = $2 and o.status = 'active'
+        and e.status = 'published' and e.guests_allowed and e.visibility = 'public'
+        and e.kind = any($3::event_kind[]) and e.starts_at > now()
+        and (e.entries_open is null or e.entries_open <= now())
+        and (e.entries_close is null or e.entries_close > now())`,
+      [hostSlug, eventSlug, ENTERABLE_KINDS]);
+  },
+
+  /**
+   * Who is this contact? By email, or by mobile. Returns the addresses to send a
+   * link to, never the people — the caller must not be able to read the register.
+   */
+  async addressesFor(contact) {
+    const c = String(contact ?? '').trim();
+    if (c.includes('@')) {
+      const rows = await q(`select distinct lower(email::text) as email from person where email = $1
+        union select lower(email::text) from account where email = $1`, [c.toLowerCase()]);
+      return rows.map((r) => r.email);
+    }
+    const key = phoneKey(c);
+    if (!key) return [];
+    const rows = await q(`select distinct lower(email::text) as email from person
+      where email is not null and phone is not null and right(regexp_replace(phone, '\\D', '', 'g'), 8) = $1
+      limit 3`, [key]);
+    return rows.map((r) => r.email);
+  },
+
+  /** Make sure an address that belongs to a person can sign in. Idempotent. */
+  async ensureAccount(email) {
+    const have = await one('select id from account where email = $1', [email]);
+    if (have) return have.id;
+    // Several people can share an address (a parent's, on a child's record).
+    // The sign-in belongs to the eldest; the children come through guardianship.
+    const person = await one(`select id from person where email = $1
+      order by date_of_birth asc nulls last, created_at asc limit 1`, [email]);
+    if (!person) return null;
+    const made = await one(`insert into account (email, person_id) values ($1,$2)
+      on conflict (email) do nothing returning id`, [email, person.id]);
+    return made?.id ?? (await one('select id from account where email = $1', [email])).id;
+  },
+
+  /** A person seen for the first time. Refused if the address is already known. */
+  async register(input) {
+    const problems = problemsWithOutsider(input);
+    if (problems.length) throw new Invalid(problems.join('; '));
+    const email = input.email.toLowerCase();
+    if ((await this.addressesFor(email)).length)
+      throw new Invalid('We already know that address. Ask for a sign-in link instead.');
+
+    const client = await pool.connect();
+    try {
+      await client.query('begin');
+      const { rows: [person] } = await client.query(`
+        insert into person (first_name, last_name, date_of_birth, gender, email, phone)
+        values ($1,$2,$3,$4,$5,$6) returning id`,
+        [input.firstName.trim(), input.lastName.trim(), input.dateOfBirth || null,
+         normaliseGender(input.gender) ?? null, email, input.phone || null]);
+      const { rows: [account] } = await client.query(
+        `insert into account (email, person_id) values ($1,$2) returning id`, [email, person.id]);
+      await client.query(`insert into audit_log (account_id, action, entity, entity_id, after)
+        values ($1,'entrant_registered','person',$2,$3::jsonb)`,
+        [account.id, person.id, JSON.stringify({ via: 'event entry' })]);
+      await client.query('commit');
+      return { personId: person.id, accountId: account.id, email };
+    } catch (e) { await client.query('rollback'); throw e; } finally { client.release(); }
   },
 };

@@ -9,6 +9,10 @@
   },
   "rewrites": [
     {
+      "source": "/enter/:path*",
+      "destination": "/api/index"
+    },
+    {
       "source": "/enquire/:path*",
       "destination": "/api/index"
     },
