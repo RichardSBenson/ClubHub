@@ -157,16 +157,27 @@ nav.main a:hover{border-bottom-color:var(--primary)}
    checkbox holds open/closed, so the menu works wherever the page does. */
 .navtoggle,.navbtn,.navscrim,.navclose{display:none}
 
-.hero{background:var(--ink-soft);color:var(--canvas);padding:56px 0}
-.hero h1{font-family:var(--display);font-size:clamp(32px,5.4vw,52px);font-weight:700;
-  margin:0 0 14px;line-height:1.05;letter-spacing:-.02em}
-.hero p{font-size:19px;color:var(--neutral);margin:0 0 22px;max-width:46ch}
+.hero{position:relative;color:var(--canvas);padding:clamp(72px,14vw,150px) 0 clamp(56px,10vw,110px);
+  min-height:min(72vh,640px);display:flex;align-items:center;overflow:hidden;
+  background:
+    linear-gradient(115deg,rgba(0,0,0,.0) 0 62%,rgba(255,255,255,.04) 62% 63%,rgba(0,0,0,0) 63%),
+    radial-gradient(120% 90% at 85% 10%,var(--primary) 0,transparent 55%),
+    linear-gradient(160deg,var(--ink-soft),var(--ink))}
+.hero>.wrap{position:relative;width:100%}
+.hero h1{font-family:var(--display);font-size:clamp(36px,6.4vw,68px);font-weight:700;
+  margin:0 0 16px;line-height:1.04;letter-spacing:-.025em;max-width:22ch;text-wrap:balance}
+.hero p{font-size:clamp(17px,2.2vw,21px);color:var(--canvas);opacity:.88;margin:0 0 28px;max-width:46ch}
 .hero.photo{background-size:cover;background-position:center}
-.btn{display:inline-block;font-weight:700;padding:13px 26px;text-decoration:none;
-  border:2px solid var(--primary);background:var(--primary);color:#fff}
-.btn:hover{background:var(--primary-hover);border-color:var(--primary-hover)}
-.btn.ghost{background:none;color:var(--canvas);border-color:var(--canvas)}
+.hero .actions{display:flex;flex-wrap:wrap;gap:12px}
+.hero.small{min-height:0;padding:56px 0}
+.btn{display:inline-block;font-weight:700;padding:15px 30px;text-decoration:none;font-size:17px;
+  border:2px solid var(--primary);background:var(--primary);color:#fff;border-radius:2px;
+  transition:transform .15s ease,background .15s ease,box-shadow .15s ease}
+.btn:hover{background:var(--primary-hover);border-color:var(--primary-hover);transform:translateY(-1px);
+  box-shadow:0 6px 18px rgba(0,0,0,.25)}
+.btn.ghost{background:rgba(0,0,0,.25);color:var(--canvas);border-color:var(--canvas)}
 .btn.ghost:hover{background:var(--canvas);color:var(--ink)}
+.btn.light{background:var(--canvas);color:var(--ink);border-color:var(--canvas)}
 
 .facts{background:var(--ink);color:var(--canvas)}
 .facts .wrap{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));padding:0}
@@ -190,14 +201,21 @@ table.times th{text-align:left;font-family:var(--display);padding:10px 0;
 table.times td{padding:12px 0;border-bottom:1px solid var(--neutral)}
 table.times td:last-child{text-align:right;color:var(--muted)}
 
-.grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:2px;
-  background:var(--neutral)}
-.grid a{background:var(--canvas);padding:16px 18px;text-decoration:none;display:block;
-  color:var(--ink)}
-.grid a:hover{background:var(--primary);color:#fff}
-.grid strong{display:block;font-family:var(--display);font-size:18px}
-.grid span{font-size:14px;color:var(--muted)}
-.grid a:hover span{color:#fff}
+.grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:16px}
+.grid a{position:relative;display:flex;flex-direction:column;justify-content:flex-end;min-height:150px;
+  padding:16px 18px;text-decoration:none;color:#fff;overflow:hidden;border-radius:2px;
+  background:linear-gradient(160deg,var(--ink-soft),var(--ink));background-size:cover;background-position:center;
+  transition:transform .15s ease,box-shadow .15s ease}
+.grid a::before{content:"";position:absolute;inset:0;
+  background:linear-gradient(to top,rgba(0,0,0,.78),rgba(0,0,0,.05) 70%)}
+.grid a::after{content:"";position:absolute;left:0;right:0;bottom:0;height:4px;background:var(--primary)}
+.grid a>*{position:relative}
+.grid a:hover{transform:translateY(-3px);box-shadow:0 10px 24px rgba(0,0,0,.28)}
+.grid strong{display:block;font-family:var(--display);font-size:20px}
+.grid span{font-size:14px;opacity:.9}
+.cta{background:var(--primary);color:#fff;text-align:center;padding:48px 0}
+.cta h2{color:#fff;margin:0 0 18px}.cta h2::after{display:none}
+.stickycta{display:none}
 
 ul.events{list-style:none;padding:0;margin:0}
 ul.events li{display:grid;grid-template-columns:96px 1fr;gap:20px;padding:18px 0;
@@ -218,7 +236,7 @@ footer.site a{color:var(--neutral)}
 @media (max-width:860px){
   .facts .wrap{grid-template-columns:1fr}
   .facts div{border-right:0;border-bottom:1px solid var(--ink-soft)}
-  .grid{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .grid{grid-template-columns:repeat(3,minmax(0,1fr))}
   .navbtn{display:flex;margin-left:auto;width:44px;height:44px;align-items:center;
     justify-content:center;cursor:pointer;flex-direction:column;gap:5px}
   .navbtn i{display:block;width:24px;height:2px;background:var(--canvas)}
@@ -240,7 +258,11 @@ footer.site a{color:var(--neutral)}
   nav.main,.navscrim{transition:none!important}
 }
 @media (max-width:600px){
-  .grid{grid-template-columns:1fr}
+  .grid{grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
+  .grid a{min-height:120px}
+  .stickycta{display:block;position:sticky;bottom:0;z-index:15;padding:10px 16px;
+    background:var(--ink);border-top:3px solid var(--primary)}
+  .stickycta .btn{display:block;text-align:center;width:100%}
   ul.events li{grid-template-columns:64px 1fr;gap:14px}
 }`;
 }
@@ -343,12 +365,14 @@ export function dojoPage({ dojo, federation, events, origin, fonts, nav,
   const parts = {
     hero: () => `
 <div class="hero${dojo.hero_url ? ' photo' : ''}"${dojo.hero_url
-  ? ` style="background-image:linear-gradient(rgba(22,22,23,.62),rgba(22,22,23,.62)),url('${esc(dojo.hero_url)}')"`
+  ? ` style="background-image:linear-gradient(100deg,rgba(10,10,12,.78),rgba(10,10,12,.35)),url('${esc(dojo.hero_url)}')"`
   : ''}><div class="wrap">
   <h1>${esc(federation.name)} in ${esc(town)}</h1>
   <p>${esc(capitalise(artOf(federation)))} for adults and children. ${esc(daysLine)}.${
     free ? ' Your first class is free.' : ''}</p>
-  <a class="btn" href="#visit">Come to a class</a>
+  <div class="actions"><a class="btn" href="${free ? `/enquire/${esc(dojo.slug)}?kind=trial` : '#visit'}">${
+    free ? 'Book your free class' : 'Come to a class'}</a>
+  <a class="btn ghost" href="#times">See class times</a></div>
 </div></div>`,
 
     facts: () => `
@@ -369,7 +393,7 @@ export function dojoPage({ dojo, federation, events, origin, fonts, nav,
     startAnyWeek: () => startAnyWeekText
       ? `<div class="notice">${esc(startAnyWeekText)}</div>` : '',
 
-    times: () => `<h2>Training times</h2>
+    times: () => `<h2 id="times">Training times</h2>
   ${groups.length ? `<table class="times">
     <thead><tr><th>Class</th><th>Day</th><th>Time</th></tr></thead>
     <tbody>${groups.map((g) => `<tr>
@@ -405,7 +429,11 @@ export function dojoPage({ dojo, federation, events, origin, fonts, nav,
   if (!order.includes('facts')) order.splice(Math.min(1, order.length), 0, 'facts');
   if (!order.includes('findUs')) order.push('findUs');
 
-  const body = arrange(order, parts, new Set(['hero', 'facts']));
+  const trial = free ? `/enquire/${esc(dojo.slug)}?kind=trial` : '#visit';
+  const body = arrange(order, parts, new Set(['hero', 'facts']))
+    + `\n<section class="cta"><div class="wrap"><h2>${free ? 'Your first class is free' : 'Come and see a class'}</h2>`
+    + `<a class="btn light" href="${trial}">${free ? 'Book your free class' : 'Visit us'}</a></div></section>`
+    + `\n<div class="stickycta"><a class="btn" href="${trial}">${free ? 'Book your free class' : 'Visit us'}</a></div>`;
 
   return layout({
     title: `${capitalise(artOf(federation))} in ${town} — ${federation.name}`,
@@ -576,7 +604,7 @@ export function eventPage({ ev, federation, origin, fonts, nav,
                             base = '', vocabulary = {} }) {
   const at = (p) => `${base}${p}`;
   const body = `
-<div class="hero"><div class="wrap">
+<div class="hero small"><div class="wrap">
   <span class="tag">${esc(ev.kind.replace('_',' ').toUpperCase())}</span>
   <h1>${esc(ev.title)}</h1>
   <p>${esc(date(ev.starts_at))}${ev.venue_name ? ' · ' + esc(ev.venue_name) : ''}</p>
@@ -609,7 +637,7 @@ export function eventsPage({ events, federation, origin, fonts, nav,
                              base = '', vocabulary = {} }) {
   const at = (p) => `${base}${p}`;
   const body = `
-<div class="hero"><div class="wrap">
+<div class="hero small"><div class="wrap">
   <h1>Events</h1>
   <p>${events.length
     ? `${events.length} coming up.`
@@ -637,7 +665,7 @@ export function newsPage({ articles, federation, origin, fonts, nav,
                            base = '', vocabulary = {} }) {
   const at = (p) => `${base}${p}`;
   const body = `
-<div class="hero"><div class="wrap">
+<div class="hero small"><div class="wrap">
   <h1>News</h1>
 </div></div>
 <section><div class="wrap narrow">
@@ -661,7 +689,7 @@ export function articlePage({ article, html, federation, origin, fonts, nav,
                               base = '', vocabulary = {} }) {
   const at = (p) => `${base}${p}`;
   const body = `
-<div class="hero"><div class="wrap">
+<div class="hero small"><div class="wrap">
   <h1>${esc(article.title)}</h1>
   ${article.published_at ? `<p>${esc(date(article.published_at))}${
     article.about_org ? ' · ' + esc(article.about_org) : ''}</p>` : ''}
@@ -683,7 +711,7 @@ export function articlePage({ article, html, federation, origin, fonts, nav,
  * empty settings file still renders something.
  */
 export function homePage({ federation, dojos, events, articles, origin, fonts,
-                           nav, homeCopy = {}, base = '', vocabulary = {},
+                           nav, homeCopy = {}, base = '', vocabulary = {}, heroUrl = null,
                            sections = HOME_DEFAULT }) {
   const at = (p) => `${base}${p}`;
   const heading = homeCopy.heroHeading ?? 'Everyone starts somewhere.';
@@ -694,11 +722,13 @@ export function homePage({ federation, dojos, events, articles, origin, fonts,
 
   const parts = {
     hero: () => `
-<div class="hero"><div class="wrap">
+<div class="hero${heroUrl ? ' photo' : ''}"${heroUrl
+  ? ` style="background-image:linear-gradient(100deg,rgba(10,10,12,.78),rgba(10,10,12,.3)),url('${esc(heroUrl)}')"`
+  : ''}><div class="wrap">
   <h1>${esc(heading)}</h1>
   <p>${esc(heroText)}</p>
-  <a class="btn" href="${at('/find-a-dojo')}">${esc(heroButton)}</a>
-  <a class="btn ghost" href="${at('/events')}" style="margin-left:8px">Events</a>
+  <div class="actions"><a class="btn" href="${at('/find-a-dojo')}">${esc(heroButton)}</a>
+  <a class="btn ghost" href="${at('/events')}">Events</a></div>
 </div></div>`,
 
     // Only what each club has said. "Book a free class" was printed under
@@ -706,7 +736,8 @@ export function homePage({ federation, dojos, events, articles, origin, fonts,
     dojoGrid: () => dojos.length ? `<section><div class="wrap">
   <h2>Where we train</h2>
   <div class="grid">${dojos.slice(0,16).map((d) =>
-    `<a href="${at(`/${esc(d.slug)}`)}"><strong>${esc(d.name)}</strong><span>${
+    `<a href="${at(`/${esc(d.slug)}`)}"${d.hero_url
+      ? ` style="background-image:url('${esc(d.hero_url)}')"` : ''}><strong>${esc(d.name)}</strong><span>${
       d.first_class_free ? 'First class free' : 'See times'}</span></a>`).join('')}</div>
 </div></section>` : '',
 

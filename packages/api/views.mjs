@@ -4,6 +4,7 @@ import { describe as auditDescribe, weight as auditWeight }
 import { highlight as searchHighlight, linkTo as searchLinkTo }
   from '../content/search.mjs';
 import { REASON_WORDS } from '../core/domain/repeat-entry.mjs';
+import { slotHint, slotTable } from '../content/image-slots.mjs';
 import { WRITING_HELP } from '../content/document-text.mjs';
 import path from 'node:path';
 import { BLOCKS } from '../content/blocks.mjs';
@@ -1751,6 +1752,15 @@ export const mediaLibrary = ({ me, csrf, org, assets = [], accepted = [],
     <p><button class="btn" type="submit">Upload</button></p>
   </form>
 
+  <details class="card" style="margin-bottom:24px"><summary><strong>What size should pictures be?</strong></summary>
+    <p class="muted">The website crops a picture to fit its space and never stretches it. Bigger is fine
+      (up to the limit above); smaller than the minimum looks soft.</p>
+    <table><thead><tr><th>Picture</th><th>Aim for (pixels)</th><th>At least</th><th>Shape</th><th>Notes</th></tr></thead>
+    <tbody>${slotTable().map((r) => `<tr><td><strong>${esc(r.label)}</strong><br>
+      <span class="muted">${esc(r.where)}</span></td><td>${esc(r.size)}</td><td>${r.min} wide</td>
+      <td>${esc(r.ratio)}</td><td>${esc(r.safe)}</td></tr>`).join('')}</tbody></table>
+  </details>
+
   ${assets.length ? `<div class="grid">${assets.map((a) => `
     <div class="card">
       <img src="/a/${esc(a.id)}" alt="${esc(a.alt_text ?? '')}"
@@ -2393,6 +2403,7 @@ export const articleEditor = ({ me, csrf, org, article: a = null, values = {},
               your images as well.</span><br>
             <input id="heroFile" type="file" name="heroFile"
               accept="image/png,image/jpeg,image/gif,image/webp"></label></p>
+          <p class="hint">${esc(slotHint('card'))}</p>
           <p><label for="heroAlt">Describe it for somebody who cannot see it<br>
             <input id="heroAlt" type="text" name="heroAlt" maxlength="300"
               value="${esc(values.heroAlt ?? '')}"></label></p>
@@ -2638,6 +2649,7 @@ export const clubPageEditor = ({ me, csrf, org, profile = {}, sessions = [],
         <span class="hint">It is uploaded when you save, and goes into your images too.</span></label>
       <input id="heroFile" type="file" name="heroFile"
         accept="image/png,image/jpeg,image/gif,image/webp">
+      <p class="hint">${esc(slotHint('hero'))}</p>
       <label for="heroAlt">Describe it for somebody who cannot see it</label>
       <input id="heroAlt" name="heroAlt" maxlength="300" style="max-width:600px">
     </fieldset>

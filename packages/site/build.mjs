@@ -447,6 +447,7 @@ for (const target of SITES) {
     dojos, events: evs, articles,
     homeCopy: atRoot ? (rootSettings.homePage ?? {}) : strip(orgSettings.homePage ?? {}),
     sections: homeSections,
+    heroUrl: assets[(atRoot ? rootSettings.homePage : orgSettings.homePage)?.heroAssetId] ?? null,
     ...shared,
   }));
 

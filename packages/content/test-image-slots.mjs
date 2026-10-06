@@ -1,0 +1,13 @@
+import { SLOTS, slotHint, fitFor, slotTable } from './image-slots.mjs';
+let pass = 0, fail = 0;
+const ok = (n, c) => { c ? pass++ : (fail++, console.log('  ✗', n)); };
+ok('every slot has a size, a minimum and a note', Object.values(SLOTS).every((s) => s.width && s.height && s.minWidth && s.safe && s.where));
+ok('minimums never exceed the target', Object.values(SLOTS).every((s) => s.minWidth <= s.width));
+ok('the hint names the size', /2400 × 1000/.test(slotHint('hero')) && /5 MB/.test(slotHint('hero', 5 * 1024 * 1024)));
+ok('an unknown slot gives nothing', slotHint('nope') === '' && fitFor('nope', { width: 1, height: 1 }).length === 0);
+ok('a good hero passes', fitFor('hero', { width: 2400, height: 1000 }).length === 0);
+ok('a small one is warned about', /1000 pixels wide/.test(fitFor('hero', { width: 1000, height: 417 })[0]));
+ok('a tall phone photo is warned about its shape', fitFor('hero', { width: 2000, height: 3000 }).some((m) => /cropped/.test(m)));
+ok('no dimensions, no complaint', fitFor('hero', {}).length === 0);
+ok('the table lists every slot', slotTable().length === Object.keys(SLOTS).length);
+console.log(`${pass} passed, ${fail} failed`); process.exit(fail ? 1 : 0);

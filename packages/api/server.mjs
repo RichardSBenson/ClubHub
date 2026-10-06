@@ -70,6 +70,7 @@ import { destinations, menuFor, MAX_ITEMS } from '../content/navigation.mjs';
 import { ACTIONS as AUDIT_ACTIONS } from '../content/audit.mjs';
 import { documentFromText, textFromDocument }
   from '../content/document-text.mjs';
+import { fitFor } from '../content/image-slots.mjs';
 import { identify, NotAnImage, ACCEPTED, MAX_BYTES }
   from '../content/images.mjs';
 import { parseTable, planImport } from '../core/domain/roll-import.mjs';
@@ -2329,6 +2330,7 @@ post('/o/:slug/club-page', async (ctx) => {
   // A picture chosen here is uploaded here, as the article editor does it:
   // nobody should have to leave a half-filled form to go and find one.
   const hero = files.find((f) => f.field === 'heroFile' && f.bytes.length);
+  let heroWarning = null;
   if (hero) {
     try {
       const created = await assets.create(ctx.me.accountId, org.id, {
@@ -2336,6 +2338,7 @@ post('/o/:slug/club-page', async (ctx) => {
         filename: hero.filename, altText: form.heroAlt,
       });
       read.profile.hero_asset_id = created.id;
+      heroWarning = fitFor('hero', identify(hero.bytes, { filename: hero.filename }))[0];
     } catch (e) {
       if (e instanceof NotAnImage || e instanceof BadUpload || e instanceof Invalid)
         return clubPageScreen(ctx, org, { status: 422, error: e.message,
@@ -2355,7 +2358,7 @@ post('/o/:slug/club-page', async (ctx) => {
     const rebuild = after.state === 'live'
       ? await requestRebuild({ reason: `club page ${org.slug}` }) : null;
     return ctx.redirect(`/o/${org.slug}/club-page?done=${
-      encodeURIComponent('Saved.')}${rebuild
+      encodeURIComponent('Saved.' + (heroWarning ? ' ' + heroWarning : ''))}${rebuild
       ? '&rebuild=' + encodeURIComponent(rebuild.detail) : ''}`);
   } catch (e) {
     if (e instanceof ClubPageNotReady || e instanceof Invalid)
@@ -2769,7 +2772,9 @@ post('/o/:slug/media', async (ctx) => {
       consentRef: fields.consent_ref,
     });
 
-    return ctx.redirect(`${back}?done=${encodeURIComponent(`${file.filename} uploaded`)}`);
+    // Small is allowed, but say so: every slot needs at least 800 pixels across.
+    const small = fitFor('gallery', identified)[0];
+    return ctx.redirect(`${back}?done=${encodeURIComponent(`${file.filename} uploaded.${small ? ' ' + small : ''}`)}`);
   } catch (e) {
     // A refused upload goes back to the screen with the reason, rather than an
     // error page — the person is mid-task and the fix is usually obvious.

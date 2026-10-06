@@ -156,6 +156,8 @@ console.log('\nEVERY INTERNAL LINK GOES SOMEWHERE');
     const body = fs.readFileSync(f, 'utf8');
     for (const [, href] of body.matchAll(/href="(\/[^"#]*)"/g)) {
       const clean = href.split('?')[0].replace(/\/$/, '') || '/';
+      // /enquire/<club> is the enquiry form, answered by the application rather than built.
+      if (clean.startsWith('/enquire/')) continue;
       if (served.has(clean) || served.has(`${clean}/index.html`)) continue;
       broken.push(`${href}  <-  ${at(f)}`);
     }
