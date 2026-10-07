@@ -35,6 +35,7 @@ needed. That is deliberate. A page reading "Sensei [Name]" is worse than no page
 | latitude / longitude | -39.9187, 175.0200 — right-click the pin in Google Maps |
 | phone / email | the one that reaches the dojo operator directly |
 | directions | "Park at the back; side door by the playground." |
+| country / timezone | optional, only for a dojo outside the federation's own country: JP, Asia/Tokyo |
 | blurb | two or three sentences in their own words |
 | who_trains | one sentence on who actually trains there |
 

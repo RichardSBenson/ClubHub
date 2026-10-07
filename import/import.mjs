@@ -85,7 +85,7 @@ try {
         ({ rows: [org] } = await client.query(`
           insert into organisation (parent_id, type, name, slug, path, country_code, timezone, status)
           values ($1,'club',$2,$3,($4 || '.' || $5)::ltree,$6,$7,'active') returning id, name`,
-          [root.id, row.name, row.slug, root.path, row.slug.replace(/-/g, '_'), root.country_code, root.timezone]));
+          [root.id, row.name, row.slug, root.path, row.slug.replace(/-/g, '_'), nul(row.country) ?? root.country_code, nul(row.timezone) ?? root.timezone]));
         console.log(`  + added ${row.name} to the register`);
       }
     }
