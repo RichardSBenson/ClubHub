@@ -96,6 +96,8 @@ const rowsOf = (html) => (html.match(/name="pick_[0-9a-f-]+"/g) ?? []).length;
 console.log('\nTHE ROLL, HIGHEST GRADE FIRST');
 await signIn('doug@example.nz');
 {
+  const roll = await req('/o/whanganui/roster');
+  ok('the roll links straight to choosing instructors', /href="\/o\/whanganui\/instructors">Choose instructors/.test(roll.html));
   let r = await req('/o/whanganui/instructors');
   ok('the screen leads with a picker of the roll', r.status === 200 && /Choose your instructors/.test(r.html));
   const idx = order(r.html.slice(r.html.indexOf('Choose your instructors'), r.html.indexOf('Their cards')), ['Aroha Sandan', 'Ben Shodan', 'Tia Teen']);

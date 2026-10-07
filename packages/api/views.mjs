@@ -423,7 +423,7 @@ export const dashboard = ({ me, csrf, orgs, parents = [], groups = [] }) => {
   </div>`).join('')}</div>`).join('')}` });
 };
 
-export const roster = ({ me, csrf, org, roster, canRegister = false,
+export const roster = ({ me, csrf, org, roster, canRegister = false, canManage = false,
                         done }) => page({
   title: `${org.name} roster`, me, csrf, body: `
   <h1>${esc(org.name)}</h1>
@@ -431,12 +431,14 @@ export const roster = ({ me, csrf, org, roster, canRegister = false,
     <a href="/o/${esc(org.slug)}/grading">Run a grading</a> ·
     <a href="/o/${esc(org.slug)}/history">History</a> ·
     <a href="/o/${esc(org.slug)}/events">Events</a> ·
+    ${canManage ? `<a href="/o/${esc(org.slug)}/instructors">Instructors</a> ·` : ''}
     <a href="/o/${esc(org.slug)}/pages">Website</a></p>
 
   ${done ? `<div class="good">${esc(done)}</div>` : ''}
-  ${canRegister ? `<p class="actions" style="margin:0 0 20px">
-    <a class="btn" href="/o/${esc(org.slug)}/members/new">Add someone</a>
-    <a class="btn quiet" href="/o/${esc(org.slug)}/members/import">Import a spreadsheet</a>
+  ${canRegister || canManage ? `<p class="actions" style="margin:0 0 20px">
+    ${canRegister ? `<a class="btn" href="/o/${esc(org.slug)}/members/new">Add someone</a>
+    <a class="btn quiet" href="/o/${esc(org.slug)}/members/import">Import a spreadsheet</a>` : ''}
+    ${canManage ? `<a class="btn quiet" href="/o/${esc(org.slug)}/instructors">Choose instructors</a>` : ''}
   </p>` : ''}
   ${roster.length ? `<table>
     <thead><tr><th>Name</th><th>Grade</th><th class="hide-sm">Age</th>

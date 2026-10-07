@@ -332,6 +332,7 @@ get('/o/:slug/roster', async (ctx) => {
   return ctx.send(200, V.roster({
     me: ctx.me, org, roster, csrf: ctx.csrf,
     canRegister: await mayRegisterAt(ctx, org.id),
+    canManage: await mayPublishAt(ctx, org.id).catch(() => false),
     done: ctx.url.searchParams.get('done'),
   }));
 });
