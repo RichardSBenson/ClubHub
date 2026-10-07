@@ -95,6 +95,11 @@ await signIn('doug@example.nz');
   ok('ticking records the role', r.status === 302 && await instructorRows() === 1);
   r = await req(`/p/${sensei.id}`);
   ok('and the same profile now carries the badge', /class="idchip">Instructor/.test(r.html) && /checked/.test(r.html.slice(r.html.indexOf('name="instructor"'), r.html.indexOf('name="instructor"') + 120)));
+  ok('the profile says the website does not show them yet, with the way to change it', /Not shown yet/.test(r.html) && new RegExp(`href="/o/whanganui/instructors"[^>]*>Show them on the website`).test(r.html));
+  await signIn('hana.sensei@example.nz');
+  r = await req(`/me/${sensei.id}`);
+  ok('the instructor sees the same on their own page, without a switch they cannot use', /You are an instructor at/.test(r.html) && /Not on the dojo website yet/.test(r.html) && !/Show them on the website/.test(r.html));
+  await signIn('doug@example.nz');
   await req(`/p/${sensei.id}/instructor`, { method: 'POST', form: { instructor: 'on' } });
   ok('ticking twice changes nothing', await instructorRows() === 1);
 

@@ -364,6 +364,7 @@ get('/p/:id', async (ctx) => {
     done: ctx.url.searchParams.get('done'), photoError: ctx.url.searchParams.get('error'),
     titles: await people.titlesOf(ctx.me.accountId, ctx.params.id),
     recognisable: (await rank.recognisable(ctx.me.accountId, ctx.params.id)).grades,
+    instructorSite: await instructors.siteStatus(ctx.params.id),
     // Named `changes`, not `history`: this view already has a `history`, and
     // it is the grading history. Overwriting it with the audit log would have
     // replaced somebody's grades with a list of edits.

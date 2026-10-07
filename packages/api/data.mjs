@@ -1903,6 +1903,15 @@ export const news = {
 // ---------------------------------------------------------------------------
 
 export const instructors = {
+  /** Where this person is an instructor, and whether the dojo's website shows them yet. */
+  async siteStatus(personId) {
+    return one(`select o.slug, o.name, coalesce(ip.published, false) as published
+      from affiliation a join organisation o on o.id = a.organisation_id
+      left join instructor_profile ip on ip.person_id = a.person_id and ip.organisation_id = a.organisation_id
+      where a.person_id = $1 and a.role = 'instructor' and a.ends is null and a.status = 'active'
+      order by o.path limit 1`, [personId]);
+  },
+
   /**
    * Everybody holding the instructor role here, with their profile if they
    * have one. Instructors without a profile are included deliberately: the
@@ -2323,7 +2332,8 @@ export const myself = {
     const home = (await homesOf(personId))[0];
     const today = home ? await qualToday(home) : null;
     const quals = today ? describeAwards(await q(`${AWARD_SELECT} where qa.person_id = $1`, [personId]), today).filter((a) => a.counts) : [];
-    return { how, person, private: priv, grade, memberships, certificates, qualifications: quals };
+    return { how, person, private: priv, grade, memberships, certificates, qualifications: quals,
+             instructorSite: await instructors.siteStatus(personId) };
   },
 
   /** Only the fields a person may change about themselves. */

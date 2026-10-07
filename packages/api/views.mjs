@@ -454,7 +454,7 @@ export const roster = ({ me, csrf, org, roster, canRegister = false,
 
 export const person = ({ me, csrf, person, history, affiliations, eligibility,
                         titles = [], changes = [], guardians = null, training = null,
-                        canEdit = false, access = null, link = null, isInstructor = false, canManage = false, done = null, photoError = null, recognisable = [],
+                        canEdit = false, access = null, link = null, isInstructor = false, canManage = false, done = null, photoError = null, recognisable = [], instructorSite = null,
                         linkExpires = 15, error = null }) => page({
   title: `${person.first_name} ${person.last_name}`, me, csrf, body: `<style>${identityCss}
   .idphoto{background:#ddd}.idphoto.none{color:#666}.idchip{color:#9a2a1f}</style>
@@ -482,6 +482,12 @@ export const person = ({ me, csrf, person, history, affiliations, eligibility,
       Signing in to take the roll is a separate thing, under Access.</p>
     <button class="btn" type="submit">Save</button>
   </form>` : ''}
+
+  ${instructorSite ? `<div class="card" style="margin:12px 0"><h3 style="margin-top:0">On the ${esc(instructorSite.name)} website</h3>
+    <p>${instructorSite.published ? '<span class="tag ok">Shown</span> on the dojo page and the Instructors page.' : '<span class="tag wait">Not shown yet</span> The dojo page says "Introductions coming soon".'}</p>
+    ${canManage ? `<p><a class="btn" href="/o/${esc(instructorSite.slug)}/instructors">${instructorSite.published ? 'Change what it says' : 'Show them on the website'}</a></p>
+    <p class="hint">On that screen, tick <strong>Show on the website</strong>, add what they teach and a short about, and save.</p>`
+      : '<p class="hint">An owner or administrator of the dojo (or the federation) switches this on, under Instructors.</p>'}</div>` : ''}
 
   ${recognisable.length ? `<form method="post" action="/p/${esc(person.id)}/recognise-grade" class="card" style="margin:12px 0">
     <input type="hidden" name="_csrf" value="${esc(csrf ?? '')}">
@@ -3112,7 +3118,7 @@ export const myHome = ({ me, csrf, self, dependants = [] }) => page({
 
 /** One person, as they and their guardians may see and change it. */
 export const myPerson = ({ me, csrf, how, person, private: priv = {}, grade, memberships = [], certificates = [], qualifications = [],
-                           values = null, error, done }) => {
+                           values = null, error, done, instructorSite = null }) => {
   const v = (k, fallback) => esc(values?.[k] ?? fallback ?? '');
   const mine = how === 'self';
   return page({ title: `${person.first_name} ${person.last_name}`, me, csrf, body: `<style>${identityCss}</style>
@@ -3134,6 +3140,11 @@ export const myPerson = ({ me, csrf, how, person, private: priv = {}, grade, mem
   <p class="muted">Name, date of birth, grade and membership are kept by the club
     and federation. Ask them if one is wrong.</p>
 
+  ${instructorSite && mine ? `<h2>Instructor</h2>
+  <div class="card"><p>You are an instructor at ${esc(instructorSite.name)}.
+    ${instructorSite.published ? '<span class="tag ok">Shown on the dojo website</span>' : '<span class="tag wait">Not on the dojo website yet</span>'}</p>
+    ${instructorSite.published ? '' : '<p class="hint">Appearing on the website is the dojo\'s choice and yours: an owner or administrator of the dojo (or the federation) switches it on from the Instructors screen, once they have your photograph and a few words. Add your photograph below, and ask them.</p>'}</div>
+  ` : ''}
   <h2>Photograph</h2>
   <form method="post" action="/p/${esc(person.id)}/photo" enctype="multipart/form-data" class="card" style="margin:12px 0">
     <input type="hidden" name="_csrf" value="${esc(csrf ?? '')}">
