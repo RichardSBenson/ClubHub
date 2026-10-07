@@ -75,8 +75,20 @@ try {
   await client.query('begin');
 
   for (const row of dojos) {
-    const { rows: [org] } = await client.query(
+    let { rows: [org] } = await client.query(
       'select id, name from organisation where slug = $1', [row.slug]);
+    if (!org && row.name) {
+      // A dojo the register does not have yet is added beneath the federation, the way the Add a club screen does.
+      const { rows: [root] } = await client.query(
+        'select id, path, country_code, timezone from organisation where parent_id is null order by created_at limit 1');
+      if (root) {
+        ({ rows: [org] } = await client.query(`
+          insert into organisation (parent_id, type, name, slug, path, country_code, timezone, status)
+          values ($1,'club',$2,$3,($4 || '.' || $5)::ltree,$6,$7,'active') returning id, name`,
+          [root.id, row.name, row.slug, root.path, row.slug.replace(/-/g, '_'), root.country_code, root.timezone]));
+        console.log(`  + added ${row.name} to the register`);
+      }
+    }
     if (!org) { console.log(`  ? no organisation with slug "${row.slug}" — skipped`); continue; }
 
     const mine = byDojo.get(row.slug) ?? [];
