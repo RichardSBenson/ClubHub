@@ -53,14 +53,16 @@ function publishable(row, sessionCount) {
   return missing;
 }
 
-const [dojoFile, sessionFile] = process.argv.slice(2);
+const [dojoFile, sessionFile, instructorFile] = process.argv.slice(2);
 if (!dojoFile) {
-  console.error('usage: node import.mjs <dojos.csv> [sessions.csv]');
+  console.error('usage: node import.mjs <dojos.csv> [sessions.csv] [instructors.csv]');
   process.exit(1);
 }
 
 const dojos = parseCsv(fs.readFileSync(dojoFile, 'utf8'));
 const sessions = sessionFile ? parseCsv(fs.readFileSync(sessionFile, 'utf8')) : [];
+
+const instructors = instructorFile ? parseCsv(fs.readFileSync(instructorFile, 'utf8')) : [];
 
 const byDojo = new Map();
 for (const s of sessions) {
@@ -147,6 +149,61 @@ if (held.length) {
   console.log('\nHeld back — marked publish=yes but missing facts a visitor needs:');
   for (const h of held) console.log(`  ${h.slug.padEnd(16)} needs ${h.missing.join(', ')}`);
   console.log('\nA half-filled page is worse than no page. Fill these and re-run.');
+}
+
+// ---------------------------------------------------------------------------
+// Instructors: put each person on their dojo's roll as an instructor, at the dan grade they hold.
+// Re-runnable: a person already on the roll is found by name, not added twice, and a grade they
+// already hold (or a higher one) is left alone. This puts people on the roll; it does not put
+// them on the website. That still needs their own consent, a write-up and current checks.
+// ---------------------------------------------------------------------------
+if (instructors.length) {
+  const c = await pool.connect();
+  const out = { added: 0, onRoll: 0, instructor: 0, graded: 0 };
+  try {
+    await c.query('begin');
+    const { rows: [root] } = await c.query('select id, coalesce(short_name, slug) as prefix from organisation where parent_id is null order by created_at limit 1');
+    const prefix = String(root.prefix).toUpperCase().replace(/[^A-Z]/g, '').slice(0, 5) || 'M';
+    const { rows: [seq] } = await c.query(`select coalesce(max(substring(display_number from '[0-9]+$')::int), 0) as last from person where display_number like $1`, [`${prefix}-%`]);
+    let next = seq.last;
+    const { rows: ladder } = await c.query('select id, rank_order from grade where organisation_id = $1 and is_dan', [root.id]);
+    for (const r of instructors) {
+      const { rows: [org] } = await c.query('select id from organisation where slug = $1', [r.slug]);
+      if (!org) { console.log(`  ? no dojo "${r.slug}" for ${r.first_name} ${r.last_name} — skipped`); continue; }
+      const first = r.first_name.trim(), last = r.last_name.trim();
+      // The same name on another dojo's roll is the same person (Craig and Elaine teach at two), unless the row says it is not.
+      let { rows: [who] } = await c.query(
+        `select p.id from person p where lower(p.first_name) = lower($1) and lower(p.last_name) = lower($2)
+           and ($3 or exists (select 1 from affiliation a where a.person_id = p.id and a.organisation_id = $4))
+         order by p.created_at limit 1`, [first, last, !yes(r.distinct), org.id]);
+      if (!who) {
+        next += 1;
+        ({ rows: [who] } = await c.query(
+          `insert into person (display_number, first_name, last_name) values ($1,$2,$3) returning id`,
+          [`${prefix}-${String(next).padStart(4, '0')}`, first, last]));
+        out.added++;
+      }
+      const { rows: [aff] } = await c.query('select id, role from affiliation where person_id = $1 and organisation_id = $2 and ends is null', [who.id, org.id]);
+      if (!aff) {
+        await c.query(`insert into affiliation (person_id, organisation_id, role, starts, status) values ($1,$2,'instructor',current_date,'active')`, [who.id, org.id]);
+        out.onRoll++; out.instructor++;
+      } else if (aff.role === 'member') {
+        await c.query(`update affiliation set role = 'instructor' where id = $1`, [aff.id]);
+        out.instructor++;
+      }
+      const target = ladder.find((g) => g.rank_order === 10 + Number(r.dan));
+      if (target) {
+        const { rows: [held] } = await c.query('select max(g.rank_order) as top from grading_record gr join grade g on g.id = gr.grade_id where gr.person_id = $1 and gr.result = $2', [who.id, 'pass']);
+        if (!held.top || held.top < target.rank_order) {
+          await c.query(`insert into grading_record (person_id, grade_id, awarded_on, awarded_by_org, result, panel, notes) values ($1,$2,current_date,$3,'pass','[]',$4)`,
+            [who.id, target.id, org.id, "Held on joining. Imported from the dojo's own records; not graded through this system."]);
+          out.graded++;
+        }
+      }
+    }
+    await c.query('commit');
+  } catch (e) { await c.query('rollback'); throw e; } finally { c.release(); }
+  console.log(`Instructors: ${out.added} people added, ${out.instructor} made or kept as instructors, ${out.graded} grades recorded.`);
 }
 
 const { rows: [tally] } = await pool.query(`

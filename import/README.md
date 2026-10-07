@@ -48,3 +48,23 @@ of them.
 One row per class per night. The site groups them, so
 `Tuesday 17:30` and `Thursday 17:30` with the same label render as one row
 reading "Tuesday & Thursday".
+
+## Instructors
+
+`instructors.csv` puts people on a dojo's roll as instructors, at the dan grade they hold:
+
+```bash
+node import.mjs dojos.csv sessions.csv instructors.csv
+```
+
+Columns: `slug, first_name, last_name, dan` (1 to 8), and `distinct` (`yes` when the same name
+elsewhere is a different person). Re-runnable: a person already on the roll is found by name
+and not added twice, the same name on another dojo's roll is the same person (two people who
+teach at two dojo get a second affiliation), and a grade they already hold or beat is left alone.
+
+Grades are recorded as held on joining, not awarded here. Dojo operators are not made
+administrators by this import; giving someone access to run a dojo is a separate, deliberate step.
+
+This puts people on the roll. It does not put them on the website: that still needs each
+instructor's own consent, a write-up of up to 280 characters, and current first aid, police
+vetting and child protection checks (see docs/instructors.md).
