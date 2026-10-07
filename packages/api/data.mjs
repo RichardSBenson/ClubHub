@@ -9,6 +9,8 @@
 // The pool lives in infrastructure, where it belongs. Re-exported here because
 // plenty of adapter code already imports it from this module.
 export { pool } from '../infrastructure/postgres/pool.mjs';
+import { applyRegister } from './register-import.mjs';
+import { parseCsv } from '../core/domain/register-csv.mjs';
 import { pool } from '../infrastructure/postgres/pool.mjs';
 import { problemsWithPerson, problemsWithMembership, normaliseGender }
   from '../core/domain/people.mjs';
@@ -1558,6 +1560,41 @@ export const pages = {
 // that listing a media library does not pull megabytes through the connection
 // to show a filename.
 // ---------------------------------------------------------------------------
+
+/**
+ * Load the dojo register's three CSV files (dojos, class times, instructors) into this federation.
+ *
+ * `confirm: false` runs the whole thing and rolls it back, so the preview is exactly what saving
+ * would do. Owners and administrators of the federation only.
+ */
+export const registerImport = {
+  async run(actor, orgId, files, { confirm = false } = {}) {
+    await assertRole(actor, orgId, MANAGE);
+    const parent = await one('select type, parent_id from organisation where id = $1', [orgId]);
+    if (!parent) throw new NotFound('Organisation');
+    if (parent.type === 'club') throw new Invalid('A club cannot import other clubs.');
+    const read = (t) => (String(t ?? '').trim() ? parseCsv(String(t)) : []);
+    const dojos = read(files.dojos), sessions = read(files.sessions), instructors = read(files.instructors);
+    if (!dojos.length && !sessions.length && !instructors.length) throw new Invalid('Paste at least one file.');
+    for (const [name, rows, cols] of [['dojos', dojos, ['slug']], ['sessions', sessions, ['slug', 'weekday', 'starts', 'ends']],
+                                      ['instructors', instructors, ['slug', 'first_name', 'last_name', 'dan']]]) {
+      if (rows.length) for (const c of cols) if (!(c in rows[0])) throw new Invalid(`The ${name} file has no "${c}" column.`);
+    }
+    const client = await pool.connect();
+    try {
+      await client.query('begin');
+      const report = await applyRegister(client, { dojos, sessions, instructors });
+      if (confirm) {
+        await client.query(`insert into audit_log (account_id, organisation_id, action, entity, entity_id, after)
+          values ($1,$2,'register_import','organisation',$2,$3::jsonb)`,
+          [actor, orgId, JSON.stringify({ dojos: dojos.length, sessions: sessions.length, instructors: instructors.length,
+                                          updated: report.updated, published: report.published, people: report.people })]);
+        await client.query('commit');
+      } else await client.query('rollback');
+      return report;
+    } catch (e) { await client.query('rollback').catch(() => {}); throw e; } finally { client.release(); }
+  },
+};
 
 /**
  * Store an image and its bytes in one transaction. No role check: the caller has already

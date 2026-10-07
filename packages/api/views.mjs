@@ -2908,6 +2908,39 @@ export const appearanceEditor = ({ me, csrf, org, current, builtIn = [], home = 
   </form>`, });
 };
 
+/** Load the dojo register's CSV files into a federation: paste, preview, confirm. */
+export const registerImportScreen = ({ me, csrf, org, files = {}, report = null, saved = false, error }) => {
+  const box = (id, label, hint) => `<label for="${id}">${esc(label)}</label>
+    <p class="muted">${hint}</p>
+    <textarea id="${id}" name="${id}" rows="6" spellcheck="false" style="font-family:monospace">${esc(files[id] ?? '')}</textarea>`;
+  const list = (rows) => rows.length ? `<ul>${rows.map((r) => `<li>${r}</li>`).join('')}</ul>` : '';
+  return page({ title: `Import dojo — ${org.name}`, me, csrf, body: `
+  <h1>Import dojo, class times and instructors</h1>
+  <p class="sub">${esc(org.name)}</p>
+  <p><a href="/o/${esc(org.slug)}/clubs">Back to clubs</a></p>
+  ${error ? `<div class="bad">${esc(error)}</div>` : ''}
+  ${report ? `<div class="${saved ? 'good' : 'note'}"><strong>${saved ? 'Saved.' : 'Preview. Nothing is saved yet.'}</strong>
+    ${report.updated} dojo ${saved ? 'updated' : 'would be updated'}, ${report.published} ${saved ? 'published' : 'would be published'}.
+    ${report.people.added || report.people.instructors ? `${report.people.added} people ${saved ? 'added' : 'would be added'}, ${report.people.instructors} ${saved ? 'made' : 'would be made'} instructors, ${report.people.graded} grades recorded.` : ''}
+    ${list(report.added.map((n) => `${esc(n)} ${saved ? 'was' : 'would be'} added as a new dojo`))}
+    ${report.held.length ? `<p>Held back, not published, because something a visitor needs is missing:</p>${list(report.held.map((h) => `${esc(h.name)} needs ${esc(h.missing.join(', '))}`))}` : ''}
+    ${list(report.notes.map(esc))}
+  </div>` : ''}
+  <p>Paste the contents of each CSV file. Blank means unknown and is never filled in for you.
+  Importing twice does not duplicate anything. This puts instructors on their dojo's roll; showing them on the
+  website still needs their own consent, a write-up and current checks.</p>
+  <form method="post" action="/o/${esc(org.slug)}/register-import">
+    <input type="hidden" name="_csrf" value="${esc(csrf ?? '')}">
+    ${box('dojos', 'Dojo', 'Columns: slug, name, venue_name, address_line, suburb, city, postcode, latitude, longitude, phone, email, directions, blurb, who_trains, instructor_name, instructor_grade, publish (and optionally country, timezone)')}
+    ${box('sessions', 'Class times', 'Columns: slug, label, weekday, starts, ends, min_age, max_age')}
+    ${box('instructors', 'Instructors', 'Columns: slug, first_name, last_name, dan, distinct')}
+    <div class="actions">
+      <button class="btn" type="submit">${report && !saved ? 'Check again' : 'Preview'}</button>
+      ${report && !saved ? '<button class="btn" type="submit" name="confirm" value="yes">Save these changes</button>' : ''}
+    </div>
+  </form>`, });
+};
+
 /**
  * The clubs beneath an organisation, and adding one.
  *
@@ -2932,6 +2965,7 @@ export const clubsScreen = ({ me, csrf, org, clubs = [], values = {}, error,
          minutes, and is not shown again):<br><code style="word-break:break-all">${esc(link)}</code>`
       : ''}` : ''}</div>` : ''}
 
+  <p><a href="/o/${esc(org.slug)}/register-import">Import dojo, class times and instructors from CSV files</a></p>
   <h2>Add a club</h2>
   <form method="post" action="/o/${esc(org.slug)}/clubs/new">
     <input type="hidden" name="_csrf" value="${esc(csrf ?? '')}">

@@ -33,7 +33,7 @@
 import crypto from 'node:crypto';
 import { URL } from 'node:url';
 import { photos, instructorRole, eventDetails, gallery, MAX_GALLERY, pool, orgs, people, rank, events, competition, pages, assets, news,
-         instructors, navigation, audit, cards, checkin, search, clubPages, appearance, clubs, clubProfile, family, myself, memberEvents, messages, emailPreferences, payments, fees, renewals, reminders, attendance, newcomers, reports, gradings, qualifications, forms, autoRenew, booking, push, apiTokens, api, webhooks, platform, portal, enquiries, scheduledPublishing, TooMany, outsiders, trials, referrals, growth, clubMailer, terms,
+         instructors, navigation, audit, cards, checkin, search, clubPages, appearance, clubs, registerImport, clubProfile, family, myself, memberEvents, messages, emailPreferences, payments, fees, renewals, reminders, attendance, newcomers, reports, gradings, qualifications, forms, autoRenew, booking, push, apiTokens, api, webhooks, platform, portal, enquiries, scheduledPublishing, TooMany, outsiders, trials, referrals, growth, clubMailer, terms,
          Forbidden, NotFound, Invalid } from './data.mjs';
 import * as auth from './auth.mjs';
 import * as V from './views.mjs';
@@ -2545,6 +2545,32 @@ get('/o/:slug/clubs', async (ctx) => {
   const org = await organisationFor(ctx);
   if (org.type === 'club') return ctx.redirect(`/o/${org.slug}/club-page`);
   return clubsScreen(ctx, org);
+});
+
+// Loading the dojo register's CSV files: dojos, class times and instructors. Preview first; nothing is saved until confirmed.
+async function registerImportScreen(ctx, org, extra = {}) {
+  return ctx.send(extra.status ?? 200, V.registerImportScreen({ me: ctx.me, org, csrf: ctx.csrf, ...extra }));
+}
+
+get('/o/:slug/register-import', async (ctx) => {
+  const org = await organisationFor(ctx);
+  if (org.type === 'club') throw new Forbidden('Only a federation or region can import dojo.');
+  return registerImportScreen(ctx, org);
+});
+
+post('/o/:slug/register-import', async (ctx) => {
+  const org = await organisationFor(ctx);
+  if (org.type === 'club') throw new Forbidden('Only a federation or region can import dojo.');
+  const form = await ctx.form();
+  const files = { dojos: form.dojos ?? '', sessions: form.sessions ?? '', instructors: form.instructors ?? '' };
+  try {
+    const confirm = form.confirm === 'yes';
+    const report = await registerImport.run(ctx.me.accountId, org.id, files, { confirm });
+    return registerImportScreen(ctx, org, { files, report, saved: confirm });
+  } catch (e) {
+    if (e instanceof Invalid) return registerImportScreen(ctx, org, { status: 422, files, error: e.message });
+    throw e;
+  }
 });
 
 post('/o/:slug/clubs/new', async (ctx) => {
