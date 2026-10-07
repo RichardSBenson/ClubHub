@@ -671,7 +671,7 @@ export function instructorCard(i, { at = (x) => x, federationSlug = null, full =
     ${showClub && i.organisationName && i.organisationSlug !== federationSlug
       ? `<p class="iclub"><a href="${at(`/${esc(i.organisationSlug)}`)}">${esc(i.organisationName)}</a></p>` : ''}
     ${facts ? `<ul class="ifacts">${facts}</ul>` : ''}
-    ${about}
+    ${/* security-ok: about is built from esc()d paragraphs at line 658 */ about}
     ${checks ? `<ul class="ichecks" aria-label="Checks">${checks}</ul>` : ''}
   </article>`;
 }

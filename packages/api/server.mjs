@@ -181,9 +181,11 @@ get('/admin', async (ctx) => ctx.redirect(ctx.me ? '/dashboard' : '/signin'));
 // slash could send a signed-in person somewhere else.
 const safeNext = (v) => (typeof v === 'string' && /^\/[A-Za-z0-9_\-./?=&%~]*$/.test(v) && !v.startsWith('//') && v.length < 600) ? v : null;
 
+// security-ok: public by design: the sign-in page is how anyone gets in, and next is checked by safeNext
 get('/signin', async (ctx) => ctx.send(200, V.signIn({
   sent: ctx.url.searchParams.get('sent'), csrf: ctx.csrf, next: safeNext(ctx.url.searchParams.get('next')) ?? '' })));
 
+// security-ok: public by design: anyone may ask for a sign-in link; the form is CSRF-checked and rate limited
 post('/signin', async (ctx) => {
   const form = await ctx.form();
   try {
@@ -267,6 +269,7 @@ get('/try/:slug', async (ctx) => {
   return ctx.redirect('/dashboard');
 });
 
+// security-ok: works on the caller's own session cookie only; the form is CSRF-checked
 post('/signout', async (ctx) => {
   await ctx.form();
   if (ctx.sessionToken) await auth.signOut(ctx.sessionToken);
@@ -1988,6 +1991,7 @@ post('/o/:slug/newcomers', async (ctx) => {
 
 post('/o/:slug/newcomers/:id/join', async (ctx) => {
   const org = await organisationFor(ctx);
+  await ctx.form();
   if (!UUID_RE.test(ctx.params.id)) throw new NotFound('Newcomer');
   try {
     const { person } = await newcomers.join(ctx.me.accountId, org.id, ctx.params.id);
@@ -2000,6 +2004,7 @@ post('/o/:slug/newcomers/:id/join', async (ctx) => {
 
 post('/o/:slug/newcomers/:id/stop', async (ctx) => {
   const org = await organisationFor(ctx);
+  await ctx.form();
   if (!UUID_RE.test(ctx.params.id)) throw new NotFound('Newcomer');
   try {
     await newcomers.notContinuing(ctx.me.accountId, org.id, ctx.params.id);
@@ -2084,6 +2089,7 @@ post('/o/:slug/gradings/:eventId/enter', async (ctx) => {
 
 post('/o/:slug/gradings/:eventId/withdraw/:entryId', async (ctx) => {
   const org = await organisationFor(ctx, { toRegister: true });
+  await ctx.form();
   if (!UUID_RE.test(ctx.params.eventId) || !UUID_RE.test(ctx.params.entryId)) throw new NotFound('Entry');
   try {
     await gradings.withdraw(ctx.me.accountId, org.id, ctx.params.entryId);
@@ -2206,6 +2212,7 @@ post('/o/:slug/compliance/qualifications', async (ctx) => {
 
 post('/o/:slug/compliance/qualifications/:id/remove', async (ctx) => {
   const org = await organisationFor(ctx, { toRegister: true });
+  await ctx.form();
   if (!UUID_RE.test(ctx.params.id)) throw new NotFound('Qualification');
   try {
     await qualifications.retire(ctx.me.accountId, org.id, ctx.params.id);
@@ -2246,6 +2253,7 @@ post('/p/:id/qualifications', async (ctx) => {
 
 post('/p/:id/qualifications/:awardId/remove', async (ctx) => {
   ctx.requireActor();
+  await ctx.form();
   if (!UUID_RE.test(ctx.params.id) || !UUID_RE.test(ctx.params.awardId)) throw new NotFound('Record');
   await qualifications.removeAward(ctx.me.accountId, ctx.params.id, ctx.params.awardId);
   return ctx.redirect(`/p/${ctx.params.id}/qualifications?done=${encodeURIComponent('Removed.')}`);
@@ -3368,6 +3376,7 @@ post('/o/:slug/media/:assetId/describe', async (ctx) => {
 
 post('/o/:slug/media/:assetId/delete', async (ctx) => {
   const org = await organisationFor(ctx, { toWrite: true });
+  await ctx.form();
   const back = `/o/${org.slug}/media`;
   try {
     const { filename } = await assets.remove(ctx.me.accountId, ctx.params.assetId);

@@ -926,7 +926,7 @@ function previewOf(p, org, csrf, text) {
         .filter(Boolean).join(' ') || '—')}</strong>
         ${r.values.email ? `<div class="muted">${esc(r.values.email)}</div>` : ''}</td>
       <td class="hide-sm">${esc(r.values.dateOfBirth ?? '')}</td>
-      <td><span class="tag ${cls}">${label}</span>
+      <td><span class="tag ${cls}">${/* security-ok: label comes from the fixed ACTION_TAGS table */ label}</span>
         ${r.problems.length ? `<div class="muted">${
           r.problems.map(esc).join('; ')}</div>` : ''}
         ${r.notes.length ? `<div class="muted">${
@@ -1150,8 +1150,8 @@ const option = (value, label, selected) =>
 
 const checkbox = (name, label, checked, hint = '') => `
   <div class="check">
-    <input type="checkbox" id="${name}" name="${name}" value="1"${checked ? ' checked' : ''}>
-    <label for="${name}" style="margin:0;font-weight:400">${esc(label)}
+    <input type="checkbox" id="${/* security-ok: name is a developer-chosen field name, never request data */ name}" name="${/* security-ok: name is a developer-chosen field name, never request data */ name}" value="1"${checked ? ' checked' : ''}>
+    <label for="${/* security-ok: name is a developer-chosen field name, never request data */ name}" style="margin:0;font-weight:400">${esc(label)}
       ${hint ? `<span class="hint">${esc(hint)}</span>` : ''}</label>
   </div>`;
 
@@ -2608,7 +2608,7 @@ export const clubPageEditor = ({ me, csrf, org, profile = {}, sessions = [],
   const base = `/o/${org.slug}/club-page`;
   const post = (path, label, cls = 'btn') => `<form method="post" action="${base}/${path}">
     <input type="hidden" name="_csrf" value="${esc(csrf ?? '')}">
-    <button class="${cls}" type="submit">${label}</button></form>`;
+    <button class="${cls}" type="submit">${/* security-ok: label is a literal passed by the calling screen */ label}</button></form>`;
 
   const status = {
     live: `<div class="good"><strong>Your page is on the website.</strong>
@@ -2722,7 +2722,7 @@ export const clubPageEditor = ({ me, csrf, org, profile = {}, sessions = [],
             ${i === 0 ? 'placeholder="Juniors" ' : ''}aria-label="Class ${i + 1} name">
           <select name="session_day_${i}" aria-label="Class ${i + 1} day">
             <option value=""></option>${WEEKDAYS.map(([n, name]) => `<option value="${n}"${
-              t.weekday === n ? ' selected' : ''}>${name}</option>`).join('')}</select>
+              t.weekday === n ? ' selected' : ''}>${/* security-ok: name comes from the fixed WEEKDAYS table */ name}</option>`).join('')}</select>
           <input name="session_starts_${i}" type="time" value="${esc(t.starts)}"
             aria-label="Class ${i + 1} starts">
           <input name="session_ends_${i}" type="time" value="${esc(t.ends)}"
@@ -2757,7 +2757,7 @@ export const clubPageList = ({ me, csrf, org, clubs = [], vocabulary = {},
   const decide = (c, answer, label, cls) => `<form method="post"
     action="/o/${esc(org.slug)}/club-pages/${esc(c.id)}/decide" style="display:inline">
     <input type="hidden" name="_csrf" value="${esc(csrf ?? '')}">
-    <button class="${cls}" type="submit" name="answer" value="${answer}">${label}</button>
+    <button class="${cls}" type="submit" name="answer" value="${answer}">${/* security-ok: label is a literal passed by the calling screen */ label}</button>
   </form>`;
 
   const tag = (c) => ({
@@ -3698,7 +3698,7 @@ export const rollScreen = ({ me, csrf, org, session, date, members = [], visitor
 
 export const newcomerForm = ({ me, csrf, org, values = {}, error, sessionId = '', date = '' }) => {
   const v = (k) => esc(values[k] ?? '');
-  const f = (id, label, extra = '') => `<label for="${id}">${label}</label><input id="${id}" name="${id}" value="${v(id)}" ${extra}>`;
+  const f = (id, label, extra = '') => `<label for="${id}">${/* security-ok: label is a literal passed by the calling screen */ label}</label><input id="${id}" name="${id}" value="${v(id)}" ${extra}>`;
   return page({ title: `${org.name} — new person`, me, csrf, body: `
   <p><a href="/o/${esc(org.slug)}/${sessionId ? `attendance/${esc(sessionId)}?date=${esc(date)}` : 'newcomers'}">← Back</a></p>
   <h1>Somebody new</h1>
@@ -4701,7 +4701,7 @@ export const formList = ({ me, csrf, org, rows = [], inherited = [], starters = 
 const KIND_WORDS = { waiver: 'Waiver', consent: 'Consent', medical: 'Medical', other: 'Other' };
 const TYPE_WORDS = { agree: 'A statement to agree to (a tick)', text: 'Short answer', longtext: 'Long answer', choice: 'Pick one', checkboxes: 'Pick any', date: 'Date' };
 const AUD_WORDS = { all: 'Everyone on the roll', juniors: 'Juniors (under 18)', seniors: 'Seniors (18 and over)' };
-const sel = (name, words, cur) => `<select name="${name}">${Object.entries(words).map(([k, w]) => `<option value="${esc(k)}"${k === cur ? ' selected' : ''}>${esc(w)}</option>`).join('')}</select>`;
+const sel = (name, words, cur) => `<select name="${/* security-ok: name is a developer-chosen field name, never request data */ name}">${Object.entries(words).map(([k, w]) => `<option value="${esc(k)}"${k === cur ? ' selected' : ''}>${esc(w)}</option>`).join('')}</select>`;
 
 export const formEditor = ({ me, csrf, org, form: f, canManage = false, done, error }) => {
   const tok = formTok(csrf), base = `/o/${esc(org.slug)}/forms/${esc(f.id)}`;
@@ -4722,7 +4722,7 @@ export const formEditor = ({ me, csrf, org, form: f, canManage = false, done, er
        <label>Ask again every <input name="renewMonths" type="number" min="1" max="60" value="${esc(f.renew_months ?? '')}" style="width:4em"> months (blank = once)</label></p>
     <p><label>Introduction<br><textarea name="intro" rows="3" maxlength="3000">${esc(f.intro ?? '')}</textarea></label></p>
     <button class="btn" type="submit">Save details</button></form>` : ''}
-  <h2>Questions (${f.fields.length})</h2>
+  <h2>Questions (${/* security-ok: a number: the count of fields */ f.fields.length})</h2>
   ${f.fields.map((q, i) => `<div class="card"><p><strong>${i + 1}.</strong> ${esc(q.label)} <span class="muted">— ${esc(TYPE_WORDS[q.type])}${q.required ? ', required' : ''}</span></p>
     ${q.options?.length ? `<p class="muted">${q.options.map(esc).join(' · ')}</p>` : ''}
     ${canManage ? `<details><summary>Edit</summary>${fieldForm(q)}</details>
@@ -4782,7 +4782,7 @@ export const fillForm = ({ me, csrf, person, item, minor = false, values = {}, e
   ${error ? `<div class="bad">${esc(error)}</div>` : ''}
   ${f.intro ? `<p style="white-space:pre-wrap">${esc(f.intro)}</p>` : ''}
   <form method="post" action="/me/forms/${esc(f.id)}/${esc(person.id)}">${formTok(csrf)}
-    ${f.fields.map((q) => `<p>${input(q)}</p>`).join('')}
+    ${/* security-ok: input() escapes every value it writes */ f.fields.map((q) => `<p>${input(q)}</p>`).join('')}
     <h2>Sign</h2>
     <p><label>${minor ? `Your full name, as ${esc(person.first_name)}'s parent or guardian` : 'Your full name'}<br><input name="signedName" maxlength="120" required autocomplete="name" value="${esc(values.signedName ?? '')}"></label></p>
     <button class="btn" type="submit">Sign and submit</button></form>` });

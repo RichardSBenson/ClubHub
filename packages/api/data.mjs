@@ -193,7 +193,7 @@ export const people = {
       join organisation o on o.id = a.organisation_id
       left join person_current_grade cg on cg.person_id = p.id
       ${includePrivate ? 'left join person_private pv on pv.person_id = p.id' : ''}
-      where ${scope} and a.ends is null
+      where ${scope} and a.ends is null /* security-ok: scope is one of two fixed fragments chosen just above */
       order by cg.rank_order desc nulls last, p.last_name`, [orgId]);
   },
 
@@ -658,7 +658,7 @@ export const people = {
       if (sets.length) {
         const cols = sets.map(([c], i) => `${c} = $${i + 2}`).join(', ');
         await client.query(
-          `update person set ${cols}, updated_at = now() where id = $1`,
+          `update person set ${cols}, updated_at = now() where id = $1`, /* security-ok: column names come from a fixed whitelist of person fields, values are placeholders */
           [personId, ...sets.map(([, v]) => (v === '' ? null : v))]);
       }
 
@@ -5129,7 +5129,7 @@ import { problemsWithScheduleDate } from '../core/domain/scheduling.mjs';
 
 const schedulable = (table, label) => ({
   async schedule(actor, id, date) {
-    const row = await one(`select t.id, t.organisation_id, t.title, t.status, o.timezone from ${table} t
+    const row = await one(`select t.id, t.organisation_id, t.title, t.status, o.timezone from ${table} t /* security-ok: table is a literal passed by schedulable() for page or article only */
       join organisation o on o.id = t.organisation_id where t.id = $1`, [id]);
     if (!row) throw new NotFound(label);
     await assertRole(actor, row.organisation_id, MANAGE);
@@ -5137,23 +5137,23 @@ const schedulable = (table, label) => ({
     const today = (await one(`select to_char((now() at time zone $1)::date,'YYYY-MM-DD') as d`, [row.timezone])).d;
     const problems = problemsWithScheduleDate(date, today);
     if (problems.length) throw new Invalid(problems.join(' '));
-    await q(`update ${table} set publish_at = ($2::date)::timestamp at time zone $3 where id = $1`, [id, date, row.timezone]);
+    await q(`update ${table} set publish_at = ($2::date)::timestamp at time zone $3 where id = $1`, [id, date, row.timezone]); /* security-ok: table is a literal passed by schedulable() for page or article only */
     await q(`insert into audit_log (account_id, organisation_id, action, entity, entity_id, after)
       values ($1,$2,'publish_scheduled',$3,$4,$5)`, [actor, row.organisation_id, table, id, JSON.stringify({ title: row.title, date })]);
     return { date };
   },
 
   async unschedule(actor, id) {
-    const row = await one(`select organisation_id, title from ${table} where id=$1`, [id]);
+    const row = await one(`select organisation_id, title from ${table} where id=$1`, [id]); /* security-ok: table is a literal passed by schedulable() for page or article only */
     if (!row) throw new NotFound(label);
     await assertRole(actor, row.organisation_id, MANAGE);
-    await q(`update ${table} set publish_at = null where id=$1`, [id]);
+    await q(`update ${table} set publish_at = null where id=$1`, [id]); /* security-ok: table is a literal passed by schedulable() for page or article only */
     await q(`insert into audit_log (account_id, organisation_id, action, entity, entity_id, after)
       values ($1,$2,'publish_unscheduled',$3,$4,$5)`, [actor, row.organisation_id, table, id, JSON.stringify({ title: row.title })]);
   },
 
   async scheduledFor(id) {
-    return (await one(`select to_char(publish_at at time zone o.timezone,'YYYY-MM-DD') as d from ${table} t
+    return (await one(`select to_char(publish_at at time zone o.timezone,'YYYY-MM-DD') as d from ${table} t /* security-ok: table is a literal passed by schedulable() for page or article only */
       join organisation o on o.id = t.organisation_id where t.id=$1 and t.status='draft' and t.publish_at is not null`, [id]))?.d ?? null;
   },
 });
@@ -6055,7 +6055,7 @@ export const growth = {
           (r, url) => `Hi ${r.first_name},\n\nYour free month at ${org.name} ends on ${r.ends}. To keep training without a gap, join here:\n${url}\n\nIf it is not for you, no need to do anything.`]]) {
         for (const r of list) {
           const sent = await clubMail(org, { messenger, baseFrom }, r.email, subject(r), text(r, await link(r)));
-          await pool.query(`update member_trial set ${col} = now() where id = $1`, [r.id]);   // marked even if the mail failed: do not nag daily
+          await pool.query(`update member_trial set ${col} = now() where id = $1`, [r.id]);   // marked even if the mail failed: do not nag daily /* security-ok: col is one of two literal column names in the loop above */
           if (sent) report.reminded++;
         }
       }
@@ -6140,7 +6140,7 @@ const termRow = `st.id, st.organisation_id, st.year, st.number, st.name, to_char
 
 /** The terms that apply to this organisation for a year: its own, or the nearest ancestor's. */
 async function effectiveTerms(orgId, year) {
-  const rows = await q(`select ${termRow}, o.name as owner, nlevel(o.path) as depth
+  const rows = await q(`select ${termRow}, o.name as owner, nlevel(o.path) as depth /* security-ok: termRow is a fixed column list defined at module level */
     from school_term st join organisation o on o.id = st.organisation_id
     join organisation me on me.id = $1 and me.path <@ o.path
     where st.year = $2 order by nlevel(o.path) desc, st.number`, [orgId, year]);
@@ -6233,7 +6233,7 @@ export const terms = {
   /** Who is enrolled in one term at one club. */
   async roster(actor, orgId, termId) {
     await assertRole(actor, orgId, REGISTER);
-    const term = await one(`select ${termRow} from school_term st where st.id = $1`, [termId]);
+    const term = await one(`select ${termRow} from school_term st where st.id = $1`, [termId]); /* security-ok: termRow is a fixed column list defined at module level */
     if (!term) throw new NotFound('Term');
     const rows = await q(`select e.id, e.status, e.paid, e.fee_cents, e.price_note, to_char(e.enrolled_on,'YYYY-MM-DD') as enrolled_on, p.id as person_id,
         trim(concat_ws(' ', p.first_name, p.last_name)) as name, date_part('year', age(p.date_of_birth))::int as age
@@ -6487,7 +6487,7 @@ export const gallery = {
       }
     }
     if (!sets.length) throw new Invalid('Choose a year or an event to file them under.');
-    await pool.query(`update club_gallery set ${sets.join(', ')} where organisation_id = $1 and id = any($2::uuid[])`, args);
+    await pool.query(`update club_gallery set ${sets.join(', ')} where organisation_id = $1 and id = any($2::uuid[])`, args); /* security-ok: sets holds only fragments we wrote, values are $n placeholders */
     await pool.query(`insert into audit_log (account_id, organisation_id, action, entity, after) values ($1,$2,'gallery_filed','club_gallery',$3)`,
       [actor, orgId, JSON.stringify({ count: ids.length, year: year ?? null, eventId: eventId ?? null })]);
   },

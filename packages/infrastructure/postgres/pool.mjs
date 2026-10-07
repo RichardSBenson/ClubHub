@@ -50,6 +50,7 @@ pg.types.setTypeParser(1082, (value) => value);
  */
 function sslOption() {
   if (process.env.PGSSL === 'off') return false;
+  // security-ok: opt-in escape hatch for local databases with self-signed certificates, never the default
   if (process.env.PGSSL === 'insecure') return { rejectUnauthorized: false };
   return { rejectUnauthorized: true };
 }

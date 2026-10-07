@@ -152,6 +152,7 @@ export function applePass(member, federation, config) {
 export function appleManifest(files) {
   const manifest = {};
   for (const [name, buf] of Object.entries(files)) {
+    // security-ok: Apple Wallet passes require a SHA-1 manifest; it is not used for secrecy or signing here
     manifest[name] = crypto.createHash('sha1').update(buf).digest('hex');
   }
   return manifest;

@@ -92,7 +92,7 @@ console.log('\nNOTHING OF ANYBODY ELSE\'S IS IN THERE');
     ['article', 'articles'], ['dojo_profile', 'club profiles'],
     ['qualification', 'qualifications'], ['brand', 'brands'],
   ]) {
-    const rows = await q(`select * from ${table}`);
+    const rows = await q(`select * from ${table}`); /* security-ok: table comes from a literal list in this test */
     const text = JSON.stringify(rows).toLowerCase();
     ok(`no karate ${what}`,
       !text.includes('moknz') && !text.includes('oyama')

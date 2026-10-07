@@ -126,7 +126,7 @@ export function validate(doc) {
 export function inline(text = '') {
   let s = esc(text);
   s = s.replace(/\[([^\]]+)\]\((\/[^)\s]*|https?:\/\/[^)\s]+|mailto:[^)\s]+|tel:[^)\s]+)\)/g,
-    (_, label, href) => `<a href="${href}">${label}</a>`);
+    (_, label, href) => `<a href="${/* security-ok: text was escaped above; href is limited to /, http(s), mailto and tel by the pattern */ href}">${/* security-ok: text was escaped above; href is limited to /, http(s), mailto and tel by the pattern */ label}</a>`);
   s = s.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
   s = s.replace(/(^|[^*])\*([^*]+)\*/g, '$1<em>$2</em>');
   return s;
