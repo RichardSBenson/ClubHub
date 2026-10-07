@@ -79,7 +79,7 @@ console.log('\nREADING WHAT SOMEBODY TYPED');
   ok('an email', readQuery('doug@example.nz').kind === 'email');
   ok('a partial email still is', readQuery('doug@').kind === 'email');
   ok('a grade', readQuery('4th kyu').kind === 'grade');
-  ok('shodan too', readQuery('Shodan').kind === 'grade');
+  ok('shodan too', readQuery('1st dan').kind === 'grade');
   ok('nothing typed', readQuery('   ').kind === 'empty');
   ok('one letter is too short', readQuery('a').kind === 'too-short');
 }

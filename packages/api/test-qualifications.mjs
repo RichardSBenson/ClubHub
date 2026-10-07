@@ -128,7 +128,7 @@ console.log('\nTHE GRADING PANEL');
   const examiner = (await one(`select id from qualification where code='examiner-course'`)).id;
   const grade = async (l) => one('select * from grade where organisation_id=$1 and label=$2', [root.id, l]);
   const shodan = await person('Panelist', whanganui);
-  await pool.query(`insert into grading_record (person_id, grade_id, awarded_on, awarded_by_org, result) values ($1,$2,'2015-01-01',$3,'pass')`, [shodan.id, (await grade('Shodan')).id, root.id]);
+  await pool.query(`insert into grading_record (person_id, grade_id, awarded_on, awarded_by_org, result) values ($1,$2,'2015-01-01',$3,'pass')`, [shodan.id, (await grade('1st dan')).id, root.id]);
   const cand = await person('Candidate', whanganui);
   const ev = (await one(`insert into event (organisation_id, kind, title, slug, starts_at, status) values ($1,'grading','Qual grading','qg-1', now() + interval '3 days','published') returning id`, [whanganui.id])).id;
   await gradings.enter(reg.accountId, whanganui.id, ev, [cand.id]);

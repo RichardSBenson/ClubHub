@@ -95,7 +95,7 @@ let uniform, dan;
   uniform = await payments.request(doug.id, whanganui.id, ask());
   ok('a uniform is the dojo\'s', uniform.organisation_id === whanganui.id);
   ok('a kyu grading is the dojo\'s', (await payments.request(doug.id, whanganui.id, ask({ kind: 'kyu_grading', amountCents: 3000 }))).organisation_id === whanganui.id);
-  dan = await payments.request(doug.id, whanganui.id, ask({ kind: 'dan_grading', amountCents: 20000, description: 'Shodan' }));
+  dan = await payments.request(doug.id, whanganui.id, ask({ kind: 'dan_grading', amountCents: 20000, description: '1st dan' }));
   ok('a black belt grading is the federation\'s, even though the dojo asked',
     dan.organisation_id === federation.id, dan.organisation_id);
   ok('nobody is asked for what is not theirs to be asked',

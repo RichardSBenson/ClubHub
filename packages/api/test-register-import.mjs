@@ -95,7 +95,7 @@ console.log('\nCONFIRMING SAVES IT');
   ok('Mike Kenworthy is one person on two rolls, as an instructor', mike.rows.length === 2 && mike.rows.every((r) => r.role === 'instructor'), JSON.stringify(mike.rows));
   ok('only one Mike Kenworthy exists', (await one(`select count(*)::int n from person where first_name='Mike' and last_name='Kenworthy'`)).n === 1);
   const grade = await one(`select g.label from grading_record r join grade g on g.id = r.grade_id join person p on p.id = r.person_id where p.first_name = 'Penina'`);
-  ok('Penina holds a 6th dan (Renshi)', grade?.label === 'Renshi', JSON.stringify(grade));
+  ok('Penina holds a 6th dan', grade?.label === '6th dan', JSON.stringify(grade));
   const audit = await one(`select count(*)::int n from audit_log where action = 'register_import'`);
   ok('the import is in the audit log', audit.n === 1);
 }

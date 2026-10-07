@@ -77,13 +77,13 @@ const login = async (person, email) => {
 };
 
 
-const pat = await enrol('Sandan', 'Sam', '1975-05-05', 'sam.sandan@example.nz');
+const pat = await enrol('3rd dan', 'Sam', '1975-05-05', 'sam.sandan@example.nz');
 await login(pat, 'sam.sandan@example.nz');
 const plain = await enrol('Pat', 'Plain', '1990-04-04', 'pat.plain@example.nz');
 await login(plain, 'pat.plain@example.nz');
 const grade = async (label) => (await one(`select id, rank_order from grade g where label=$1 and organisation_id=$2`, [label, root.id]));
 const records = async () => (await pool.query(`select g.label, r.notes, r.awarded_on::text d, r.certificate_no, r.panel, r.awarded_by_org from grading_record r join grade g on g.id=r.grade_id where r.person_id=$1 order by g.rank_order`, [pat.id])).rows;
-const sandan = await grade('Sandan'), shodan = await grade('Shodan'), fiveKyu = await grade('5th kyu');
+const sandan = await grade('3rd dan'), shodan = await grade('1st dan'), fiveKyu = await grade('5th kyu');
 const today = new Date().toISOString().slice(0, 10);
 
 console.log('\nA DOJO OFFICIAL');
@@ -95,7 +95,7 @@ await signIn('dojo.registrar@example.nz');
   ok('the profile offers to record a grade held already', /action="\/p\/[^"]+\/recognise-grade"/.test(r.html));
   const menu = r.html.slice(r.html.indexOf('name="gradeId"'), r.html.indexOf('</select>', r.html.indexOf('name="gradeId"')));
   ok('kyu grades are on offer', menu.includes('5th kyu'));
-  ok('black belts are not, to a dojo', !menu.includes('Sandan') && !menu.includes('Shodan'));
+  ok('black belts are not, to a dojo', !menu.includes('3rd dan') && !menu.includes('1st dan'));
   r = await req(`/p/${pat.id}/recognise-grade`, { method: 'POST', form: { gradeId: sandan.id, heldOn: '2019-06-01' } });
   ok('a dojo cannot type in a black belt', (r.status === 403 || r.status === 404) && (await records()).length === 0);
   r = await req(`/p/${pat.id}/recognise-grade`, { method: 'POST', form: { gradeId: fiveKyu.id, heldOn: '2015-03-02', note: 'Awarded in Tokyo' } });
@@ -118,16 +118,16 @@ console.log('\nA FEDERATION OFFICIAL');
   let r = await req(`/p/${pat.id}`);
   ok('a federation owner can open the profile', r.status === 200, String(r.status));
   const menu = r.html.slice(r.html.indexOf('name="gradeId"'), r.html.indexOf('</select>', r.html.indexOf('name="gradeId"')));
-  ok('and is offered black belts', menu.includes('Sandan') && menu.includes('Shodan'));
+  ok('and is offered black belts', menu.includes('3rd dan') && menu.includes('1st dan'));
   r = await req(`/p/${pat.id}/recognise-grade`, { method: 'POST', form: { gradeId: sandan.id, heldOn: '2019-06-01', note: 'Shihan Smith' } });
-  ok('Sandan is recorded', r.status === 302 && /done=Sandan/.test(r.location));
-  const rec = (await records()).find((x) => x.label === 'Sandan');
+  ok('3rd dan is recorded', r.status === 302 && /done=3rd(\s|%20)dan/.test(r.location));
+  const rec = (await records()).find((x) => x.label === '3rd dan');
   ok('against the federation, with no panel or certificate', rec && rec.awarded_by_org === root.id && !rec.certificate_no && rec.panel.length === 0);
   const cur = await one(`select g.label from person_current_grade cg join grade g on g.id = cg.grade_id where cg.person_id=$1`, [pat.id]);
-  ok('it becomes their current grade', cur?.label === 'Sandan', JSON.stringify(cur));
+  ok('it becomes their current grade', cur?.label === '3rd dan', JSON.stringify(cur));
   r = await req(`/p/${pat.id}`);
   const menu2 = r.html.slice(r.html.indexOf('name="gradeId"'), r.html.indexOf('</select>', r.html.indexOf('name="gradeId"')));
-  ok('and only higher grades are offered after that', !menu2.includes('Shodan') && !menu2.includes('Sandan') && menu2.includes('Yondan'));
+  ok('and only higher grades are offered after that', !menu2.includes('1st dan') && !menu2.includes('3rd dan') && menu2.includes('4th dan'));
   r = await req(`/p/${pat.id}/recognise-grade`, { method: 'POST', form: { gradeId: shodan.id } });
   ok('a lower grade cannot be added behind it', /error=/.test(r.location));
 }

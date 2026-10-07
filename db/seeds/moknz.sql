@@ -70,11 +70,11 @@ from (values
   ('3rd kyu', '3k','#2E6B33',0, 8,false,6,   8,   48),
   ('2nd kyu', '2k','#2E6B33',1, 9,false,6,   8,   48),
   ('1st kyu', '1k','#6B4322',0,10,false,12, 10,   96),
-  ('Shodan',  '1d','#1C1C1E',1,11,true, 18, 16,  144),
-  ('Nidan',   '2d','#1C1C1E',2,12,true, 24, 18,  192),
-  ('Sandan',  '3d','#1C1C1E',3,13,true, 36, 21,  240),
-  ('Yondan',  '4d','#1C1C1E',4,14,true, 48, 25,  288),
-  ('Godan',   '5d','#1C1C1E',5,15,true, 60, 30,  336)
+  ('1st dan', '1d','#1C1C1E',1,11,true, 18, 16,  144),
+  ('2nd dan', '2d','#1C1C1E',2,12,true, 24, 18,  192),
+  ('3rd dan', '3d','#1C1C1E',3,13,true, 36, 21,  240),
+  ('4th dan', '4d','#1C1C1E',4,14,true, 48, 25,  288),
+  ('5th dan', '5d','#1C1C1E',5,15,true, 60, 30,  336)
 ) as g(label, short_label, colour, stripes, rank_order, is_dan, months, min_age, sessions);
 
 -- ---------------------------------------------------------------------------
@@ -135,12 +135,12 @@ from (values
   ('22222222-0000-0000-0000-000000000002','4th kyu', '2024-10-19'::date,'moknz'),
   -- Tane to nidan
   ('22222222-0000-0000-0000-000000000003','1st kyu', '2012-10-20'::date,'moknz'),
-  ('22222222-0000-0000-0000-000000000003','Shodan',  '2014-10-18'::date,'moknz'),
-  ('22222222-0000-0000-0000-000000000003','Nidan',   '2025-10-18'::date,'moknz'),
+  ('22222222-0000-0000-0000-000000000003','1st dan', '2014-10-18'::date,'moknz'),
+  ('22222222-0000-0000-0000-000000000003','2nd dan', '2025-10-18'::date,'moknz'),
   -- Mia, one grading
   ('22222222-0000-0000-0000-000000000004','10th kyu','2024-09-21'::date,'whanganui'),
   -- Hanshi Doug
-  ('22222222-0000-0000-0000-000000000001','Godan',   '1990-01-01'::date,'moknz')
+  ('22222222-0000-0000-0000-000000000001','5th dan', '1990-01-01'::date,'moknz')
 ) as r(pid, grade, on_date, org)
 join person p on p.id = r.pid::uuid
 join grade g on g.label = r.grade
@@ -382,7 +382,7 @@ values ('11111111-1111-1111-1111-111111111111', 11, 15, 'country', 'country', 3,
 -- Godan was a placeholder for what MOKNZ calls Shihan. Renaming rather than
 -- replacing keeps every grading_record that points at it.
 update grade
-   set label = 'Shihan', short_label = '5d'
+   set label = '5th dan', short_label = '5d'
  where organisation_id = '11111111-1111-1111-1111-111111111111'
    and rank_order = 15;
 
@@ -392,9 +392,9 @@ insert into grade (organisation_id, label, short_label, belt_colour,
 select '11111111-1111-1111-1111-111111111111', label, short_label, '#1C1C1E',
        stripes, rank_order, true, months, min_age, sessions
 from (values
-  ('Renshi', '6d', 6, 16, 72,  35, 384),
-  ('Kyoshi', '7d', 7, 17, 84,  42, 432),
-  ('Hanshi', '8d', 8, 18, 96,  50, 480)
+  ('6th dan', '6d', 6, 16, 72,  35, 384),
+  ('7th dan', '7d', 7, 17, 84,  42, 432),
+  ('8th dan', '8d', 8, 18, 96,  50, 480)
 ) as g(label, short_label, stripes, rank_order, months, min_age, sessions)
 where not exists (
   select 1 from grade x
@@ -505,7 +505,7 @@ begin
   from grade
   where organisation_id = '11111111-1111-1111-1111-111111111111' and is_dan;
 
-  if ladder is distinct from 'Shodan Nidan Sandan Yondan Shihan Renshi Kyoshi Hanshi' then
+  if ladder is distinct from '1st dan 2nd dan 3rd dan 4th dan 5th dan 6th dan 7th dan 8th dan' then
     raise exception 'dan ladder is "%", expected the eight named grades', ladder;
   end if;
 end $$;

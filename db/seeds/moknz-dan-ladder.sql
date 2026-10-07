@@ -35,7 +35,7 @@
 -- Godan was a placeholder for what MOKNZ calls Shihan. Renaming rather than
 -- replacing keeps every grading_record that points at it.
 update grade
-   set label = 'Shihan', short_label = '5d'
+   set label = '5th dan', short_label = '5d'
  where organisation_id = '11111111-1111-1111-1111-111111111111'
    and rank_order = 15;
 
@@ -45,9 +45,9 @@ insert into grade (organisation_id, label, short_label, belt_colour,
 select '11111111-1111-1111-1111-111111111111', label, short_label, '#1C1C1E',
        stripes, rank_order, true, months, min_age, sessions
 from (values
-  ('Renshi', '6d', 6, 16, 72,  35, 384),
-  ('Kyoshi', '7d', 7, 17, 84,  42, 432),
-  ('Hanshi', '8d', 8, 18, 96,  50, 480)
+  ('6th dan', '6d', 6, 16, 72,  35, 384),
+  ('7th dan', '7d', 7, 17, 84,  42, 432),
+  ('8th dan', '8d', 8, 18, 96,  50, 480)
 ) as g(label, short_label, stripes, rank_order, months, min_age, sessions)
 where not exists (
   select 1 from grade x
@@ -158,7 +158,7 @@ begin
   from grade
   where organisation_id = '11111111-1111-1111-1111-111111111111' and is_dan;
 
-  if ladder is distinct from 'Shodan Nidan Sandan Yondan Shihan Renshi Kyoshi Hanshi' then
+  if ladder is distinct from '1st dan 2nd dan 3rd dan 4th dan 5th dan 6th dan 7th dan 8th dan' then
     raise exception 'dan ladder is "%", expected the eight named grades', ladder;
   end if;
 end $$;

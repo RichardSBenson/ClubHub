@@ -86,12 +86,12 @@ console.log('\nGRADING AUTHORITY IS ENFORCED');
   const ladder = await rank.ladder(moknz.id);
   const thirdKyu = ladder.find(g => g.label === '3rd kyu');
   const eighthKyu = ladder.find(g => g.label === '8th kyu');
-  const shodan = ladder.find(g => g.label === 'Shodan');
+  const shodan = ladder.find(g => g.label === '1st dan');
   const DOUG_P = '22222222-0000-0000-0000-000000000001';  // Hanshi, 8th dan
-  const TANE_P = '22222222-0000-0000-0000-000000000003';  // Nidan
+  const TANE_P = '22222222-0000-0000-0000-000000000003';  // 2nd dan
 
   // MOKNZ's actual bands: the dojo grades to 3rd kyu, 2nd and 1st kyu need a
-  // 5th dan on the panel, and Shodan upwards is a national grading.
+  // 5th dan on the panel, and 1st dan upwards is a national grading.
   await throws('a dojo cannot award a dan grade',
     () => rank.award(DOUG, {
       personId: AROHA, gradeId: shodan.id, awardedByOrg: whanganui.id,

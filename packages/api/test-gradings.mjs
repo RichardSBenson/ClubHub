@@ -61,7 +61,7 @@ const reg = await staff('Reg', whanganui, 'registrar');
 const inst = await staff('Inst', whanganui, 'instructor');
 const wreg = await staff('Wreg', wellington, 'registrar');
 // A shodan to sit on a kyu panel.
-const shodan = await person('Shodan', whanganui); await holds(shodan, await grade('Shodan'));
+const shodan = await person('1st dan', whanganui); await holds(shodan, await grade('1st dan'));
 const ann = await person('Ann', whanganui); const bob = await person('Bob', whanganui);
 const cat = await person('Cat', whanganui); const dee = await person('Dee', whanganui);
 const eve = await person('Eve', whanganui);
@@ -165,10 +165,10 @@ console.log('\nA NATIONAL BLACK BELT GRADING');
   ok('Wellington cannot see Whanganui\'s entries', (await gradings.get(wreg.accountId, wellington.id, nat)).entries.length === 0);
   const entryId = (await one('select id from event_entry where event_id=$1', [nat])).id;
   const panel = [];
-  for (const n of ['A', 'B', 'C']) { const y = await person(`Yondan${n}`, whanganui); await holds(y, await grade('Yondan')); panel.push(y.display_number); }
+  for (const n of ['A', 'B', 'C']) { const y = await person(`4th dan${n}`, whanganui); await holds(y, await grade('4th dan')); panel.push(y.display_number); }
   ok('a panel of two is too few for a black belt', await rejects(gradings.finalise(doug, nat, { results: { [entryId]: { outcome: 'pass' } }, panelNumbers: panel.slice(0, 2), date: today }), Invalid, /panel of 3/));
   const r = await gradings.finalise(doug, nat, { results: { [entryId]: { outcome: 'pass' } }, panelNumbers: panel, date: today });
-  ok('Shodan awarded with a certificate', r.awarded.length === 1 && r.awarded[0].grade === 'Shodan', JSON.stringify(r.awarded));
+  ok('1st dan awarded with a certificate', r.awarded.length === 1 && r.awarded[0].grade === '1st dan', JSON.stringify(r.awarded));
   ok('certificate numbers continue the federation\'s count', /-0002$/.test(r.awarded[0].certificate), r.awarded[0].certificate);
   ok('a club cannot hold a national grading itself', await rejects(gradings.finalise(reg.accountId, nat, { results: {}, panelNumbers: [], date: today }), Forbidden));
 }

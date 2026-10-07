@@ -53,7 +53,7 @@ join grade_authority ga
  and ga.organisation_id = g.organisation_id
 left join grade pg on pg.rank_order = ga.min_panel_rank
                   and pg.organisation_id = ga.organisation_id
-where g.label in ('8th kyu','2nd kyu','Shodan','Sandan')
+where g.label in ('8th kyu','2nd kyu','1st dan','3rd dan')
 order by g.rank_order;
 
 \echo ''

@@ -79,7 +79,7 @@ console.log('\nAUTHORITY RULES HOLD AGAINST REAL DATA');
     `select id from grade where label=$2 and organisation_id=$1`,
     [moknz, label])).id;
   const thirdKyu = await grade('3rd kyu');   // rank 8  — a dojo grade
-  const shodan   = await grade('Shodan');    // rank 11 — a national grade
+  const shodan   = await grade('1st dan');    // rank 11 — a national grade
 
   await throws('a dojo cannot award a dan grade', () =>
     award.execute({ actorId: DOUG_ACCOUNT, personId: AROHA, gradeId: shodan,

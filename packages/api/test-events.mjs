@@ -94,7 +94,7 @@ console.log('\nTHE FORM OFFERS THIS FEDERATION\'S OWN GRADES');
   ok('and every event kind', f.html.includes('value="grading"')
     && f.html.includes('value="tournament"'));
   ok('the grade limits come from the register, not a hard-coded list',
-    f.html.includes('kyu') || f.html.includes('Shodan'),
+    f.html.includes('kyu') || f.html.includes('1st dan'),
     'no grade labels in the dropdowns');
   ok('and it says which timezone the times are in',
     f.html.includes('Pacific/Auckland'));

@@ -176,7 +176,7 @@ console.log('\nCASH');
   ok('the dojo sees how much came in by each method', t.methods.some((m) => m.method === 'cash') && t.methods.some((m) => m.method === 'transfer'));
 
   const fedPay = await payments.request(doug.id, whanganui.id, { personNumber: ann.display_number, kind: 'dan_grading',
-    description: 'Shodan', amountCents: 20000, received: 'cash' }).then(() => null, (e) => e);
+    description: '1st dan', amountCents: 20000, received: 'cash' }).then(() => null, (e) => e);
   ok('a dojo cannot record national money as received', fedPay instanceof Invalid || fedPay instanceof Forbidden || fedPay === null, String(fedPay));
 }
 

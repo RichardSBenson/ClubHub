@@ -56,9 +56,9 @@ const onRoll = () => count(`
 const SPREADSHEET = [
   'Given Name\tSurname\tD.O.B.\tEmail\tMobile\tGrade\tExpiry\tEmergency Contact\tLocker',
   'Ngaio\tHarrison\t14/08/2009\tngaio@example.nz\t0211234567\t2nd kyu\t31/12/2026\tKiri Harrison\t14',
-  'Tomas\tRiu\t3 June 1988\ttomas@example.nz\t\tShodan\t2026-12-31\t\t7',
+  'Tomas\tRiu\t3 June 1988\ttomas@example.nz\t\t1st dan\t2026-12-31\t\t7',
   'Ana\tSolomona\t25/12/2001\tana@example.nz\t\tPurple belt\t\t\t',
-  'Tomas\tRiu\t3 June 1988\ttomas@example.nz\t\tShodan\t\t\t',
+  'Tomas\tRiu\t3 June 1988\ttomas@example.nz\t\t1st dan\t\t\t',
   '\tNobody\t03/04/2015\tnot-an-email\t\t\t\t\t',
 ].join('\n');
 

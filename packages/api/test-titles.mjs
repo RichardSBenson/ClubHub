@@ -33,7 +33,7 @@ console.log('\nCONFERRED TITLES MOVE WITH THE GRADE');
 
   // Grade her to shodan — rank 11, where Senpai begins in this federation.
   const { rows:[g] } = await pool.query(
-    `select id from grade where label='Shodan' and organisation_id=$1`,[moknz.id]);
+    `select id from grade where label='1st dan' and organisation_id=$1`,[moknz.id]);
   const { rows:[rec] } = await pool.query(`
     insert into grading_record (person_id, grade_id, awarded_on, awarded_by_org)
     values ($1,$2,'2026-09-19',$3) returning id`,[aroha.id,g.id,moknz.id]);
@@ -41,7 +41,7 @@ console.log('\nCONFERRED TITLES MOVE WITH THE GRADE');
   const after = await q(`select label, how from person_title where person_id=$1`,[aroha.id]);
   ok('grading to shodan makes her Senpai, with no separate record',
     after.length===1 && after[0].label==='Senpai' && after[0].how==='conferred');
-  console.log(`      → 4th kyu: nothing  →  Shodan: ${after[0].label}`);
+  console.log(`      → 4th kyu: nothing  →  1st dan: ${after[0].label}`);
 
   await pool.query('delete from grading_record where id=$1',[rec.id]);
   ok('and it goes again if the grading is reversed',
