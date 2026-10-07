@@ -67,3 +67,10 @@ description, the venue and address, and a link back to the page.
 
 ## Not built yet
 A gallery for the federation's own pages, a photo block inside pages, and recurring events.
+
+## Add to calendar
+Each public event page has an **Add it to your calendar** block with three big buttons: **Google Calendar** and **Outlook**
+(each opens that calendar's own "new event" page with the title, time, place and description filled in, so nothing is
+downloaded) and **iPhone, Samsung or other** (downloads `event.ics`, which any calendar app opens and asks which calendar
+to use). An event with no end time is given one hour in the Google and Outlook links, because both require an end.
+Cancelled events have no buttons.

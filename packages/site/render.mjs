@@ -13,6 +13,7 @@
  * way to turn a date into 'YYYY-MM-DD' is what put a wrong founding date — in
  * fact no founding date — into the structured data on every page.
  */
+import { calendarLinks } from '../core/domain/calendar-file.mjs';
 import { bannerLines, typeFor, mapLinks } from '../core/domain/event-types.mjs';
 import { CalendarDay } from '../core/domain/values.mjs';
 
@@ -211,6 +212,7 @@ nav.main a:hover{border-bottom-color:var(--primary)}
   box-shadow:0 6px 18px rgba(0,0,0,.25)}
 .btn.ghost{background:rgba(0,0,0,.25);color:var(--canvas);border-color:var(--canvas)}
 .btn.ghost:hover{background:var(--canvas);color:var(--ink)}
+.addcal{margin:24px 0}.addcal h2{font-size:20px;margin:0 0 10px}.calbtns{display:flex;flex-wrap:wrap;gap:10px;margin:0}.calbtns .btn{flex:1 1 200px;text-align:center;min-height:48px;display:inline-flex;align-items:center;justify-content:center}.calhelp{font-size:14px;margin:8px 0 0}
 .btn.outline{background:transparent;color:var(--ink);border-color:var(--ink)}
 .btn.outline:hover{background:var(--ink);color:var(--canvas);border-color:var(--ink)}
 .btn.light{background:var(--canvas);color:var(--ink);border-color:var(--canvas)}
@@ -790,6 +792,7 @@ export function eventPage({ ev, federation, origin, fonts, nav,
                             base = '', vocabulary = {}, logoUrl = null, path = null }) {
   logoUrl = logoUrl ?? federation.logoUrl ?? null;
   const at = (p) => `${base}${p}`;
+  const cal = calendarLinks(ev, { url: origin ? `${origin}${at(path ?? `/events/${ev.slug}`)}` : null });
   const map = mapLinks({ latitude: ev.latitude, longitude: ev.longitude, venue: ev.venue_name, address: ev.address_line });
   const raw = !ev.is_own && ev.from_slug && ev.slug.endsWith(`-${ev.from_slug}`)
     ? ev.slug.slice(0, -(ev.from_slug.length + 1)) : ev.slug;
@@ -818,7 +821,13 @@ ${eventBanner(ev, { logoUrl, federationName: federation.name, vocabulary })}
     ${ev.status === 'cancelled' ? '<div class="notice">This event has been cancelled.</div>' : ''}
     ${String(ev.description ?? '').split(/\n{2,}/).map((p) => p.trim()).filter(Boolean)
       .map((p) => `<p class="evdesc">${esc(p).replace(/\n/g, '<br>')}</p>`).join('')}
-    ${ev.status === 'cancelled' ? '' : `<p><a class="btn outline" href="${at(`${path ?? `/events/${ev.slug}`}/event.ics`)}" download>Add to calendar</a></p>`}
+    ${ev.status === 'cancelled' || !cal ? '' : `<div class="addcal"><h2>Add it to your calendar</h2>
+      <p class="calbtns">
+        <a class="btn outline" href="${esc(cal.google)}" target="_blank" rel="noopener">Google Calendar</a>
+        <a class="btn outline" href="${esc(cal.outlook)}" target="_blank" rel="noopener">Outlook</a>
+        <a class="btn outline" href="${at(`${path ?? `/events/${ev.slug}`}/event.ics`)}" download>iPhone, Samsung or other</a>
+      </p>
+      <p class="muted calhelp">The last one downloads a small file. Open it and your phone asks which calendar to use.</p></div>`}
     ${canEnter ? `<p><a class="btn" href="/enter/${esc(ev.from_slug ?? '')}/${esc(raw)}">Enter this event</a></p>` : ''}
     ${ev.from_org ? `<p class="muted">Run by ${esc(ev.from_org)}.</p>` : ''}
   </div>

@@ -1,4 +1,4 @@
-import { eventToIcs, escapeText, fold, utc } from './domain/calendar-file.mjs';
+import { eventToIcs, escapeText, fold, utc, calendarLinks } from './domain/calendar-file.mjs';
 let pass = 0, fail = 0;
 const ok = (n, c) => { c ? pass++ : (fail++, console.log('  ✗', n)); };
 const ev = { id: 'abc', title: 'Kyu Grading, Whanganui', summary: 'Grading day', description: 'Bring a gi.\n\nArrive 15 minutes early; wear a belt.',
@@ -19,4 +19,11 @@ ok('a cancelled event says so', /STATUS:CANCELLED/.test(eventToIcs({ ...ev, stat
 ok('no start, no file', eventToIcs({ title: 'x' }) === null && eventToIcs({ title: 'x', starts_at: 'nonsense' }) === null);
 ok('a missing description is simply absent', !/DESCRIPTION/.test(eventToIcs({ ...ev, summary: null, description: null })));
 ok('escaping handles backslashes', escapeText('a\\b') === 'a\\\\b');
+const L = calendarLinks(ev, { url: 'https://example.nz/events/kyu' });
+const g = new URL(L.google), o = new URL(L.outlook);
+ok('a Google Calendar address with everything filled in', g.hostname === 'calendar.google.com' && g.searchParams.get('action') === 'TEMPLATE' && g.searchParams.get('text') === 'Kyu Grading, Whanganui' && g.searchParams.get('dates') === '20261114T200000Z/20261115T030000Z' && /Collegiate Gym/.test(g.searchParams.get('location')) && /Bring a gi/.test(g.searchParams.get('details')) && /example\.nz\/events\/kyu/.test(g.searchParams.get('details')));
+ok('an Outlook address likewise', o.hostname === 'outlook.live.com' && o.searchParams.get('subject') === 'Kyu Grading, Whanganui' && o.searchParams.get('startdt') === '2026-11-14T20:00:00.000Z' && o.searchParams.get('enddt') === '2026-11-15T03:00:00.000Z' && /Collegiate Gym/.test(o.searchParams.get('location')));
+ok('no end time becomes one hour, because both insist on an end', new URL(calendarLinks({ ...ev, ends_at: null }).google).searchParams.get('dates') === '20261114T200000Z/20261114T210000Z');
+ok('no start, no links', calendarLinks({ title: 'x' }) === null);
+ok('a long description is cut so the address stays usable', calendarLinks({ ...ev, description: 'x'.repeat(5000) }).google.length < 4000);
 console.log(`${pass} passed, ${fail} failed`); process.exit(fail ? 1 : 0);

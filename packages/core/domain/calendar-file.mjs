@@ -64,3 +64,31 @@ export function eventToIcs(ev, { url = null, host = 'honbu', now = new Date() } 
   ].filter(Boolean);
   return lines.map(fold).join('\r\n') + '\r\n';
 }
+
+/**
+ * One-tap "add to my calendar" addresses for the calendars most people use, so nobody has to download and open a file.
+ * Google and Outlook.com open their own "new event" page with everything filled in. An event with no end time is given
+ * one hour, because both of them insist on an end.
+ */
+export function calendarLinks(ev, { url = null } = {}) {
+  if (!ev?.starts_at || Number.isNaN(new Date(ev.starts_at).getTime())) return null;
+  const start = new Date(ev.starts_at);
+  const end = ev.ends_at && new Date(ev.ends_at) > start ? new Date(ev.ends_at) : new Date(start.getTime() + 3600e3);
+  const where = [ev.venue_name, ev.address_line].filter(Boolean).join(', ');
+  const about = [ev.summary, ev.description, url ? `More: ${url}` : null].filter(Boolean).join('\n\n').slice(0, 1500);
+  const google = new URL('https://calendar.google.com/calendar/render');
+  google.searchParams.set('action', 'TEMPLATE');
+  google.searchParams.set('text', ev.title ?? '');
+  google.searchParams.set('dates', `${utc(start)}/${utc(end)}`);
+  if (about) google.searchParams.set('details', about);
+  if (where) google.searchParams.set('location', where);
+  const outlook = new URL('https://outlook.live.com/calendar/0/deeplink/compose');
+  outlook.searchParams.set('path', '/calendar/action/compose');
+  outlook.searchParams.set('rru', 'addevent');
+  outlook.searchParams.set('subject', ev.title ?? '');
+  outlook.searchParams.set('startdt', start.toISOString());
+  outlook.searchParams.set('enddt', end.toISOString());
+  if (about) outlook.searchParams.set('body', about);
+  if (where) outlook.searchParams.set('location', where);
+  return { google: google.toString(), outlook: outlook.toString() };
+}
