@@ -1,8 +1,9 @@
 slug,label,weekday,starts,ends,min_age,max_age
-whanganui,"Juniors, 6-12 years",Tuesday,17:30,18:30,6,12
-whanganui,"Juniors, 6-12 years",Thursday,17:30,18:30,6,12
-whanganui,"Seniors, 13 and over",Tuesday,18:45,20:15,13,
-whanganui,"Seniors, 13 and over",Thursday,18:45,20:15,13,
+whanganui,Kids beginners,Monday,17:15,18:15,,
+whanganui,Kids,Tuesday,17:15,18:15,,
+whanganui,Kids,Thursday,17:15,18:15,,
+whanganui,Adults,Tuesday,18:20,20:00,,
+whanganui,Adults,Thursday,18:20,20:00,,
 wellington,"Juniors and Seniors",Monday,18:30,20:00,,
 wellington,"Juniors and Seniors",Wednesday,18:30,20:00,,
 taumarunui,"Juniors, 7-12 years",Monday,16:30,17:30,7,12
