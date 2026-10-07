@@ -1578,7 +1578,7 @@ export const registerImport = {
     if (!dojos.length && !sessions.length && !instructors.length) throw new Invalid('Paste at least one file.');
     for (const [name, rows, cols] of [['dojos', dojos, ['slug']], ['sessions', sessions, ['slug', 'weekday', 'starts', 'ends']],
                                       ['instructors', instructors, ['slug', 'first_name', 'last_name', 'dan']]]) {
-      if (rows.length) for (const c of cols) if (!(c in rows[0])) throw new Invalid(`The ${name} file has no "${c}" column.`);
+      if (rows.length) for (const c of cols) if (!(c in rows[0])) throw new Invalid(`The ${name} file has no "${c}" column. The first line must be the column names. I found: ${rows.columns.slice(0, 8).join(', ')}${rows.columns.length > 8 ? ', ...' : ''}.`);
     }
     const client = await pool.connect();
     try {

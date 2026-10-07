@@ -4,8 +4,15 @@
  * Pure: text in, rows out. Blank means unknown and is stored as NULL; nothing here invents a value.
  */
 
-/** Minimal CSV reader — handles quoted fields and embedded commas. */
+/**
+ * Minimal CSV reader — handles quoted fields and embedded commas.
+ * Also reads tab-separated text, which is what a copy from a spreadsheet gives you, and ignores
+ * the invisible mark some editors put at the start of a file. The result carries `.columns`.
+ */
 export function parseCsv(text) {
+  text = String(text).replace(/^\uFEFF/, '');
+  const firstLine = text.split('\n', 1)[0];
+  const sep = (firstLine.match(/\t/g) ?? []).length > (firstLine.match(/,/g) ?? []).length ? '\t' : ',';
   const rows = [];
   let row = [], field = '', quoted = false;
   for (let i = 0; i < text.length; i++) {
@@ -15,14 +22,16 @@ export function parseCsv(text) {
       else if (c === '"') quoted = false;
       else field += c;
     } else if (c === '"') quoted = true;
-    else if (c === ',') { row.push(field); field = ''; }
+    else if (c === sep) { row.push(field); field = ''; }
     else if (c === '\n') { row.push(field); rows.push(row); row = []; field = ''; }
     else if (c !== '\r') field += c;
   }
   if (field || row.length) { row.push(field); rows.push(row); }
   const [head, ...body] = rows.filter((r) => r.some((c) => c.trim() !== ''));
-  return body.map((r) => Object.fromEntries(
+  const out = body.map((r) => Object.fromEntries(
     head.map((h, i) => [h.trim(), (r[i] ?? '').trim()])));
+  out.columns = (head ?? []).map((h) => h.trim());
+  return out;
 }
 
 export const nul = (v) => (v === '' || v === undefined ? null : v);
