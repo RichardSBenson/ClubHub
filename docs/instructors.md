@@ -16,18 +16,27 @@ Not a registrar, and not the person themselves. Ticking is recorded with a date;
 - **Shown on the website**: a separate consent tick on the Instructors screen. Giving somebody the job is not
   agreement to a public page. Under-18s cannot be listed.
 
-## Getting onto the dojo's website: the steps and who does them
-1. **Tick "This person is an instructor"** on their profile (`/p/<id>`). An owner or administrator of the dojo, or
-   anyone above them (region, federation).
-2. **Show them on the website.** Under **Instructors** in the dojo's admin menu (the profile has a button straight
-   there): tick *Show on the website*, add what they teach, training since and a short about, and save. Again an
-   owner or administrator of the dojo or above. Until then the dojo page shows "Meet your instructor / Introductions
-   coming soon".
-3. **Photograph** (optional but expected): the person, a parent/guardian, or a registrar adds it from the person's
-   own *My details* page or the register profile.
+## Choosing instructors: one screen
+**Instructors** in the dojo's admin menu opens with **Choose your instructors**: the dojo's roll, highest grade first.
+It starts on *all black belts* (the usual instructors) and can be filtered by grade (one grade, or every grade) and by
+age (juniors under 18, seniors 18 and over). Tick the people who teach, or press *Select everyone shown*, then:
 
-The profile (and the instructor's own *My details*) says whether they are currently shown. The person themselves
-cannot switch the website on, because it is a decision by the dojo as well as by them.
+- **Make instructors and show on the website**: gives the instructor role and puts their card on the dojo's page.
+- **Make instructors only**: gives the role without showing them.
+- **Take off as instructors**: ends the role today (history is kept) and takes them off the website.
+
+Under-18s and people with no date of birth get the role but are never shown; the result names each of them and why.
+People on another dojo's roll are refused by name. Who can do it: an owner or administrator of the dojo, or anyone above
+(region, federation). A registrar or the instructor themselves cannot, because appearing on a public page is the dojo's
+decision as well as the person's.
+
+Everyone's profile also has the single-person tick, and the cards below the picker are for the optional extras (what
+they teach, training since, which checks to show).
+
+## The 280-character write-up
+Every person has a **few words about yourself** box on their own *My details* page, up to 280 characters. It is the
+text on their instructor card (it replaces the longer "About them" box if both exist). Nothing else uses it. The picker
+shows "no write-up yet" beside instructors who have not written one.
 
 ## The photograph
 One photograph on the person's record, used on their card and on the website. The person, a parent or guardian, or

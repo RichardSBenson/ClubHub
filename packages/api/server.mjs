@@ -2615,13 +2615,45 @@ post('/o/:slug/club-pages/:clubId/decide', async (ctx) => {
 
 get('/o/:slug/instructors', async (ctx) => {
   const org = await organisationFor(ctx, { toWrite: true });
+  const q = ctx.url.searchParams;
+  const grade = q.get('grade') || 'dan', band = ['junior', 'senior'].includes(q.get('band')) ? q.get('band') : '';
   return ctx.send(200, V.instructorList({
     me: ctx.me, org, csrf: ctx.csrf,
     instructors: await instructors.listFor(ctx.me.accountId, org.id),
+    roll: await instructors.rollFor(ctx.me.accountId, org.id, { grade, band }),
+    ladder: await rank.ladder((await orgs.ladderOwnerOf(org.id))?.id ?? org.id),
+    filter: { grade, band, all: q.get('all') === '1' },
     done: ctx.url.searchParams.get('done'),
     error: ctx.url.searchParams.get('error'),
     rebuild: ctx.url.searchParams.get('rebuild'),
   }));
+});
+
+post('/o/:slug/instructors/bulk', async (ctx) => {
+  const org = await organisationFor(ctx, { toWrite: true });
+  const form = await ctx.form();
+  const keep = new URLSearchParams();
+  if (form.grade) keep.set('grade', form.grade);
+  if (form.band) keep.set('band', form.band);
+  const back = `/o/${org.slug}/instructors`;
+  const go = (extra) => ctx.redirect(`${back}?${keep}${keep.size ? '&' : ''}${extra}`);
+  const picked = Object.keys(form).filter((k) => k.startsWith('pick_')).map((k) => k.slice(5)).filter((id) => UUID_RE.test(id));
+  if (!picked.length) return go('error=' + encodeURIComponent('Tick the people first.'));
+  const mode = { show: 'show', role: 'role', off: 'off' }[form.action];
+  if (!mode) return go('error=' + encodeURIComponent('Choose what to do with them.'));
+  try {
+    const r = await instructors.bulk(ctx.me.accountId, org.id, picked, mode);
+    const rebuild = mode === 'role' ? { detail: 'Not on the website, so nothing to rebuild.' }
+      : await requestRebuild({ reason: `instructors ${mode} ${org.slug}` });
+    const said = mode === 'off' ? `${r.changed} taken off as instructors.`
+      : mode === 'role' ? `${r.changed} made instructors.`
+      : `${r.changed} made instructors, ${r.shown} newly on the website.`;
+    const extra = r.skipped.length ? ' ' + r.skipped.map((x) => `${x.name}: ${x.reason}.`).join(' ') : '';
+    return go('done=' + encodeURIComponent(said + extra) + '&rebuild=' + encodeURIComponent(rebuild.detail));
+  } catch (e) {
+    if (e instanceof Invalid || e?.name === 'DomainError') return go('error=' + encodeURIComponent(e.message));
+    throw e;
+  }
 });
 
 post('/o/:slug/instructors/:personId', async (ctx) => {

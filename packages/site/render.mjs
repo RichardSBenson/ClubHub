@@ -652,7 +652,7 @@ function excerpt(text, max = 280) {
 export function instructorCard(i, { at = (x) => x, federationSlug = null, full = false, showClub = false, assets = {} } = {}) {
   const name = `${i.firstName} ${i.lastName}`;
   const photo = i.photoUrl ?? (i.photoAssetId ? assets[i.photoAssetId] : null);
-  const paras = i.paragraphs ?? bioText(i.bio);
+  const paras = i.about ? [i.about] : (i.paragraphs ?? bioText(i.bio));
   const about = full ? paras.map((t) => `<p>${esc(t)}</p>`).join('')
     : paras.length ? `<p>${esc(excerpt(paras.join(' ')))}</p>` : '';
   const rank = [...new Set([i.title, i.grade].filter(Boolean))].map(esc).join(' · ');

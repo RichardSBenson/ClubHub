@@ -2263,7 +2263,7 @@ export const menuEditor = ({ me, csrf, org, items = [], destinations = [],
  * a person, because it is: their name, their photograph and their grade on a
  * page anybody can read, indefinitely.
  */
-export const instructorList = ({ me, csrf, org, instructors = [],
+export const instructorList = ({ me, csrf, org, instructors = [], roll = [], ladder = [], filter = {},
                                  done, error, rebuild }) => {
   const age = (dob) => {
     if (!dob) return null;
@@ -2350,6 +2350,51 @@ export const instructorList = ({ me, csrf, org, instructors = [],
   };
 
   const shown = instructors.filter((i) => i.published).length;
+  const here = `/o/${esc(org.slug)}/instructors`;
+  const q = (extra = {}) => new URLSearchParams(Object.entries({ grade: filter.grade, band: filter.band, ...extra })
+    .filter(([, v]) => v)).toString();
+  const picker = `
+  <h2>Choose your instructors</h2>
+  <p class="muted">Everyone on the roll, highest grade first. Tick the people who teach, then choose what to do. Their
+    photograph and a short write-up (they add it on their own <em>My details</em> page, 280 characters) show on the card.</p>
+  <form method="get" action="${here}" class="card" style="margin:12px 0">
+    <div class="row">
+      <div><label for="f-grade">Grade</label><select id="f-grade" name="grade">
+        <option value="dan"${filter.grade === 'dan' || !filter.grade ? ' selected' : ''}>All black belts</option>
+        <option value="all"${filter.grade === 'all' ? ' selected' : ''}>Every grade</option>
+        ${[...ladder].sort((a, b) => b.rank_order - a.rank_order).map((g) => `<option value="${esc(g.id)}"${filter.grade === g.id ? ' selected' : ''}>${esc(g.label)}</option>`).join('')}
+      </select></div>
+      <div><label for="f-band">Age</label><select id="f-band" name="band">
+        <option value=""${!filter.band ? ' selected' : ''}>Juniors and seniors</option>
+        <option value="senior"${filter.band === 'senior' ? ' selected' : ''}>Seniors (18 and over)</option>
+        <option value="junior"${filter.band === 'junior' ? ' selected' : ''}>Juniors (under 18)</option>
+      </select></div>
+    </div>
+    <p><button class="btn quiet" type="submit">Show</button></p>
+  </form>
+  ${roll.length ? `
+  <form method="post" action="${here}/bulk">
+    <input type="hidden" name="_csrf" value="${esc(csrf ?? '')}">
+    <input type="hidden" name="grade" value="${esc(filter.grade ?? '')}"><input type="hidden" name="band" value="${esc(filter.band ?? '')}">
+    <p><input type="checkbox" id="pickall" hidden> <label for="pickall" hidden style="display:inline">Select all ${roll.length} shown</label>
+      <a id="pickall-link" href="${here}?${esc(q({ all: '1' }))}">Select everyone shown (${roll.length})</a></p>
+    <table><thead><tr><th></th><th>Name</th><th>Grade</th><th>Now</th></tr></thead><tbody>
+    ${roll.map((r) => `<tr>
+      <td><input class="pick" type="checkbox" name="pick_${esc(r.person_id)}" aria-label="Choose ${esc(r.first_name)} ${esc(r.last_name)}"${filter.all ? ' checked' : ''}></td>
+      <td><a href="/p/${esc(r.person_id)}">${esc(r.first_name)} ${esc(r.last_name)}</a>${r.age != null && r.age < 18 ? ' <span class="tag">junior</span>' : ''}</td>
+      <td>${r.grade ? esc(r.grade) : '<span class="muted">ungraded</span>'}</td>
+      <td>${r.published ? '<span class="tag ok">On the website</span>' : r.is_instructor ? '<span class="tag wait">Instructor, not shown</span>' : '<span class="muted">—</span>'}
+        ${r.about ? '' : r.is_instructor ? ' <span class="muted">no write-up yet</span>' : ''}</td></tr>`).join('')}
+    </tbody></table>
+    <p style="margin-top:12px"><button class="btn" type="submit" name="action" value="show">Make instructors and show on the website</button>
+      <button class="btn quiet" type="submit" name="action" value="role">Make instructors only</button>
+      <button class="btn quiet" type="submit" name="action" value="off">Take off as instructors</button></p>
+    <p class="hint">Showing puts a person's name, grade, photograph and write-up on a page anybody can read, so only do it for
+      people who have agreed. Under-18s are never shown on the website.</p>
+  </form>
+  <script src="/vendor/select-all.js" defer></script>`
+    : '<div class="note">Nobody on the roll matches. Try "Every grade".</div>'}
+`;
 
   return page({ title: `Instructors — ${org.name}`, me, csrf, body: `
   <h1>Instructors</h1>
@@ -2360,6 +2405,9 @@ export const instructorList = ({ me, csrf, org, instructors = [],
   ${done ? `<div class="good">${esc(done)}</div>` : ''}
   ${error ? `<div class="bad">${esc(error)}</div>` : ''}
   ${rebuild ? `<div class="note">${esc(rebuild)}</div>` : ''}
+
+  ${picker}
+  <h2>Their cards</h2>
 
   ${instructors.length ? `<p class="muted">${instructors.length} with the
     instructor role here; ${shown} on the public website.</p>` : ''}
@@ -3160,6 +3208,9 @@ export const myPerson = ({ me, csrf, how, person, private: priv = {}, grade, mem
 
   <h2>Contact and safety details</h2>
   <form method="post" action="/me/${esc(person.id)}">
+    <label for="about">A few words about ${mine ? 'yourself' : esc(person.first_name)} <span class="muted">(up to 280 characters)</span></label>
+    <textarea id="about" name="about" rows="3" maxlength="280">${v('about', person.about)}</textarea>
+    <p class="hint">Shown on ${mine ? 'your' : 'their'} instructor card if ${mine ? 'you are' : 'they are'} listed on the dojo's website: where ${mine ? 'you' : 'they'} trained, what ${mine ? 'you' : 'they'} enjoy teaching. Not shown anywhere else.</p>
     <input type="hidden" name="_csrf" value="${esc(csrf ?? '')}">
     <div class="row">
       <div><label for="preferred_name">Preferred name</label>

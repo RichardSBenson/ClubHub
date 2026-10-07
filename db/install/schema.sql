@@ -1963,3 +1963,5 @@ alter table club_gallery
   add column if not exists event_id uuid references event(id) on delete set null;
 update club_gallery set year = extract(year from created_at)::smallint where year is null;
 create index if not exists club_gallery_year on club_gallery (organisation_id, year desc, event_id);
+
+alter table person add column if not exists about text check (about is null or char_length(about) <= 280);

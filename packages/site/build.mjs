@@ -418,6 +418,8 @@ for (const target of SITES) {
     // The photo viewer on public gallery pages.
     await fs.copyFile(new URL('../../vendor/honbu/lightbox.js', import.meta.url).pathname, path.join(OUT, 'vendor', 'lightbox.js'));
     written.push('vendor/lightbox.js');
+    await fs.copyFile(new URL('../../vendor/honbu/select-all.js', import.meta.url).pathname, path.join(OUT, 'vendor', 'select-all.js'));
+    written.push('vendor/select-all.js');
   }
 
   // Only those the organisation has published. An empty page is the right

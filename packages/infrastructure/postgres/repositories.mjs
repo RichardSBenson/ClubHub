@@ -262,7 +262,7 @@ export class PostgresSiteContent {
              p.last_name as "lastName", p.photo_asset_id as "photoAssetId",
              cg.label as grade, cg.is_dan as "isDan",
              ct.label as title, ct.address_as as "addressAs",
-             ip.bio, ip.teaches, ip.sort_order as "sortOrder",
+             ip.bio, nullif(p.about, '') as about, ip.teaches, ip.sort_order as "sortOrder",
              ip.started_year as "startedYear",
              case when ip.show_checks then (
                select coalesce(json_agg(distinct q.label order by q.label), '[]'::json)

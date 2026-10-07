@@ -1387,7 +1387,7 @@ export const billing = {
 // ---------------------------------------------------------------------------
 
 import { validate, excerpt, toText } from '../content/blocks.mjs';
-import { assertMayPublish } from '../core/domain/instructing.mjs';
+import { assertMayPublish, reasonNotToPublish } from '../core/domain/instructing.mjs';
 import { readTheme } from '../site/theme.mjs';
 import { problemsWithClubProfile, changesTheSite }
   from '../core/domain/club-profile.mjs';
@@ -1903,6 +1903,67 @@ export const news = {
 // ---------------------------------------------------------------------------
 
 export const instructors = {
+  /**
+   * The dojo's roll, highest grade first, for picking instructors. `grade` is 'dan' (black belts, the default),
+   * 'all' or one grade's id; `band` is 'junior' (under 18), 'senior' or ''.
+   */
+  async rollFor(actor, orgId, { grade = 'dan', band = '' } = {}) {
+    await assertRole(actor, orgId, MANAGE);
+    const { rows } = await pool.query(`
+      select p.id as person_id, p.first_name, p.last_name, p.date_of_birth::text as date_of_birth,
+             p.photo_asset_id, nullif(p.about, '') as about,
+             cg.label as grade, cg.is_dan, cg.rank_order, cg.grade_id,
+             extract(year from age(current_date, p.date_of_birth))::int as age,
+             exists (select 1 from affiliation i where i.person_id = p.id and i.organisation_id = $1
+                     and i.role = 'instructor' and i.ends is null and i.status = 'active') as is_instructor,
+             coalesce(ip.published, false) as published
+      from affiliation a
+      join person p on p.id = a.person_id
+      left join person_current_grade cg on cg.person_id = p.id
+      left join instructor_profile ip on ip.person_id = p.id and ip.organisation_id = $1
+      where a.organisation_id = $1 and a.role = 'member' and a.ends is null and a.status = 'active'
+      order by cg.rank_order desc nulls last, p.last_name, p.first_name`, [orgId]);
+    return rows.filter((r) => {
+      if (grade === 'dan' && !r.is_dan) return false;
+      if (grade && grade !== 'dan' && grade !== 'all' && r.grade_id !== grade) return false;
+      if (band === 'junior' && !(r.age != null && r.age < 18)) return false;
+      if (band === 'senior' && !(r.age == null || r.age >= 18)) return false;
+      return true;
+    });
+  },
+
+  /**
+   * Make several people instructors in one go, optionally showing them on the website, or take the role away.
+   * Nobody is skipped silently: the ones who could not be shown (under 18, no date of birth) come back with why.
+   */
+  async bulk(actor, orgId, personIds, mode) {
+    await assertRole(actor, orgId, MANAGE);
+    const ids = [...new Set(personIds)];
+    const onRoll = new Set((await q(`select person_id from affiliation where organisation_id=$1 and role='member'
+      and ends is null and status='active' and person_id = any($2::uuid[])`, [orgId, ids])).map((r) => r.person_id));
+    const out = { changed: 0, shown: 0, skipped: [] };
+    for (const id of ids) {
+      const who = await one(`select first_name || ' ' || last_name as name, date_of_birth from person where id=$1`, [id]);
+      if (!who || !onRoll.has(id)) { out.skipped.push({ name: who?.name ?? 'Someone', reason: 'not on this dojo\'s roll' }); continue; }
+      if (mode === 'off') {
+        if ((await instructorRole.set(actor, id, false)).changed) out.changed += 1;
+        continue;
+      }
+      if ((await instructorRole.set(actor, id, true)).changed) out.changed += 1;
+      if (mode !== 'show') continue;
+      const org = await one('select settings from organisation where id=$1', [orgId]);
+      const why = reasonNotToPublish({ person: { dateOfBirth: who.date_of_birth }, isInstructor: true,
+        on: new Date().toISOString().slice(0, 10), settings: org?.settings ?? {} });
+      if (why) { out.skipped.push({ name: who.name, reason: 'an instructor, but not shown on the website: ' + (/under/.test(why) ? 'under 18' : 'no date of birth recorded') }); continue; }
+      const cur = await one(`select bio, teaches, sort_order, started_year, show_checks, published from instructor_profile
+        where organisation_id=$1 and person_id=$2`, [orgId, id]);
+      await this.save(actor, orgId, id, { bio: cur?.bio ?? { blocks: [] }, teaches: cur?.teaches ?? null, published: true,
+        sortOrder: cur?.sort_order ?? 0, startedYear: cur?.started_year ?? null, showChecks: !!cur?.show_checks });
+      if (!cur?.published) out.shown += 1;
+    }
+    return out;
+  },
+
   /** Where this person is an instructor, and whether the dojo's website shows them yet. */
   async siteStatus(personId) {
     return one(`select o.slug, o.name, coalesce(ip.published, false) as published
@@ -2315,7 +2376,7 @@ export const myself = {
   /** Everything a member sees about themselves or a child they look after. */
   async get(actor, personId) {
     const how = await family.assertMayActFor(actor, personId);
-    const person = await one(`select ${PERSON_COLUMNS}, p.photo_asset_id from person p where p.id=$1`, [personId]);
+    const person = await one(`select ${PERSON_COLUMNS}, p.photo_asset_id, p.about from person p where p.id=$1`, [personId]);
     if (!person) throw new NotFound('Person');
     const priv = await one(`select address_line, suburb, city, postcode, emergency_name,
       emergency_phone, medical_notes from person_private where person_id=$1`, [personId]) ?? {};
@@ -2346,8 +2407,8 @@ export const myself = {
     const client = await pool.connect();
     try {
       await client.query('begin');
-      await client.query(`update person set preferred_name=$2, phone=$3, email=$4 where id=$1`,
-        [personId, input.preferred_name, input.phone, input.email]);
+      await client.query(`update person set preferred_name=$2, phone=$3, email=$4, about=$5 where id=$1`,
+        [personId, input.preferred_name, input.phone, input.email, input.about ?? null]);
       await client.query(`
         insert into person_private (person_id, address_line, suburb, city, postcode,
           emergency_name, emergency_phone, medical_notes, updated_at)
@@ -2363,7 +2424,7 @@ export const myself = {
       // sensitive thing on the register and the history is read by more people
       // than the notes are.
       const changed = [];
-      for (const k of ['preferred_name', 'phone', 'email'])
+      for (const k of ['preferred_name', 'phone', 'email', 'about'])
         if ((before.person[k] ?? null) !== (input[k] ?? null)) changed.push(k);
       for (const k of ['address_line', 'suburb', 'city', 'postcode',
                        'emergency_name', 'emergency_phone', 'medical_notes'])

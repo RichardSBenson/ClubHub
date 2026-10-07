@@ -68,6 +68,7 @@ export function readSelfEdit(form = {}) {
     emergency_name: clean(form.emergency_name, 80),
     emergency_phone: clean(form.emergency_phone, 40),
     medical_notes: clean(form.medical_notes, 2000),
+    about: clean(form.about, 280),
   };
 }
 
