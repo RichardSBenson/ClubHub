@@ -838,6 +838,49 @@ export const rank = {
       [personId, gradeId, awardedOn, awardedByOrg, eventId, result,
        JSON.stringify(panel.map((id) => ({ person_id: id })))])).rows[0];
   },
+
+  /**
+   * Grades this actor may RECORD for a person who already holds them: kyu by an official of the
+   * person's own dojo, dan by an official of the federation that owns the ladder. A dojo cannot
+   * type in a black belt. Nothing here is awarded: no panel, no certificate.
+   */
+  async recognisable(actor, personId) {
+    const home = await one(`select organisation_id from affiliation
+      where person_id = $1 and ends is null order by (role = 'member') desc limit 1`, [personId]);
+    if (!home) return { grades: [], current: null, fed: null, mayKyu: false, mayDan: false };
+    const fed = await orgs.ladderOwnerOf(home.organisation_id);
+    if (!fed) return { grades: [], current: null, fed: null, mayKyu: false, mayDan: false };
+    const mayKyu = (await one('select has_role_at($1,$2,$3) as ok', [actor, home.organisation_id, REGISTER]))?.ok;
+    const mayDan = (await one('select has_role_at($1,$2,$3) as ok', [actor, fed.id, REGISTER]))?.ok;
+    const current = await one('select rank_order from person_current_grade where person_id = $1', [personId]);
+    const all = await this.ladder(fed.id);
+    const grades = all.filter((g) => (g.is_dan ? mayDan : mayKyu) && g.rank_order > (current?.rank_order ?? 0));
+    return { grades, current, fed, home, mayKyu: !!mayKyu, mayDan: !!mayDan };
+  },
+
+  async recognise(actor, { personId, gradeId, heldOn, note }) {
+    const { grades, fed, home, mayKyu, mayDan } = await this.recognisable(actor, personId);
+    if (!mayKyu && !mayDan) throw new Forbidden();
+    const grade = grades.find((g) => g.id === gradeId);
+    if (!grade) {
+      const any = fed ? (await this.ladder(fed.id)).find((g) => g.id === gradeId) : null;
+      if (any?.is_dan && !mayDan) throw new Forbidden();
+      throw new Invalid('Choose a grade higher than the one already on the record.');
+    }
+    const day = String(heldOn ?? '').slice(0, 10) || new Date().toISOString().slice(0, 10);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(day) || Number.isNaN(Date.parse(day)) || day > new Date().toISOString().slice(0, 10))
+      throw new Invalid('Give the date the grade was earned, not a date in the future.');
+    const text = String(note ?? '').trim().slice(0, 300);
+    const row = (await pool.query(`
+      insert into grading_record (person_id, grade_id, awarded_on, awarded_by_org, result, panel, notes)
+      values ($1,$2,$3,$4,'pass','[]',$5) returning id`,
+      [personId, gradeId, day, grade.is_dan ? fed.id : home.organisation_id,
+       'Recognised: held before joining, not graded through this system.' + (text ? ' ' + text : '')])).rows[0];
+    await pool.query(`insert into audit_log (account_id, organisation_id, action, entity, entity_id, after)
+      values ($1,$2,'grade_recognised','person',$3,$4)`,
+      [actor, home.organisation_id, personId, JSON.stringify({ gradeId, label: grade.label, heldOn: day, recordId: row.id })]);
+    return grade;
+  },
 };
 
 // ---------------------------------------------------------------------------

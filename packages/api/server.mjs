@@ -363,6 +363,7 @@ get('/p/:id', async (ctx) => {
     isInstructor: await instructorRole.is(record.person.id), canManage: mayManage,
     done: ctx.url.searchParams.get('done'), photoError: ctx.url.searchParams.get('error'),
     titles: await people.titlesOf(ctx.me.accountId, ctx.params.id),
+    recognisable: (await rank.recognisable(ctx.me.accountId, ctx.params.id)).grades,
     // Named `changes`, not `history`: this view already has a `history`, and
     // it is the grading history. Overwriting it with the audit log would have
     // replaced somebody's grades with a list of edits.
@@ -419,6 +420,20 @@ get('/p/:id/photo', async (ctx) => {
   if (!UUID_RE.test(ctx.params.id)) throw new NotFound('Photograph');
   const { mime, bytes } = await photos.bytes(ctx.me.accountId, ctx.params.id);
   return ctx.sendBytes(200, bytes, { type: mime, cacheControl: 'private, max-age=300' });
+});
+
+post('/p/:id/recognise-grade', async (ctx) => {
+  ctx.requireActor();
+  if (!UUID_RE.test(ctx.params.id)) throw new NotFound('Person');
+  const form = await ctx.form();
+  const back = `/p/${ctx.params.id}`;
+  try {
+    const g = await rank.recognise(ctx.me.accountId, { personId: ctx.params.id, gradeId: form.gradeId, heldOn: form.heldOn, note: form.note });
+    return ctx.redirect(`${back}?done=${encodeURIComponent(`${g.label} recorded.`)}`);
+  } catch (e) {
+    if (e instanceof Invalid) return ctx.redirect(`${back}?error=${encodeURIComponent(e.message)}`);
+    throw e;
+  }
 });
 
 post('/p/:id/guardians', async (ctx) => {

@@ -9,3 +9,15 @@ A grading is an event of kind *grading* (scheduled under Events). `/o/:slug/grad
 **Certificates** are a printable page (`/p/:id/certificate/:recordId`; print or save as PDF from the browser). The member or their guardian can open their own (linked from their page); so can staff at the awarding organisation or the member's club. Fails and uncertified records have none.
 
 The older **Grading** page remains for recording a result with no event behind it.
+
+## A grade somebody already holds
+For a member who earned a grade elsewhere or before joining (a transferring black belt, say), a member's profile
+(`/p/:id`) has **Record a grade they already hold**: the grade, the date earned if known, and where it came from.
+It goes into the register as *held before joining*: no panel, no certificate, no fee, and it is never described as
+awarded here. It becomes their current grade, so the next grade the system offers is the one above it.
+
+- **Kyu grades** can be recorded by an owner, administrator or registrar of the person's own dojo (or above).
+- **Dan grades** only by an owner, administrator or registrar of the federation that owns the ladder. A dojo cannot
+  type in a black belt.
+- Only grades higher than the current one are offered; the same grade twice is refused; a future date is refused.
+- Each one is written to the audit log (`grade_recognised`).

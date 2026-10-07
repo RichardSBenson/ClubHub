@@ -454,7 +454,7 @@ export const roster = ({ me, csrf, org, roster, canRegister = false,
 
 export const person = ({ me, csrf, person, history, affiliations, eligibility,
                         titles = [], changes = [], guardians = null, training = null,
-                        canEdit = false, access = null, link = null, isInstructor = false, canManage = false, done = null, photoError = null,
+                        canEdit = false, access = null, link = null, isInstructor = false, canManage = false, done = null, photoError = null, recognisable = [],
                         linkExpires = 15, error = null }) => page({
   title: `${person.first_name} ${person.last_name}`, me, csrf, body: `<style>${identityCss}
   .idphoto{background:#ddd}.idphoto.none{color:#666}.idchip{color:#9a2a1f}</style>
@@ -481,6 +481,19 @@ export const person = ({ me, csrf, person, history, affiliations, eligibility,
       (you choose that on the Instructors screen). Taking the tick off ends it today and keeps the history.
       Signing in to take the roll is a separate thing, under Access.</p>
     <button class="btn" type="submit">Save</button>
+  </form>` : ''}
+
+  ${recognisable.length ? `<form method="post" action="/p/${esc(person.id)}/recognise-grade" class="card" style="margin:12px 0">
+    <input type="hidden" name="_csrf" value="${esc(csrf ?? '')}">
+    <h3 style="margin-top:0">Record a grade they already hold</h3>
+    <p class="hint">For somebody who earned a grade elsewhere or before joining. It goes on the record as held on joining: no panel, no certificate, no fee.</p>
+    <div class="row">
+      <div><label for="rg-grade">Grade</label><select id="rg-grade" name="gradeId" required>${recognisable.map((g) => `<option value="${esc(g.id)}">${esc(g.label)}</option>`).join('')}</select></div>
+      <div><label for="rg-on">Date earned <span class="muted">(if known)</span></label><input id="rg-on" type="date" name="heldOn"></div>
+    </div>
+    <label for="rg-note">Where from <span class="muted">(optional)</span></label>
+    <input id="rg-note" name="note" maxlength="300" placeholder="e.g. Awarded by Shihan Smith, Tokyo, 2019">
+    <p><button class="btn" type="submit">Record this grade</button></p>
   </form>` : ''}
 
   ${canEdit ? `<form method="post" action="/p/${esc(person.id)}/photo" enctype="multipart/form-data" class="card" style="margin:12px 0">
