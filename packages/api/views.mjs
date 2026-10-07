@@ -3102,8 +3102,8 @@ export const myPerson = ({ me, csrf, how, person, private: priv = {}, grade, mem
                            values = null, error, done }) => {
   const v = (k, fallback) => esc(values?.[k] ?? fallback ?? '');
   const mine = how === 'self';
-  return page({ title: `${person.first_name} ${person.last_name}`, me, csrf, body: `
-  <h1>${esc(person.first_name)} ${esc(person.last_name)}</h1>
+  return page({ title: `${person.first_name} ${person.last_name}`, me, csrf, body: `<style>${identityCss}</style>
+  ${identityHead({ personId: person.id, name: `${person.first_name} ${person.last_name}`, hasPhoto: !!person.photo_asset_id, tag: 'h1' })}
   <p class="sub">${esc(person.display_number ?? '')}${mine ? '' : ' · you look after this person'}
     · <a href="/me">Back</a></p>
   ${done ? `<div class="good">${esc(done)}</div>` : ''}
