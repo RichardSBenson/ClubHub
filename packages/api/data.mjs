@@ -341,6 +341,7 @@ export const people = {
          JSON.stringify({ role, number })]);
 
       await client.query('commit');
+      await webhooks.emitNow(organisationId, 'member.created', { id: person.id, number, first_name: person.first_name, last_name: person.last_name, role });
       return person;
     } catch (e) {
       await client.query('rollback'); throw e;
@@ -3491,6 +3492,7 @@ export const messages = {
           await pool.query(`update message_recipient set status='sent', sent_at=now(),
             provider_id=$2, error=null where id=$1`, [r.id, res?.id ?? null]);
           sent++;
+          await push.toPerson(r.person_id, { title: org.name, body: message.subject, url: "/me/messages" }).catch(() => {});
         } catch (e) {
           await pool.query(`update message_recipient set status='failed', error=$2 where id=$1`,
             [r.id, String(e.message ?? e).slice(0, 300)]);
@@ -3611,6 +3613,7 @@ async function settle(paymentId, ok, detail, { actor = null, ref = undefined, ma
      JSON.stringify({ amountCents: row.amount_cents, personId: row.person_id,
        ...(manual ? { method: manual.method, receipt: row.receipt_no } : {}),
        ...(renewed.length ? { paidUntil: renewed[0] } : {}) })]);
+  if (ok) await webhooks.emitNow(row.organisation_id, 'payment.succeeded', { payment_id: paymentId, person_id: row.person_id, amount_cents: row.amount_cents });
   return true;
 }
 
@@ -3847,6 +3850,7 @@ async function rosterFor(orgId) {
                   else date_part('year', age((now() at time zone $2)::date, p.date_of_birth))::int end as age,
              exists (select 1 from payment_line l join payment py on py.id = l.payment_id
                       where l.renews_affiliation_id = a.id and py.status in ('pending','awaiting','failed')) as asked,
+             exists (select 1 from payment_agreement g where g.affiliation_id = a.id and g.status = 'active') as auto_renew,
              (select max(mr.sent_at)::date::text from message_recipient mr join message m on m.id = mr.message_id
                where m.kind = 'renewal' and mr.status = 'sent' and (mr.person_id = p.id or mr.about_id = p.id)) as last_reminded
       from affiliation a join person p on p.id = a.person_id
@@ -3967,6 +3971,161 @@ export const renewals = {
       values ($1,$2,'membership_carried_on','person',$3,$4)`, [actor, orgId, a.person_id,
       JSON.stringify({ paidUntil: until })]);
     return until;
+  },
+};
+
+
+// ---------------------------------------------------------------------------
+// automatic renewal
+// ---------------------------------------------------------------------------
+
+import { chargeDue, afterFailure, problemsWithSetup, cardLabel, METHODS as AUTO_METHODS, PERIOD_CHOICES, CHARGE_LEAD_DAYS, MAX_FAILURES }
+  from '../core/domain/autorenew.mjs';
+
+const AGREEMENT_SELECT = `select g.id, g.organisation_id, g.affiliation_id, g.person_id, g.period, g.method, g.label, g.status, g.failures,
+    g.next_attempt_on::text as next_attempt_on, g.last_error, g.agreed_at, o.name as dojo,
+    a.paid_until::text as paid_until, a.fee_exempt,
+    nullif(trim(concat_ws(' ', p.first_name, p.last_name)), '') as person_name
+  from payment_agreement g join organisation o on o.id = g.organisation_id
+  join affiliation a on a.id = g.affiliation_id join person p on p.id = g.person_id`;
+
+export const autoRenew = {
+  AUTO_METHODS, PERIOD_CHOICES, CHARGE_LEAD_DAYS, MAX_FAILURES,
+
+  /** Where this person stands: each club membership, whether it renews itself, and what it would cost. */
+  async forPerson(actor, personId) {
+    await family.assertMayActFor(actor, personId);
+    const mem = await q(`select a.id as affiliation_id, a.organisation_id, o.name as dojo, a.paid_until::text as paid_until, a.fee_exempt
+      from affiliation a join organisation o on o.id = a.organisation_id
+      where a.person_id = $1 and a.ends is null and a.role in ('member','instructor','assistant') and o.type = 'club'
+        and a.status in ('active','lapsed') order by o.name`, [personId]);
+    const live = await q(`${AGREEMENT_SELECT} where g.person_id = $1 and g.status <> 'cancelled'`, [personId]);
+    const person = await one(`select id, first_name, last_name, date_of_birth::text as dob from person where id = $1`, [personId]);
+    const out = [];
+    for (const m of mem) {
+      const today = await qualToday(m.organisation_id);
+      const age = person.dob ? Math.floor((Date.parse(today) - Date.parse(person.dob)) / 31_557_600_000) : null;
+      const schedule = await feeRows(m.organisation_id);
+      const prices = Object.fromEntries(PERIOD_CHOICES.map((pd) => [pd, feeFor(schedule, { ageYears: age, period: pd, today })]).filter(([, f]) => f));
+      out.push({ ...m, agreement: live.find((g) => g.affiliation_id === m.affiliation_id) ?? null, prices });
+    }
+    return { person, memberships: out };
+  },
+
+  /** The person (or their parent) agrees to automatic renewal and gives a method. Only a token is kept. */
+  async start(actor, personId, affiliationId, input, { provider }) {
+    await family.assertMayActFor(actor, personId);
+    const problems = problemsWithSetup({ method: input.method, period: input.period, agreed: input.agreed });
+    if (problems.length) throw new Invalid(problems.join(' '));
+    const a = await one(`select a.id, a.organisation_id, a.fee_exempt, o.type from affiliation a join organisation o on o.id = a.organisation_id
+      where a.id = $1 and a.person_id = $2 and a.ends is null and a.role in ('member','instructor','assistant')`, [affiliationId, personId]);
+    if (!a || a.type !== 'club') throw new NotFound('Membership');
+    if (a.fee_exempt) throw new Invalid('You are not charged here, so there is nothing to renew.');
+    const today = await qualToday(a.organisation_id);
+    const person = await one('select date_of_birth::text as dob from person where id=$1', [personId]);
+    const age = person.dob ? Math.floor((Date.parse(today) - Date.parse(person.dob)) / 31_557_600_000) : null;
+    if (!feeFor(await feeRows(a.organisation_id), { ageYears: age, period: input.period, today }))
+      throw new Invalid('The dojo has not set a price for that yet. Choose another, or ask the dojo.');
+    if (await one(`select 1 x from payment_agreement where affiliation_id=$1 and status <> 'cancelled'`, [affiliationId]))
+      throw new Invalid('Automatic renewal is already set up. Stop it first to change it.');
+    let saved;
+    try { saved = await provider.saveMethod({ method: input.method, card: input.card }); }
+    catch { throw new Invalid('We could not reach the payment provider. Nothing was saved — try again.'); }
+    if (saved.status !== 'saved') throw new Invalid(saved.detail || 'That payment method was not accepted.');
+    const row = await one(`insert into payment_agreement (organisation_id, affiliation_id, person_id, period, method, provider, provider_ref, label, agreed_by)
+      values ($1,$2,$3,$4,$5,$6,$7,$8,$9) returning id`,
+      [a.organisation_id, affiliationId, personId, input.period, input.method, provider.name, saved.ref,
+       input.method === 'card' ? cardLabel(input.card) : 'Bank direct debit', actor]);
+    await pool.query(`insert into audit_log (account_id, organisation_id, action, entity, entity_id, after) values ($1,$2,'auto_renew_start','person',$3,$4)`,
+      [actor, a.organisation_id, personId, JSON.stringify({ period: input.period, method: input.method })]);
+    return row.id;
+  },
+
+  /** One press. After it, nothing more is charged. */
+  async cancel(actor, personId, agreementId) {
+    await family.assertMayActFor(actor, personId);
+    const g = await one(`update payment_agreement set status='cancelled', cancelled_at=now(), cancelled_by=$3, next_attempt_on=null
+      where id=$1 and person_id=$2 and status <> 'cancelled' returning organisation_id`, [agreementId, personId, actor]);
+    if (!g) throw new NotFound('Automatic renewal');
+    await pool.query(`insert into audit_log (account_id, organisation_id, action, entity, entity_id, after) values ($1,$2,'auto_renew_stop','person',$3,'{}')`,
+      [actor, g.organisation_id, personId]);
+  },
+
+  /** A dojo's view: who renews themselves, who is failing. */
+  async forClub(actor, orgId) {
+    await assertRole(actor, orgId, REGISTER);
+    await clubOnly(orgId);
+    return q(`${AGREEMENT_SELECT} where g.organisation_id = $1 and g.status <> 'cancelled'
+      order by (g.status = 'paused') desc, (g.failures > 0) desc, p.last_name, p.first_name`, [orgId]);
+  },
+
+  /**
+   * The daily run. For each agreement whose membership is about to run out: ask for the dojo's price, charge the saved
+   * method, and let the ordinary payment path extend the membership. Safe to run twice: the payment is claimed before
+   * the provider is asked, and a second run finds the membership already extended or an attempt already waiting.
+   */
+  async run({ provider, messenger = null, origin = '', baseFrom = '', budgetMs = 9000 }) {
+    const started = Date.now();
+    const rows = await q(`${AGREEMENT_SELECT} where g.status = 'active' order by g.agreed_at`);
+    const report = { charged: 0, failed: 0, paused: 0, skipped: 0 };
+    for (const g of rows) {
+      if (Date.now() - started > budgetMs) break;
+      const today = await qualToday(g.organisation_id);
+      if (!chargeDue({ status: g.status, nextAttemptOn: g.next_attempt_on, paidUntil: g.paid_until, exempt: g.fee_exempt }, today)) { report.skipped++; continue; }
+      const person = await one('select date_of_birth::text as dob from person where id=$1', [g.person_id]);
+      const age = person.dob ? Math.floor((Date.parse(today) - Date.parse(person.dob)) / 31_557_600_000) : null;
+      const fee = feeFor(await feeRows(g.organisation_id), { ageYears: age, period: g.period, today });
+      if (!fee) { report.skipped++; continue; }
+      // Reuse an attempt already waiting rather than asking twice.
+      let pay = await one(`select py.id from payment py join payment_line l on l.payment_id = py.id
+        where l.renews_affiliation_id = $1 and py.status in ('pending','failed') order by py.created_at desc limit 1`, [g.affiliation_id]);
+      if (!pay) {
+        const client = await pool.connect();
+        try {
+          await client.query('begin');
+          const { rows: [p] } = await client.query(`insert into payment (organisation_id, person_id, amount_cents, currency, status)
+            values ($1,$2,$3,$4,'pending') returning id`, [g.organisation_id, g.person_id, fee.amount_cents, fee.currency ?? 'NZD']);
+          await client.query(`insert into payment_line (payment_id, kind, description, amount_cents, renews_affiliation_id, renews_months)
+            values ($1,'dojo_fee',$2,$3,$4,$5)`, [p.id, `${fee.label} — automatic renewal ${PERIODS[g.period].label.toLowerCase()}`, fee.amount_cents, g.affiliation_id, PERIODS[g.period].months]);
+          await client.query('commit'); pay = p;
+        } catch (e) { await client.query('rollback'); throw e; } finally { client.release(); }
+      }
+      const claimed = await one(`update payment set status='awaiting', method=$2, provider=$3, updated_at=now()
+        where id=$1 and status in ('pending','failed') returning id`, [pay.id, g.method === 'card' ? 'card' : 'direct_debit', provider.name]);
+      if (!claimed) { report.skipped++; continue; }
+      let result;
+      try { result = await provider.charge({ ref: (await one('select provider_ref from payment_agreement where id=$1', [g.id])).provider_ref,
+        amountCents: fee.amount_cents, currency: fee.currency ?? 'NZD', reference: pay.id }); }
+      catch (e) { result = { status: 'failed', detail: 'The payment provider could not be reached.' }; }
+      if (result.status === 'succeeded') {
+        await settle(pay.id, true, result.detail, { ref: result.ref });
+        await pool.query(`update payment_agreement set failures=0, next_attempt_on=null, last_error=null where id=$1`, [g.id]);
+        report.charged++;
+      } else if (result.status === 'awaiting') {
+        await pool.query(`update payment set provider_ref=$2, detail=$3, updated_at=now() where id=$1`, [pay.id, result.ref, result.detail]);
+        report.charged++;
+      } else {
+        await settle(pay.id, false, result.detail ?? 'Declined.', { ref: result.ref });
+        const next = afterFailure(g.failures, today);
+        await pool.query(`update payment_agreement set failures=$2, status=$3, next_attempt_on=$4, last_error=$5 where id=$1`,
+          [g.id, next.failures, next.status, next.nextAttemptOn, String(result.detail ?? 'Declined.').slice(0, 250)]);
+        report.failed++;
+        if (next.status === 'paused') report.paused++;
+        await push.toPerson(g.person_id, { title: next.status === 'paused' ? 'Automatic renewal has stopped' : 'Your membership payment did not go through',
+          body: `${g.dojo}: ${g.person_name}`, url: `/me/${g.person_id}/auto-renew` });
+        if (messenger) {
+          const text = next.status === 'paused'
+            ? { subject: 'Automatic renewal has stopped', body: `We could not take your membership payment for ${g.person_name} at ${g.dojo} after several tries, so automatic renewal is paused. Please sign in, go to My payments, and pay or set up automatic renewal again.` }
+            : { subject: 'Your membership payment did not go through', body: `We tried to renew ${g.person_name}'s membership at ${g.dojo} and the payment did not go through (${result.detail ?? 'declined'}). We will try again on ${next.nextAttemptOn}. You can also pay now from My payments.` };
+          try {
+            const made = await messages.prepare(null, g.organisation_id, { audience: 'selected', kind: 'renewal', personIds: [g.person_id],
+              subject: text.subject, body: text.body, eventId: null, personNumber: null }, { baseFrom, trusted: true });
+            await messages.sendBatch(null, g.organisation_id, made.message.id, { messenger, origin, trusted: true, budgetMs: 3000 });
+          } catch { /* the failure is recorded either way; a missing address must not stop the run */ }
+        }
+      }
+    }
+    return report;
   },
 };
 
@@ -6672,6 +6831,7 @@ export const forms = {
       values ($1,$2,$3,$4::jsonb,$5,$6,$7,$8,$9) returning id`,
       [formId, item.form.version, personId, JSON.stringify(answers), String(signedName).trim().slice(0, 120), actor, minor, ip, expiryFor(item.form, day)]);
     await formAudit(actor, item.form.organisation_id, 'form_signed', formId, { personId, version: item.form.version });
+    await webhooks.emitNow(item.form.organisation_id, 'form.signed', { form_id: formId, title: item.form.title, person_id: personId, version: item.form.version });
     return { id: row.id, form: item.form, person };
   },
 
@@ -6679,5 +6839,484 @@ export const forms = {
   async dueFor(personId) {
     const { person, items } = await this._applicable(personId);
     return items.filter((i) => i.standing !== 'current').map((i) => ({ id: i.form.id, title: i.form.title, first: person.first_name, personId, expired: i.standing === 'expired' }));
+  },
+};
+
+// ---------------------------------------------------------------------------
+// booking a place in a class, with a waiting list
+// ---------------------------------------------------------------------------
+
+import { mayAttend } from '../core/domain/portal.mjs';
+import { bookableDates, placeFor, problemWithBooking, placesFree, nextInQueue, queuePosition, readCapacity, BOOK_DAYS_AHEAD }
+  from '../core/domain/booking.mjs';
+
+const SESSION_BOOKING = `select ts.id, ts.organisation_id, ts.label, ts.weekday, to_char(ts.starts,'HH24:MI') as starts, to_char(ts.ends,'HH24:MI') as ends,
+    ts.min_age, ts.max_age, ts.capacity, g.rank_order as min_rank_order
+  from training_session ts left join grade g on g.id = ts.min_grade_id`;
+
+const countsFor = (sessionId, date) => q(`select status, count(*)::int n from class_booking where session_id=$1 and session_date=$2 and status <> 'cancelled' group by status`, [sessionId, date]);
+
+export const booking = {
+  BOOK_DAYS_AHEAD,
+
+  /** The club's side: its classes, places, and who is booked on the next dates. */
+  async forClub(actor, orgId) {
+    await assertRole(actor, orgId, TEACH);
+    await clubOnly(orgId);
+    const now = localNow((await one('select timezone from organisation where id=$1', [orgId])).timezone);
+    const sessions = await q(`${SESSION_BOOKING} where ts.organisation_id = $1 order by ts.weekday, ts.starts`, [orgId]);
+    const out = [];
+    for (const s of sessions) {
+      const dates = s.capacity == null ? [] : bookableDates(s, now);
+      const days = [];
+      for (const date of dates) {
+        const people = await q(`select b.id, b.status, b.created_at, p.id as person_id, p.display_number,
+            nullif(trim(concat_ws(' ', p.first_name, p.last_name)), '') as name
+          from class_booking b join person p on p.id = b.person_id
+          where b.session_id = $1 and b.session_date = $2 and b.status <> 'cancelled' order by b.status, b.created_at`, [s.id, date]);
+        days.push({ date, booked: people.filter((x) => x.status === 'booked'), waiting: people.filter((x) => x.status === 'waiting') });
+      }
+      out.push({ ...s, days });
+    }
+    return { today: now.date, sessions: out };
+  },
+
+  async setCapacity(actor, orgId, sessionId, raw) {
+    await assertRole(actor, orgId, REGISTER);
+    await clubOnly(orgId);
+    const c = readCapacity(raw);
+    if (c.problem) throw new Invalid(c.problem);
+    const row = await one(`update training_session set capacity=$3 where id=$1 and organisation_id=$2 returning id`, [sessionId, orgId, c.value]);
+    if (!row) throw new NotFound('Class');
+    await pool.query(`insert into audit_log (account_id, organisation_id, action, entity, entity_id, after) values ($1,$2,'class_places','training_session',$3,$4)`,
+      [actor, orgId, sessionId, JSON.stringify({ capacity: c.value })]);
+    // More room: bring people up from the waiting list for every date.
+    if (c.value != null) {
+      const dates = await q(`select distinct session_date::text d from class_booking where session_id=$1 and status='waiting' and session_date >= current_date`, [sessionId]);
+      for (const { d } of dates) await this._fill(sessionId, d);
+    }
+  },
+
+  /** What one person can book, and what they hold. */
+  async forPerson(actor, personId) {
+    await family.assertMayActFor(actor, personId);
+    const person = await one('select id, first_name, last_name, date_of_birth::text as dob from person where id=$1', [personId]);
+    const grade = await one('select rank_order from person_current_grade where person_id=$1', [personId]);
+    const clubs = await q(`select o.id, o.name, o.timezone from affiliation a join organisation o on o.id = a.organisation_id
+      where a.person_id = $1 and a.ends is null and a.role in ('member','instructor','assistant') and a.status in ('active','trial') and o.type='club' order by o.name`, [personId]);
+    const out = [];
+    for (const club of clubs) {
+      const now = localNow(club.timezone);
+      const who = { ageYears: ageOnDate(person.dob, now.date), rankOrder: grade?.rank_order ?? null };
+      const sessions = await q(`${SESSION_BOOKING} where ts.organisation_id=$1 and ts.capacity is not null order by ts.weekday, ts.starts`, [club.id]);
+      const slots = [];
+      for (const s of sessions) {
+        if (!mayAttend(s, who)) continue;
+        for (const date of bookableDates(s, now)) {
+          const c = Object.fromEntries((await countsFor(s.id, date)).map((r) => [r.status, r.n]));
+          const mine = await one(`select id, status, created_at from class_booking where session_id=$1 and session_date=$2 and person_id=$3 and status <> 'cancelled'`, [s.id, date, personId]);
+          let position = null;
+          if (mine?.status === 'waiting') {
+            const w = await q(`select id, created_at from class_booking where session_id=$1 and session_date=$2 and status='waiting' order by created_at, id`, [s.id, date]);
+            position = queuePosition(w, mine.id);
+          }
+          slots.push({ session: s, date, booked: c.booked ?? 0, waiting: c.waiting ?? 0, free: Math.max(0, s.capacity - (c.booked ?? 0)), mine, position });
+        }
+      }
+      slots.sort((a, b) => a.date.localeCompare(b.date) || a.session.starts.localeCompare(b.session.starts));
+      out.push({ club, slots });
+    }
+    return { person, clubs: out };
+  },
+
+  async book(actor, personId, sessionId, date) {
+    await family.assertMayActFor(actor, personId);
+    const person = await one('select id, date_of_birth::text as dob from person where id=$1', [personId]);
+    const s = await one(`${SESSION_BOOKING} where ts.id=$1`, [sessionId]);
+    if (!s) throw new NotFound('Class');
+    if (!await one(`select 1 x from affiliation where person_id=$1 and organisation_id=$2 and ends is null and role in ('member','instructor','assistant') and status in ('active','trial')`, [personId, s.organisation_id]))
+      throw new NotFound('Class');
+    const now = localNow((await one('select timezone from organisation where id=$1', [s.organisation_id])).timezone);
+    const grade = await one('select rank_order from person_current_grade where person_id=$1', [personId]);
+    const problem = problemWithBooking({ session: s, date, now, who: { ageYears: ageOnDate(person.dob, now.date), rankOrder: grade?.rank_order ?? null } });
+    if (problem) throw new Invalid(problem);
+    const client = await pool.connect();
+    try {
+      await client.query('begin');
+      // One booker at a time per class: the places are counted while the row is held.
+      await client.query('select id from training_session where id=$1 for update', [sessionId]);
+      const have = (await client.query(`select id, status from class_booking where session_id=$1 and session_date=$2 and person_id=$3 and status <> 'cancelled'`, [sessionId, date, personId])).rows[0];
+      if (have) { await client.query('rollback'); return { status: have.status, already: true }; }
+      const booked = (await client.query(`select count(*)::int n from class_booking where session_id=$1 and session_date=$2 and status='booked'`, [sessionId, date])).rows[0].n;
+      const status = placeFor({ capacity: s.capacity, booked });
+      await client.query(`insert into class_booking (session_id, session_date, person_id, status, booked_by) values ($1,$2,$3,$4,$5)`, [sessionId, date, personId, status, actor]);
+      await client.query('commit');
+      await webhooks.emitNow(s.organisation_id, 'class.booked', { session_id: sessionId, date, person_id: personId, status });
+      return { status, already: false };
+    } catch (e) { await client.query('rollback'); throw e; } finally { client.release(); }
+  },
+
+  /** Give up a place (or leave the queue). The longest-waiting person moves up. */
+  async cancel(actor, personId, bookingId, { notify = null } = {}) {
+    await family.assertMayActFor(actor, personId);
+    const b = await one(`update class_booking set status='cancelled', cancelled_at=now() where id=$1 and person_id=$2 and status <> 'cancelled' and session_date >= current_date - 1
+      returning session_id, session_date::text as d, (select organisation_id from training_session where id = session_id) as org`, [bookingId, personId]);
+    if (!b) throw new NotFound('Booking');
+    const moved = await this._fill(b.session_id, b.d);
+    if (notify) for (const m of moved) await this._tell(b.org, m, b.d, notify);
+    return { moved: moved.length };
+  },
+
+  /** Fill free places from the queue. Returns the people moved up. */
+  async _fill(sessionId, date) {
+    const client = await pool.connect();
+    const moved = [];
+    try {
+      await client.query('begin');
+      const s = (await client.query('select id, capacity from training_session where id=$1 for update', [sessionId])).rows[0];
+      if (s?.capacity != null) {
+        const booked = (await client.query(`select count(*)::int n from class_booking where session_id=$1 and session_date=$2 and status='booked'`, [sessionId, date])).rows[0].n;
+        const waiting = (await client.query(`select id, person_id, created_at from class_booking where session_id=$1 and session_date=$2 and status='waiting' order by created_at, id`, [sessionId, date])).rows;
+        for (const w of nextInQueue(waiting, placesFree({ capacity: s.capacity, booked }))) {
+          await client.query(`update class_booking set status='booked', promoted_at=now() where id=$1`, [w.id]);
+          moved.push(w.person_id);
+        }
+      }
+      await client.query('commit');
+    } catch (e) { await client.query('rollback'); throw e; } finally { client.release(); }
+    return moved;
+  },
+
+  async _tell(orgId, personId, date, { messenger, origin = '', baseFrom = '' }) {
+    await push.toPerson(personId, { title: 'A place has opened up', body: `You are now booked in for ${date}. Cancel from My classes if you cannot come.`, url: `/me/${personId}/book` });
+    try {
+      const s = await one(`select o.name from organisation o where o.id=$1`, [orgId]);
+      const made = await messages.prepare(null, orgId, { audience: 'selected', kind: 'announcement', personIds: [personId],
+        subject: 'A place has opened up', body: `Good news: a place has opened in the class you were waiting for at ${s.name} on ${date}. You are now booked in. If you cannot come, please cancel from My classes so somebody else can have it.`,
+        eventId: null, personNumber: null }, { baseFrom, trusted: true });
+      await messages.sendBatch(null, orgId, made.message.id, { messenger, origin, trusted: true, budgetMs: 3000 });
+    } catch { /* the place is theirs either way */ }
+  },
+};
+
+// ---------------------------------------------------------------------------
+// push notifications
+// ---------------------------------------------------------------------------
+
+import { pushFromEnv } from '../infrastructure/push/webpush.mjs';
+
+const MAX_DEVICES = 10;
+const problemsWithSubscription = (s) => {
+  const out = [];
+  let url; try { url = new URL(String(s?.endpoint ?? '')); } catch { out.push('That device did not give a usable address.'); }
+  if (url && url.protocol !== 'https:') out.push('That device did not give a usable address.');
+  if (!/^[A-Za-z0-9_-]{80,100}$/.test(String(s?.p256dh ?? ''))) out.push('That device did not give a usable key.');
+  if (!/^[A-Za-z0-9_-]{16,32}$/.test(String(s?.auth ?? ''))) out.push('That device did not give a usable key.');
+  if (String(s?.endpoint ?? '').length > 1000) out.push('That device address is too long.');
+  return out;
+};
+
+export const push = {
+  /** Which provider sends: from the environment unless one is handed in (tests). null means push is off. */
+  provider: () => pushFromEnv(),
+
+  async status(actor) {
+    const p = this.provider();
+    const mine = await q('select id, user_agent, created_at from push_subscription where account_id=$1 order by created_at desc', [actor]);
+    return { available: !!p, publicKey: p?.publicKey ?? null, devices: mine };
+  },
+
+  async subscribe(actor, sub, userAgent = null) {
+    if (!this.provider()) throw new Invalid('Notifications are not switched on for this site yet.');
+    const problems = problemsWithSubscription(sub);
+    if (problems.length) throw new Invalid([...new Set(problems)].join(' '));
+    // The same device signing in as somebody else takes the subscription with it.
+    await pool.query(`insert into push_subscription (account_id, endpoint, p256dh, auth, user_agent) values ($1,$2,$3,$4,$5)
+      on conflict (endpoint) do update set account_id=$1, p256dh=$3, auth=$4, user_agent=$5, failures=0`,
+      [actor, sub.endpoint, sub.p256dh, sub.auth, String(userAgent ?? '').slice(0, 200) || null]);
+    await pool.query(`delete from push_subscription where id in (select id from push_subscription where account_id=$1 order by created_at desc offset $2)`, [actor, MAX_DEVICES]);
+  },
+
+  async unsubscribe(actor, endpoint) {
+    await pool.query('delete from push_subscription where account_id=$1 and endpoint=$2', [actor, String(endpoint ?? '')]);
+  },
+
+  async removeDevice(actor, id) {
+    const r = await pool.query('delete from push_subscription where account_id=$1 and id=$2', [actor, id]);
+    if (!r.rowCount) throw new NotFound('Device');
+  },
+
+  /**
+   * Tell a person (and, for a child, their parents) something short. Best effort and never an error to the caller:
+   * a dead device is forgotten, a slow one is skipped. Returns how many devices were reached.
+   */
+  async toPerson(personId, message, provider = this.provider()) {
+    if (!provider) return 0;
+    const subs = await q(`select s.id, s.endpoint, s.p256dh, s.auth from push_subscription s join account a on a.id = s.account_id
+      where a.person_id = $1 or a.person_id in (select guardian_id from guardian_link where child_id = $1 and ended_on is null)`, [personId]);
+    let reached = 0;
+    for (const s of subs) {
+      let r; try { r = await provider.send(s, message); } catch { r = 'failed'; }
+      if (r === 'sent') { reached++; await pool.query('update push_subscription set last_sent_at=now(), failures=0 where id=$1', [s.id]); }
+      else if (r === 'gone') await pool.query('delete from push_subscription where id=$1', [s.id]);
+      else await pool.query('update push_subscription set failures = failures + 1 where id=$1', [s.id]);
+    }
+    return reached;
+  },
+};
+
+// ---------------------------------------------------------------------------
+// API tokens and webhooks
+// ---------------------------------------------------------------------------
+
+import dns from 'node:dns/promises';
+import { SCOPES as API_SCOPES, EVENTS as WEBHOOK_EVENTS, MAX_TOKENS, MAX_WEBHOOKS, MAX_ATTEMPTS, retryAt, problemsWithToken, problemsWithWebhook,
+         isPrivateAddress, DISABLE_AFTER_FAILED_DELIVERIES, pageSize } from '../core/domain/integrations.mjs';
+
+const sha256 = (s) => crypto.createHash('sha256').update(String(s)).digest('hex');
+
+export const apiTokens = {
+  SCOPES: API_SCOPES,
+
+  async list(actor, orgId) {
+    await assertRole(actor, orgId, MANAGE);
+    return q(`select id, name, prefix, scopes, created_at, last_used_at, revoked_at from api_token where organisation_id = $1 order by revoked_at nulls first, created_at desc`, [orgId]);
+  },
+
+  /** The token itself is returned once, here, and never stored. */
+  async create(actor, orgId, { name, scopes }) {
+    await assertRole(actor, orgId, MANAGE);
+    const problems = problemsWithToken({ name, scopes });
+    if (problems.length) throw new Invalid(problems.join(' '));
+    if ((await one(`select count(*)::int n from api_token where organisation_id=$1 and revoked_at is null`, [orgId])).n >= MAX_TOKENS)
+      throw new Invalid(`There are already ${MAX_TOKENS} tokens. Revoke one you no longer use.`);
+    const token = `hb_${crypto.randomBytes(24).toString('base64url')}`;
+    const row = await one(`insert into api_token (organisation_id, name, prefix, token_hash, scopes, created_by) values ($1,$2,$3,$4,$5,$6) returning id`,
+      [orgId, String(name).trim().slice(0, 80), token.slice(0, 9), sha256(token), scopes, actor]);
+    await pool.query(`insert into audit_log (account_id, organisation_id, action, entity, entity_id, after) values ($1,$2,'api_token_create','api_token',$3,$4)`,
+      [actor, orgId, row.id, JSON.stringify({ name, scopes })]);
+    return { id: row.id, token };
+  },
+
+  async revoke(actor, orgId, tokenId) {
+    await assertRole(actor, orgId, MANAGE);
+    const row = await one(`update api_token set revoked_at = now() where id=$1 and organisation_id=$2 and revoked_at is null returning id`, [tokenId, orgId]);
+    if (!row) throw new NotFound('Token');
+    await pool.query(`insert into audit_log (account_id, organisation_id, action, entity, entity_id, after) values ($1,$2,'api_token_revoke','api_token',$3,'{}')`, [actor, orgId, tokenId]);
+  },
+
+  /** A bearer string → who it speaks for, or null. */
+  async authenticate(bearer) {
+    const t = String(bearer ?? '').trim();
+    if (!/^hb_[A-Za-z0-9_-]{32}$/.test(t)) return null;
+    const row = await one(`select id, organisation_id, scopes, last_used_at from api_token where token_hash = $1 and revoked_at is null`, [sha256(t)]);
+    if (!row) return null;
+    if (!row.last_used_at || Date.now() - new Date(row.last_used_at).getTime() > 60_000) await pool.query('update api_token set last_used_at = now() where id=$1', [row.id]);
+    return { tokenId: row.id, orgId: row.organisation_id, scopes: row.scopes };
+  },
+};
+
+/** What the API shows. Deliberately small: no dates of birth, contact details, medical or payment information. */
+export const api = {
+  async organisations(auth) {
+    return q(`select o.id, o.slug, o.name, o.type, p.slug as parent_slug from organisation o join organisation me on me.id = $1 and o.path <@ me.path
+      left join organisation p on p.id = o.parent_id where o.status = 'active' order by o.path`, [auth.orgId]);
+  },
+  async members(auth, { limit, after }) {
+    const n = pageSize(limit);
+    const rows = await q(`select p.id, p.display_number as number, p.first_name, p.last_name, o.slug as dojo, a.role, a.status, a.paid_until::text as paid_until,
+        a.starts::text as joined, g.label as grade
+      from affiliation a join organisation o on o.id = a.organisation_id join organisation me on me.id = $1 and o.path <@ me.path
+      join person p on p.id = a.person_id left join person_current_grade g on g.person_id = p.id
+      where a.ends is null and a.role in ('member','instructor','assistant') and ($3::uuid is null or p.id > $3::uuid)
+      order by p.id limit $2`, [auth.orgId, n + 1, UUID_OK.test(String(after ?? '')) ? after : null]);
+    return { data: rows.slice(0, n), next: rows.length > n ? rows[n - 1].id : null };
+  },
+  async events(auth, { limit, after }) {
+    const n = pageSize(limit);
+    const rows = await q(`select e.id, e.slug, e.title, e.kind, e.starts_at, e.ends_at, e.status, e.venue_name, o.slug as organisation
+      from event e join organisation o on o.id = e.organisation_id join organisation me on me.id = $1 and o.path <@ me.path
+      where ($3::uuid is null or e.id > $3::uuid) order by e.id limit $2`, [auth.orgId, n + 1, UUID_OK.test(String(after ?? '')) ? after : null]);
+    return { data: rows.slice(0, n), next: rows.length > n ? rows[n - 1].id : null };
+  },
+};
+const UUID_OK = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+export const webhooks = {
+  EVENTS: WEBHOOK_EVENTS,
+
+  async list(actor, orgId) {
+    await assertRole(actor, orgId, MANAGE);
+    const endpoints = await q(`select id, url, events, active, disabled_at, disabled_reason, consecutive_failures, created_at from webhook_endpoint where organisation_id=$1 order by created_at desc`, [orgId]);
+    const recent = await q(`select d.id, d.endpoint_id, d.event, d.status, d.attempts, d.last_status, d.last_error, d.created_at, d.delivered_at, d.next_attempt_at
+      from webhook_delivery d join webhook_endpoint e on e.id = d.endpoint_id where e.organisation_id=$1 order by d.created_at desc limit 20`, [orgId]);
+    return { endpoints, recent };
+  },
+
+  /** The secret is returned once, here. */
+  async create(actor, orgId, { url, events }) {
+    await assertRole(actor, orgId, MANAGE);
+    const problems = problemsWithWebhook({ url, events });
+    if (problems.length) throw new Invalid(problems.join(' '));
+    if ((await one('select count(*)::int n from webhook_endpoint where organisation_id=$1', [orgId])).n >= MAX_WEBHOOKS)
+      throw new Invalid(`There are already ${MAX_WEBHOOKS} webhooks. Remove one you no longer use.`);
+    const secret = `whsec_${crypto.randomBytes(24).toString('base64url')}`;
+    const row = await one(`insert into webhook_endpoint (organisation_id, url, secret, events, created_by) values ($1,$2,$3,$4,$5) returning id`,
+      [orgId, String(url).trim(), secret, events, actor]);
+    await pool.query(`insert into audit_log (account_id, organisation_id, action, entity, entity_id, after) values ($1,$2,'webhook_create','webhook_endpoint',$3,$4)`,
+      [actor, orgId, row.id, JSON.stringify({ url, events })]);
+    return { id: row.id, secret };
+  },
+
+  async setActive(actor, orgId, id, active) {
+    await assertRole(actor, orgId, MANAGE);
+    const row = await one(`update webhook_endpoint set active=$3, disabled_at = null, disabled_reason = null, consecutive_failures = 0 where id=$1 and organisation_id=$2 returning id`, [id, orgId, !!active]);
+    if (!row) throw new NotFound('Webhook');
+  },
+
+  async remove(actor, orgId, id) {
+    await assertRole(actor, orgId, MANAGE);
+    const row = await one('delete from webhook_endpoint where id=$1 and organisation_id=$2 returning id', [id, orgId]);
+    if (!row) throw new NotFound('Webhook');
+  },
+
+  /**
+   * Something happened at `orgId`. Every endpoint at that organisation or above it that asked for this event gets a
+   * delivery queued. Never throws: whatever happened has happened, and telling others is best effort.
+   */
+  async emit(orgId, event, data, { only = null } = {}) {
+    try {
+      const org = await one('select id, slug, name from organisation where id=$1', [orgId]);
+      if (!org) return [];
+      const endpoints = await q(`select e.id from webhook_endpoint e join organisation o on o.id = e.organisation_id
+        join organisation at on at.id = $1 and at.path <@ o.path
+        where e.active and e.disabled_at is null and $2 = any(e.events) and ($3::uuid is null or e.id = $3::uuid)`, [orgId, event, only]);
+      const ids = [];
+      for (const e of endpoints) {
+        const id = crypto.randomUUID();
+        const payload = { id, event, created: new Date().toISOString(), organisation: { id: org.id, slug: org.slug, name: org.name }, data };
+        await pool.query(`insert into webhook_delivery (id, endpoint_id, event, payload) values ($1,$2,$3,$4::jsonb)`, [id, e.id, event, JSON.stringify(payload)]);
+        ids.push(id);
+      }
+      return ids;
+    } catch { return []; }
+  },
+
+  /** Emit, and try to deliver straight away (briefly). Anything that does not go through is retried by the daily run. */
+  async emitNow(orgId, event, data) {
+    const ids = await this.emit(orgId, event, data);
+    if (ids.length) await this.run({ ids, budgetMs: 3000 }).catch(() => {});
+    return ids.length;
+  },
+
+  async sendTest(actor, orgId, id, deps = {}) {
+    await assertRole(actor, orgId, MANAGE);
+    const e = await one('select id from webhook_endpoint where id=$1 and organisation_id=$2', [id, orgId]);
+    if (!e) throw new NotFound('Webhook');
+    const ids = await this.emit(orgId, 'ping', { message: 'This is a test from Honbu.' }, { only: id });
+    // A test is sent even if the endpoint did not ask for "ping".
+    if (!ids.length) {
+      const org = await one('select id, slug, name from organisation where id=$1', [orgId]);
+      const did = crypto.randomUUID();
+      await pool.query(`insert into webhook_delivery (id, endpoint_id, event, payload) values ($1,$2,'ping',$3::jsonb)`,
+        [did, id, JSON.stringify({ id: did, event: 'ping', created: new Date().toISOString(), organisation: org, data: { message: 'This is a test from Honbu.' } })]);
+      ids.push(did);
+    }
+    await this.run({ ids, budgetMs: 8000, ...deps });
+    return one('select status, last_status, last_error from webhook_delivery where id=$1', [ids[0]]);
+  },
+
+  /** Deliver what is due (or just these). Each delivery is claimed first so two runs never send the same one twice. */
+  async run({ ids = null, budgetMs = 9000, fetchFn = fetch, lookup = (h) => dns.lookup(h, { all: true }) } = {}) {
+    const started = Date.now();
+    const report = { delivered: 0, retrying: 0, failed: 0 };
+    while (Date.now() - started < budgetMs) {
+      const due = await q(`update webhook_delivery set next_attempt_at = now() + interval '2 minutes'
+        where id in (select id from webhook_delivery where status='pending' and next_attempt_at <= now() and ($1::uuid[] is null or id = any($1::uuid[]))
+          order by next_attempt_at limit 10 for update skip locked) returning id, endpoint_id, event, payload, attempts`, [ids]);
+      if (!due.length) break;
+      for (const d of due) {
+        const e = await one('select id, url, secret, active, disabled_at from webhook_endpoint where id=$1', [d.endpoint_id]);
+        const attempts = d.attempts + 1;
+        let status = null, error = null, ok = false, permanent = false;
+        if (!e || !e.active || e.disabled_at) { error = 'The webhook is switched off.'; permanent = true; }
+        else {
+          try {
+            const host = new URL(e.url).hostname.replace(/^\[|\]$/g, '');
+            const addrs = /^[\d.]+$|:/.test(host) ? [{ address: host }] : await lookup(host);
+            if (!addrs.length || addrs.some((a) => isPrivateAddress(a.address))) { error = 'The address is not on the public internet.'; permanent = true; }
+            else {
+              const body = JSON.stringify(d.payload), t = Math.floor(Date.now() / 1000);
+              const sig = crypto.createHmac('sha256', e.secret).update(`${t}.${body}`).digest('hex');
+              const res = await fetchFn(e.url, { method: 'POST', body, redirect: 'manual', signal: AbortSignal.timeout(8000), headers: {
+                'content-type': 'application/json', 'user-agent': 'Honbu-Webhooks/1', 'x-honbu-event': d.event, 'x-honbu-delivery': d.payload.id,
+                'x-honbu-signature': `t=${t},v1=${sig}` } });
+              status = res.status; ok = res.status >= 200 && res.status < 300;
+              if (!ok) error = `The receiver answered ${res.status}.`;
+            }
+          } catch (err) { error = `Could not reach the receiver (${String(err.cause?.code ?? err.name ?? 'error').slice(0, 40)}).`; }
+        }
+        if (ok) {
+          await pool.query(`update webhook_delivery set status='delivered', attempts=$2, last_status=$3, last_error=null, delivered_at=now(), next_attempt_at=null where id=$1`, [d.id, attempts, status]);
+          await pool.query('update webhook_endpoint set consecutive_failures = 0 where id=$1', [d.endpoint_id]);
+          report.delivered++;
+        } else {
+          const next = permanent ? null : retryAt(attempts);
+          await pool.query(`update webhook_delivery set status=$2, attempts=$3, last_status=$4, last_error=$5, next_attempt_at=$6 where id=$1`,
+            [d.id, next ? 'pending' : 'failed', attempts, status, error, next]);
+          if (next) report.retrying++; else report.failed++;
+          if (e) {
+            const f = await one('update webhook_endpoint set consecutive_failures = consecutive_failures + 1 where id=$1 returning consecutive_failures', [e.id]);
+            if (f.consecutive_failures >= DISABLE_AFTER_FAILED_DELIVERIES)
+              await pool.query(`update webhook_endpoint set active=false, disabled_at=now(), disabled_reason='Switched off after too many failed deliveries.' where id=$1`, [e.id]);
+          }
+        }
+      }
+      if (ids) break;
+    }
+    // Keep the log short: delivered or failed history is kept for 30 days.
+    if (!ids) await pool.query(`delete from webhook_delivery where status <> 'pending' and created_at < now() - interval '30 days'`);
+    return report;
+  },
+};
+
+// ---------------------------------------------------------------------------
+// the platform: how this installation is doing, for the federation's owner
+// ---------------------------------------------------------------------------
+
+export const platform = {
+  /** Only the owner of the federation at the top of this installation. */
+  async overview(actor, { env = process.env, provider = null, pushOn = false } = {}) {
+    const root = await one(`select id, slug, name from organisation where parent_id is null order by created_at limit 1`);
+    if (!root) throw new NotFound('Federation');
+    await assertRole(actor, root.id, ['owner']);
+    const count = async (sql, a = []) => (await one(sql, a)).n;
+    const orgs = await q(`select type, count(*)::int n from organisation where status='active' group by type order by type`);
+    const members = await q(`select status, count(*)::int n from affiliation where ends is null and role in ('member','instructor','assistant') group by status order by status`);
+    const stats = {
+      people: await count('select count(*)::int n from person'),
+      accounts: await count('select count(*)::int n from account'),
+      upcomingEvents: await count(`select count(*)::int n from event where starts_at > now()`),
+      formsPublished: await count(`select count(*)::int n from club_form where status='published'`),
+      autoRenewing: await count(`select count(*)::int n from payment_agreement where status='active'`),
+      autoRenewStopped: await count(`select count(*)::int n from payment_agreement where status='paused'`),
+      bookingsAhead: await count(`select count(*)::int n from class_booking where status='booked' and session_date >= current_date`),
+      pushDevices: await count('select count(*)::int n from push_subscription'),
+      tokens: await count('select count(*)::int n from api_token where revoked_at is null'),
+      webhooks: await count('select count(*)::int n from webhook_endpoint where active'),
+      webhooksOff: await count('select count(*)::int n from webhook_endpoint where not active'),
+      deliveriesFailed24h: await count(`select count(*)::int n from webhook_delivery where status='failed' and created_at > now() - interval '24 hours'`),
+      deliveriesWaiting: await count(`select count(*)::int n from webhook_delivery where status='pending'`),
+    };
+    const recent = await q(`select l.at as created_at, l.action, o.name as organisation, nullif(a.email,'') as who
+      from audit_log l left join organisation o on o.id = l.organisation_id left join account a on a.id = l.account_id order by l.at desc limit 15`);
+    const check = (ok, good, bad) => ({ ok, text: ok ? good : bad });
+    const health = [
+      check(!!env.CRON_SECRET, 'The daily job is locked with a secret.', 'CRON_SECRET is not set, so the daily job (reminders, automatic renewals, webhook retries) cannot run.'),
+      check(provider && provider.name !== 'test', 'Payments are live.', 'Payments are in test mode — no real money moves.'),
+      check((env.MESSENGER_PROVIDER ?? 'none') !== 'none', 'Email is switched on.', 'Email is off, so messages and sign-in links are not sent.'),
+      check(pushOn, 'Notifications are switched on.', 'Notifications are off (no VAPID keys set).'),
+    ];
+    return { root, orgs, members, stats, recent, health, store: env.HONBU_STORE ?? 'postgres' };
   },
 };

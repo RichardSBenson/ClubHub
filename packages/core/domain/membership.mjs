@@ -151,7 +151,7 @@ export function dueForReminder(rows, today) {
   const ago = (n) => { const d = new Date(`${today}T00:00:00Z`); d.setUTCDate(d.getUTCDate() - n);
     return d.toISOString().slice(0, 10); };
   const recent = ago(REMIND_EVERY_DAYS), cutoff = ago(STOP_REMINDING_AFTER_DAYS);
-  const pick = (r) => !r.fee_exempt && (!r.last_reminded || r.last_reminded <= recent);
+  const pick = (r) => !r.fee_exempt && !r.auto_renew && (!r.last_reminded || r.last_reminded <= recent);
   return {
     due: rows.filter((r) => r.standing === 'due' && pick(r)),
     overdue: rows.filter((r) => r.standing === 'overdue' && r.paid_until >= cutoff && pick(r)),

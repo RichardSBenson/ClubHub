@@ -178,7 +178,7 @@ console.log('\nTIMETABLE');
   const r = await req('/me/classes');
   ok('opens', r.status === 200 && /Whanganui/.test(r.html));
   ok('says which classes are for whom', /For you/.test(r.html) && /Not for you/.test(r.html));
-  ok('says booking is not here yet', /not available yet/.test(r.html));
+  ok('offers booking', /Book a class/.test(r.html));
 }
 
 console.log('\nNOBODY ELSE\'S');

@@ -15,6 +15,7 @@ import { menuFor } from '../content/navigation.mjs';
 import { loadSettings, SettingsError } from './settings.mjs';
 import { readTheme, lookOf } from './theme.mjs';
 import * as R from './render.mjs';
+import * as PWA from './pwa.mjs';
 import { eventToIcs } from '../core/domain/calendar-file.mjs';
 
 // Relative to the repository, not the working directory — so it lands in the
@@ -420,6 +421,19 @@ for (const target of SITES) {
     written.push('vendor/lightbox.js');
     await fs.copyFile(new URL('../../vendor/honbu/select-all.js', import.meta.url).pathname, path.join(OUT, 'vendor', 'select-all.js'));
     written.push('vendor/select-all.js');
+
+    // The installable app: manifest, icons, offline page, service worker, and the two small scripts that use them.
+    for (const f of ['pwa.js', 'push.js']) {
+      await fs.copyFile(new URL(`../../vendor/honbu/${f}`, import.meta.url).pathname, path.join(OUT, 'vendor', f));
+      written.push(`vendor/${f}`);
+    }
+    await fs.copyFile(new URL('../../vendor/honbu/sw.js', import.meta.url).pathname, path.join(OUT, 'sw.js'));
+    await write('manifest.webmanifest', JSON.stringify(PWA.manifest({ name: federation.name }), null, 2));
+    await write('offline.html', PWA.offlinePage(federation.name));
+    await fs.mkdir(path.join(OUT, 'icons'), { recursive: true });
+    for (const [file, size, maskable] of [['icon-192.png', 192, false], ['icon-512.png', 512, false], ['icon-maskable-512.png', 512, true]])
+      await fs.writeFile(path.join(OUT, 'icons', file), PWA.iconPng(size, { maskable }));
+    written.push('sw.js', 'icons/icon-192.png', 'icons/icon-512.png', 'icons/icon-maskable-512.png');
   }
 
   // Only those the organisation has published. An empty page is the right
@@ -504,7 +518,7 @@ for (const target of SITES) {
 }
 
 // ---- crawlability ---------------------------------------------------------
-const urls = allWritten.filter((f) => f.endsWith('.html'))
+const urls = allWritten.filter((f) => f.endsWith('.html') && f !== 'offline.html')
   .map((f) => ORIGIN + '/' + f.replace(/index\.html$/, '').replace(/\/$/, ''));
 allWritten.push(await (async () => {
   const file = path.join(OUT, 'sitemap.xml');

@@ -263,7 +263,7 @@ function page({ title, me, body, csrf, query = '', wide = false, head = '' }) {
 
   return `<!DOCTYPE html><html lang="en-NZ"><head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>${esc(title)} — Honbu</title>${head}<style>${CSS}</style></head><body>
+<title>${esc(title)} — Honbu</title><link rel="manifest" href="/manifest.webmanifest"><meta name="theme-color" content="#3451D1"><link rel="apple-touch-icon" href="/icons/icon-192.png">${head}<style>${CSS}</style></head><body>
 <a class="skip" href="#main">Skip to the content</a>
 <div class="shell">
   ${me ? RAIL_MARKER : ''}
@@ -276,6 +276,7 @@ function page({ title, me, body, csrf, query = '', wide = false, head = '' }) {
     <footer class="foot">Honbu — federation register</footer>
   </div>
 </div>
+<script src="/vendor/pwa.js" defer></script>
 </body></html>`;
 }
 
@@ -319,6 +320,7 @@ export function rail({ org, vocabulary = {}, can = {}, path = '' }) {
     can.register && link(`${base}/forms`, 'Forms and consent'),
     can.register && link(`${base}/grading`, vocabulary.grading ?? 'Grading'),
     isClub && can.teach && link(`${base}/attendance`, 'Attendance'),
+    isClub && can.teach && link(`${base}/bookings`, 'Class bookings'),
     isClub && can.teach && link(`${base}/newcomers`, 'Newcomers'),
     isClub && can.register && link(`${base}/renewals`, 'Renewals'),
     can.manage && link(`${base}/messages`, 'Messages'),
@@ -341,6 +343,7 @@ export function rail({ org, vocabulary = {}, can = {}, path = '' }) {
     !isClub && link(`${base}/clubs`, vocabulary.clubPlural ?? `${club}s`),
     isClub && link(`${base}/profile`, `${club} details`),
     link(`${base}/history`, 'History'),
+    link(`${base}/integrations`, 'API and webhooks'),
   ]) : ''}
   <div class="all"><nav aria-label="All organisations">
     ${link('/dashboard', 'Everything I look after')}</nav></div>
@@ -377,7 +380,7 @@ export const signIn = ({ sent, error, csrf, next = '' } = {}) => page({
  * The one screen that can show several federations at once, so the one screen
  * where a single vocabulary is wrong. Each group carries its own words.
  */
-export const dashboard = ({ me, csrf, orgs, parents = [], groups = [] }) => {
+export const dashboard = ({ me, csrf, orgs, parents = [], groups = [], platformOwner = false }) => {
   const total = groups.reduce((n, g) =>
     n + g.clubs.reduce((m, o) => m + Number(o.members), 0), 0);
 
@@ -413,7 +416,7 @@ export const dashboard = ({ me, csrf, orgs, parents = [], groups = [] }) => {
     <p>${esc(o.type)} · <a href="/o/${esc(o.slug)}/roster">Members</a>
        · <a href="/o/${esc(o.slug)}/events">Events</a>
        · <a href="/o/${esc(o.slug)}/grading">Grading</a>
-       · <a href="/o/${esc(o.slug)}/pages">Website</a></p>
+       · <a href="/o/${esc(o.slug)}/pages">Website</a>${platformOwner && !String(o.path).includes('.') ? ` · <a href="/platform">Platform</a>` : ''}</p>
   </div>`).join('')}
 
   ${groups.map((group) => `
@@ -3389,7 +3392,7 @@ const testBanner = (test) => test ? `<div class="note"><strong>Test payments.</s
 export const myPayments = ({ me, csrf, groups = [], test = false, done }) => page({
   title: 'Payments', me, csrf, body: `
   <h1>Payments</h1>
-  <p class="sub"><a href="/me">Back</a></p>
+  <p class="sub"><a href="/me">Back</a>${groups.length ? groups.map(({ person }) => ` · <a href="/me/${esc(person.id)}/auto-renew">Automatic renewal${groups.length > 1 ? ` for ${esc(person.first_name)}` : ''}</a>`).join('') : ''}</p>
   ${done ? `<div class="good">${esc(done)}</div>` : ''}
   ${testBanner(test)}
   ${groups.map(({ person, rows }) => `
@@ -3503,7 +3506,7 @@ export const paymentsScreen = ({ me, csrf, org, rows = [], totals = [], methods 
 
 const STANDING_TAG = { exempt: 'ok', current: 'ok', due: 'warn', overdue: 'no', unpaid: 'no' };
 
-export const renewalsScreen = ({ me, csrf, org, today, rows = [], prices = [], canSetPrices = false,
+export const renewalsScreen = ({ me, csrf, org, today, rows = [], prices = [], auto = [], canSetPrices = false,
                                  canExempt = false, reminderText: remind = null, autoReminders = false, values = null, error, done, notes = [] }) => {
   const v = (k) => esc(values?.[k] ?? '');
   const periods = [...new Set(prices.map((f) => f.period))].filter((p) => FEE_PERIODS[p].months);
@@ -3516,6 +3519,13 @@ export const renewalsScreen = ({ me, csrf, org, today, rows = [], prices = [], c
   ${done ? `<div class="good">${esc(done)}</div>` : ''}
   ${error ? `<div class="bad">${esc(error)}</div>` : ''}
   ${notes.length ? `<div class="note">${notes.map(esc).join('<br>')}</div>` : ''}
+
+  <h2>Renewing themselves (${auto.length})</h2>
+  ${auto.length ? `<table><thead><tr><th>Member</th><th>Pays</th><th>With</th><th>Fees run to</th><th></th></tr></thead><tbody>${auto.map((g) => `<tr>
+    <td>${esc(g.person_name)}</td><td>${esc(FEE_PERIODS[g.period]?.label ?? g.period)}</td><td>${esc(g.label)}</td><td>${esc(g.paid_until ?? '—')}</td>
+    <td>${g.status === 'paused' ? '<span class="tag bad">Stopped after failed payments</span>' : g.failures ? `<span class="tag wait">Last payment failed — trying again ${esc(g.next_attempt_on ?? '')}</span>` : '<span class="tag ok">Active</span>'}</td></tr>`).join('')}</tbody></table>
+    <p class="muted">Members who renew themselves are not sent renewal reminders.</p>`
+    : '<p class="muted">Nobody has set up automatic renewal yet. Members can do it from My payments.</p>'}
 
   <h2>Prices</h2>
   ${prices.length ? `<table><thead><tr><th>Price</th><th>For</th><th>How often</th><th>Amount</th><th>From</th><th></th></tr></thead><tbody>${
@@ -4124,6 +4134,7 @@ export const memberHome = ({ me, csrf, people = [], unread = 0, messages = [] })
   ${people.length ? `<h1>Kia ora, ${esc(people[0].person.preferred_name || people[0].person.first_name)}</h1>
   <p class="sub">${esc(people[0].person.display_number ?? '')}
     · <a href="/me/${esc(people[0].person.id)}">See and update my details</a>
+    · <a href="/me/notifications">Notifications</a>
     · <a href="/me/terms">Term enrolment</a>
     · <a href="/me/forms/${esc(people[0].person.id)}">Forms</a>
     · <a href="/me/refer">Refer a friend</a>
@@ -4224,7 +4235,7 @@ export const myClasses = ({ me, csrf, groups = [] }) => page({
     <td>${s.forMe ? '<span class="tag ok">For you</span>' : '<span class="muted">Not for you</span>'}</td></tr>`).join('')}</tbody></table>`
     : '<p class="muted">The club has not published a timetable.</p>'}`).join('')
   : '<div class="note">You are not on a club\'s roll, so there is no timetable to show.</div>'}
-  <p class="muted">Booking and cancelling a class are not available yet.</p>` });
+  ${groups.length ? [...new Map(groups.map((g) => [g.person.id, g.person])).values()].map((p) => `<p><a class="btn" href="/me/${esc(p.id)}/book">Book a class${groups.length > 1 ? ` for ${esc(p.first_name)}` : ''}</a></p>`).join('') : ''}` });
 
 const DAY_NAMES_ = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 
@@ -4782,3 +4793,151 @@ export const formAnswers = ({ me, csrf, org, form: f, response: r }) => page({ t
   <h1>${esc(f.title)}</h1>
   ${r ? `<p class="sub">Signed by ${esc(r.signed_name)}${r.signed_for_minor ? ' (parent or guardian)' : ''} on ${esc(String(r.answered_at.toISOString?.() ?? r.answered_at).slice(0, 10))}${r.expires_on ? `, until ${esc(r.expires_on)}` : ''}</p>
   <table><tbody>${f.fields.map((q) => { const a = r.answers?.[q.id]; return `<tr><td>${esc(q.label)}</td><td>${esc(Array.isArray(a) ? a.join(', ') : a === true ? 'Agreed' : a === false ? 'Not ticked' : a ?? '')}</td></tr>`; }).join('')}</tbody></table>` : '<p class="muted">Nothing signed yet.</p>'}` });
+
+export const autoRenewScreen = ({ me, csrf, person, memberships = [], test = false, done, error }) => {
+  const tok = `<input type="hidden" name="_csrf" value="${esc(csrf ?? '')}">`;
+  const base = `/me/${esc(person.id)}/auto-renew`;
+  return page({ title: `Automatic renewal — ${person.first_name}`, me, csrf, body: `
+  <p><a href="/me/payments">&larr; Payments</a></p>
+  <h1>Automatic renewal for ${esc(person.first_name)}</h1>
+  <p class="sub">The dojo charges your saved card or bank a few days before fees run out, so membership never lapses. You can stop it at any time with one press.</p>
+  ${testBanner(test)}
+  ${done ? `<div class="good">${esc(done)}</div>` : ''}${error ? `<div class="bad">${esc(error)}</div>` : ''}
+  ${memberships.length ? memberships.map((m) => `<div class="card"><h2>${esc(m.dojo)}</h2>
+    <p class="muted">Fees run to ${esc(m.paid_until ?? 'not paid yet')}</p>
+    ${m.fee_exempt ? '<p>You are not charged by this dojo.</p>'
+    : m.agreement ? `<p><span class="tag ${m.agreement.status === 'paused' ? 'bad' : 'ok'}">${m.agreement.status === 'paused' ? 'Stopped' : 'On'}</span>
+      ${esc(FEE_PERIODS[m.agreement.period]?.label ?? m.agreement.period)} with ${esc(m.agreement.label)}</p>
+      ${m.agreement.status === 'paused' ? '<p class="bad">The last payments did not go through, so this has stopped. Stop it here, then set it up again with another card — or pay from My payments.</p>'
+        : m.agreement.failures ? `<p class="muted">The last payment did not go through. We will try again on ${esc(m.agreement.next_attempt_on ?? 'soon')}.</p>` : ''}
+      <form method="post" action="${base}/${esc(m.agreement.id)}/stop">${tok}<button class="btn quiet" type="submit">Stop automatic renewal</button></form>`
+    : Object.keys(m.prices).length ? `<form method="post" action="${base}">${tok}<input type="hidden" name="affiliationId" value="${esc(m.affiliation_id)}">
+      <p><label>Renew <select name="period">${Object.entries(m.prices).map(([k, f]) => `<option value="${esc(k)}">${esc(FEE_PERIODS[k]?.label ?? k)} — ${esc(cents(f.amount_cents, f.currency))}</option>`).join('')}</select></label></p>
+      <p><label>Pay with <select name="method"><option value="card">Credit or debit card</option><option value="direct_debit">Bank direct debit</option></select></label></p>
+      <p><label>Card number (we never keep it — the payment provider does)<br><input name="card" inputmode="numeric" autocomplete="cc-number" maxlength="23"></label></p>
+      <p><label><input type="checkbox" name="agreed"> I agree that ${esc(m.dojo)} may charge this automatically each time fees are due, at the price shown. I can stop it at any time.</label></p>
+      <button class="btn" type="submit">Turn on automatic renewal</button></form>`
+    : '<p class="muted">This dojo has not set prices for automatic renewal yet.</p>'}</div>`).join('') : '<p class="muted">No club memberships to renew.</p>'}` });
+};
+
+export const bookScreen = ({ me, csrf, person, clubs = [], done, error }) => {
+  const tok = `<input type="hidden" name="_csrf" value="${esc(csrf ?? '')}">`;
+  const base = `/me/${esc(person.id)}/book`;
+  return page({ title: `Book a class — ${person.first_name}`, me, csrf, body: `
+  <p><a href="/me/classes">&larr; Classes</a></p>
+  <h1>Book a class for ${esc(person.first_name)}</h1>
+  ${done ? `<div class="good">${esc(done)}</div>` : ''}${error ? `<div class="bad">${esc(error)}</div>` : ''}
+  ${clubs.map(({ club, slots }) => `<h2>${esc(club.name)}</h2>
+  ${slots.length ? `<table><thead><tr><th>When</th><th>Class</th><th>Places</th><th></th></tr></thead><tbody>${slots.map((s) => `<tr>
+    <td>${esc(DAY_NAMES_[s.session.weekday])} ${esc(s.date)}<br><span class="muted">${esc(s.session.starts)}–${esc(s.session.ends)}</span></td>
+    <td>${esc(s.session.label)}</td>
+    <td>${s.free ? `${s.free} left` : '<span class="tag wait">Full</span>'}${s.waiting ? ` <span class="muted">${s.waiting} waiting</span>` : ''}</td>
+    <td>${s.mine ? `<span class="tag ${s.mine.status === 'booked' ? 'ok' : 'wait'}">${s.mine.status === 'booked' ? 'Booked' : `Waiting list — number ${s.position}`}</span>
+      <form method="post" action="${base}/${esc(s.mine.id)}/cancel" style="display:inline">${tok}<button class="btn quiet" type="submit">${s.mine.status === 'booked' ? 'Cancel' : 'Leave list'}</button></form>`
+      : `<form method="post" action="${base}">${tok}<input type="hidden" name="sessionId" value="${esc(s.session.id)}"><input type="hidden" name="date" value="${esc(s.date)}">
+        <button class="btn" type="submit">${s.free ? 'Book' : 'Join waiting list'}</button></form>`}</td></tr>`).join('')}</tbody></table>`
+    : '<p class="muted">Nothing needs booking at the moment — just turn up to your usual class.</p>'}`).join('') || '<p class="muted">Not on a club\'s roll.</p>'}
+  <p class="muted">Please cancel if you cannot come, so somebody on the waiting list can have your place.</p>` });
+};
+
+export const bookingsScreen = ({ me, csrf, org, today, sessions = [], canSet = false, done, error }) => {
+  const tok = `<input type="hidden" name="_csrf" value="${esc(csrf ?? '')}">`;
+  return page({ title: `${org.name} — class bookings`, me, csrf, body: `
+  <h1>Class bookings</h1>
+  <p class="sub">Give a class a number of places and members book a place on the day, with a waiting list when it is full. Leave it blank and people just turn up.</p>
+  ${done ? `<div class="good">${esc(done)}</div>` : ''}${error ? `<div class="bad">${esc(error)}</div>` : ''}
+  ${sessions.length ? sessions.map((s) => `<div class="card"><h2>${esc(s.label)} <span class="muted">· ${esc(DAY_NAMES_[s.weekday])} ${esc(s.starts)}–${esc(s.ends)}</span></h2>
+    ${canSet ? `<form method="post" action="/o/${esc(org.slug)}/bookings/${esc(s.id)}/places">${tok}
+      <label>Places <input name="capacity" inputmode="numeric" maxlength="3" size="4" value="${esc(s.capacity ?? '')}" placeholder="no booking"></label>
+      <button class="btn quiet" type="submit">Save</button></form>` : `<p>${s.capacity ? `${s.capacity} places` : 'No booking'}</p>`}
+    ${s.days.map((d) => `<h3>${esc(d.date)} — ${d.booked.length} of ${s.capacity} booked${d.waiting.length ? `, ${d.waiting.length} waiting` : ''}</h3>
+      ${d.booked.length ? `<p>${d.booked.map((x) => `<a href="/p/${esc(x.person_id)}">${esc(x.name)}</a>`).join(', ')}</p>` : '<p class="muted">Nobody yet.</p>'}
+      ${d.waiting.length ? `<p class="muted">Waiting: ${d.waiting.map((x) => esc(x.name)).join(', ')}</p>` : ''}`).join('')}</div>`).join('')
+    : '<p class="muted">This club has no classes on its timetable yet. Add them on the club page.</p>'}` });
+};
+
+export const notificationsScreen = ({ me, csrf, available = false, publicKey = null, devices = [], done }) => {
+  const tok = `<input type="hidden" name="_csrf" value="${esc(csrf ?? '')}">`;
+  return page({ title: 'Notifications', me, csrf, body: `
+  <p><a href="/me">&larr; Home</a></p>
+  <h1>Notifications on this device</h1>
+  <p class="sub">Get a short alert when a message arrives, a place opens in a class you are waiting for, or a payment needs attention. You can turn it off at any time.</p>
+  ${done ? `<div class="good">${esc(done)}</div>` : ''}
+  ${available ? `<div id="push-box" data-key="${esc(publicKey)}" data-csrf="${esc(csrf ?? '')}">
+    <p><button id="push-on" class="btn" type="button">Turn on notifications</button>
+       <button id="push-off" class="btn quiet" type="button" hidden>Turn off for this device</button></p>
+    <p id="push-msg" class="muted" role="status"></p></div><script src="/vendor/push.js" defer></script>
+    <noscript><p class="muted">Turning notifications on needs JavaScript.</p></noscript>`
+  : '<div class="note">Notifications have not been switched on for this site yet. Ask the person who runs it.</div>'}
+  <h2>Your devices</h2>
+  ${devices.length ? `<table><tbody>${devices.map((d) => `<tr><td>${esc((d.user_agent ?? 'A device').slice(0, 80))}</td><td>${esc(String(d.created_at.toISOString?.() ?? d.created_at).slice(0, 10))}</td>
+    <td><form method="post" action="/me/notifications/${esc(d.id)}/remove">${tok}<button class="btn quiet" type="submit">Remove</button></form></td></tr>`).join('')}</tbody></table>`
+    : '<p class="muted">No devices yet.</p>'}
+  <p class="muted">On an iPhone or iPad, first choose Share, then Add to Home Screen, and open the app from there.</p>` });
+};
+
+const whenAt = (d) => esc(String(d?.toISOString?.() ?? d ?? '').slice(0, 16).replace('T', ' '));
+
+export const integrationsScreen = ({ me, csrf, org, tokens = [], endpoints = [], recent = [], scopes = {}, events = {}, origin = '', newToken = null, newSecret = null, done, error }) => {
+  const tok = `<input type="hidden" name="_csrf" value="${esc(csrf ?? '')}">`;
+  const base = `/o/${esc(org.slug)}/integrations`;
+  return page({ title: `${org.name} — API and webhooks`, me, csrf, body: `
+  <h1>API and webhooks</h1>
+  <p class="sub">Connect ${esc(org.name)} to other systems — an accounting package, a website, a spreadsheet — without giving anybody a login.</p>
+  ${done ? `<div class="good">${esc(done)}</div>` : ''}${error ? `<div class="bad">${esc(error)}</div>` : ''}
+  ${newToken ? `<div class="note"><strong>Copy your token now.</strong> It is shown this once; we keep only a fingerprint.<br><code>${esc(newToken)}</code></div>` : ''}
+  ${newSecret ? `<div class="note"><strong>Copy the signing secret now.</strong> You need it to check that messages come from us. It is shown this once.<br><code>${esc(newSecret)}</code></div>` : ''}
+
+  <h2>API tokens</h2>
+  <p class="muted">Read-only. A token sees ${esc(org.name)} and everything beneath it, and never dates of birth, contact details, medical or payment information.
+    Use it as <code>Authorization: Bearer &lt;token&gt;</code> against <code>${esc(origin)}/api/v1/organisations</code>, <code>/members</code> and <code>/events</code> (add <code>?limit=100&amp;after=&lt;id&gt;</code> to page through).</p>
+  ${tokens.length ? `<table><thead><tr><th>Name</th><th>Starts</th><th>Can read</th><th>Last used</th><th></th></tr></thead><tbody>${tokens.map((t) => `<tr>
+    <td>${esc(t.name)}</td><td><code>${esc(t.prefix)}…</code></td><td>${t.scopes.map((s) => esc(s.split(':')[0])).join(', ')}</td>
+    <td>${t.last_used_at ? when(t.last_used_at) : 'never'}</td>
+    <td>${t.revoked_at ? '<span class="tag bad">Revoked</span>' : `<form method="post" action="${base}/tokens/${esc(t.id)}/revoke">${tok}<button class="btn quiet" type="submit">Revoke</button></form>`}</td></tr>`).join('')}</tbody></table>` : '<p class="muted">No tokens yet.</p>'}
+  <form method="post" action="${base}/tokens">${tok}
+    <p><label>Name <input name="name" maxlength="80" placeholder="Accounting export" required></label></p>
+    <p>${Object.entries(scopes).map(([k, w]) => `<label style="display:block"><input type="checkbox" name="scopes" value="${esc(k)}"> ${esc(w)}</label>`).join('')}</p>
+    <button class="btn" type="submit">Create a token</button></form>
+
+  <h2>Webhooks</h2>
+  <p class="muted">We send a signed message to your address when something happens here or beneath ${esc(org.name)}. Each is signed: the header
+    <code>X-Honbu-Signature: t=&lt;time&gt;,v1=&lt;hex&gt;</code> is an HMAC-SHA256 of <code>&lt;time&gt;.&lt;body&gt;</code> with your secret. If your server is down we try again a few times over about 15 hours.</p>
+  ${endpoints.length ? `<table><thead><tr><th>Address</th><th>Tells you about</th><th></th></tr></thead><tbody>${endpoints.map((e) => `<tr>
+    <td>${esc(e.url)}${e.disabled_at ? `<br><span class="tag bad">${esc(e.disabled_reason ?? 'Switched off')}</span>` : e.active ? '' : '<br><span class="tag wait">Off</span>'}</td>
+    <td>${e.events.map((x) => esc(events[x] ?? x)).join('<br>')}</td>
+    <td><form method="post" action="${base}/webhooks/${esc(e.id)}/test" style="display:inline">${tok}<button class="btn quiet" type="submit">Send a test</button></form>
+      <form method="post" action="${base}/webhooks/${esc(e.id)}/${e.active && !e.disabled_at ? 'off' : 'on'}" style="display:inline">${tok}<button class="btn quiet" type="submit">${e.active && !e.disabled_at ? 'Switch off' : 'Switch on'}</button></form>
+      <form method="post" action="${base}/webhooks/${esc(e.id)}/remove" style="display:inline">${tok}<button class="btn quiet" type="submit">Remove</button></form></td></tr>`).join('')}</tbody></table>` : '<p class="muted">No webhooks yet.</p>'}
+  <form method="post" action="${base}/webhooks">${tok}
+    <p><label>Address <input name="url" type="url" maxlength="500" placeholder="https://example.com/honbu-hook" required style="width:28em;max-width:100%"></label></p>
+    <p>${Object.entries(events).filter(([k]) => k !== 'ping').map(([k, w]) => `<label style="display:block"><input type="checkbox" name="events" value="${esc(k)}"> ${esc(w)}</label>`).join('')}</p>
+    <button class="btn" type="submit">Add a webhook</button></form>
+  ${recent.length ? `<h3>Recent messages</h3><table><thead><tr><th>When</th><th>What</th><th>Result</th></tr></thead><tbody>${recent.map((d) => `<tr><td>${whenAt(d.created_at)}</td><td>${esc(events[d.event] ?? d.event)}</td>
+    <td>${d.status === 'delivered' ? '<span class="tag ok">Delivered</span>' : d.status === 'failed' ? `<span class="tag bad">Gave up</span> ${esc(d.last_error ?? '')}` : `<span class="tag wait">Trying again</span> ${esc(d.last_error ?? '')}`}</td></tr>`).join('')}</tbody></table>` : ''}` });
+};
+
+export const platformScreen = ({ me, csrf, root, orgs = [], members = [], stats = {}, recent = [], health = [], store }) => page({
+  title: 'Platform', me, csrf, body: `
+  <p><a href="/dashboard">&larr; Everything I look after</a></p>
+  <h1>${esc(root.name)} — platform</h1>
+  <p class="sub">How this installation is doing. Only the federation's owner sees this.</p>
+  <h2>Is everything switched on?</h2>
+  <ul>${health.map((h) => `<li><span class="tag ${h.ok ? 'ok' : 'wait'}">${h.ok ? 'OK' : 'Check'}</span> ${esc(h.text)}</li>`).join('')}</ul>
+  <h2>What is here</h2>
+  <table><tbody>
+    <tr><td>Organisations</td><td>${orgs.map((o) => `${o.n} ${esc(o.type)}${o.n === 1 ? '' : 's'}`).join(', ') || 'none'}</td></tr>
+    <tr><td>Memberships</td><td>${members.map((m) => `${m.n} ${esc(m.status)}`).join(', ') || 'none'}</td></tr>
+    <tr><td>People / sign-in accounts</td><td>${stats.people} / ${stats.accounts}</td></tr>
+    <tr><td>Upcoming events</td><td>${stats.upcomingEvents}</td></tr>
+    <tr><td>Published forms</td><td>${stats.formsPublished}</td></tr>
+    <tr><td>Renewing themselves (stopped)</td><td>${stats.autoRenewing} (${stats.autoRenewStopped})</td></tr>
+    <tr><td>Class places booked ahead</td><td>${stats.bookingsAhead}</td></tr>
+    <tr><td>Devices with notifications</td><td>${stats.pushDevices}</td></tr>
+    <tr><td>API tokens in use</td><td>${stats.tokens}</td></tr>
+    <tr><td>Webhooks on / off</td><td>${stats.webhooks} / ${stats.webhooksOff}</td></tr>
+    <tr><td>Webhook messages waiting / gave up in 24h</td><td>${stats.deliveriesWaiting} / ${stats.deliveriesFailed24h}</td></tr>
+  </tbody></table>
+  <h2>Latest activity</h2>
+  <table><tbody>${recent.map((r) => `<tr><td>${whenAt(r.created_at)}</td><td>${esc(r.action)}</td><td>${esc(r.organisation ?? '')}</td><td class="muted">${esc(r.who ?? 'the system')}</td></tr>`).join('')}</tbody></table>
+  <p class="muted">Data store: ${esc(store)}.</p>` });

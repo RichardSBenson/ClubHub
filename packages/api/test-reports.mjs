@@ -116,7 +116,7 @@ console.log('\nTHE DOWNLOAD');
   ok('a hostile name cannot be a formula', csv.text.includes(`"'=HYPERLINK`) && !/(^|,)=HYPERLINK/m.test(csv.text), csv.text.split('\r\n').find((l) => /Evil/.test(l)));
   ok('it was audited', !!(await one(`select 1 from audit_log where action='report_exported' and organisation_id=$1`, [whanganui.id])));
   const page = await get(`/o/${whanganui.slug}/reports/members`);
-  ok('the on-screen version escapes too', page.status === 200 && !page.text.includes('<script') && page.text.includes('&quot;http'));
+  ok('the on-screen version escapes too', page.status === 200 && !page.text.replace('<script src="/vendor/pwa.js" defer></script>', '').includes('<script') && page.text.includes('&quot;http'));
   const other = await get(`/o/${wellington.slug}/reports/members?format=csv`);
   ok('he can also reach a club below him', other.status === 200 && other.text.includes('Wellington'));
   await signIn('tane@example.nz');

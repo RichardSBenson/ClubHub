@@ -1999,3 +1999,101 @@ create table if not exists form_response (
   withdrawn_at    timestamptz
 );
 create index if not exists form_response_person on form_response (person_id, form_id, answered_at desc);
+
+create table if not exists payment_agreement (
+  id              uuid primary key default uuid_generate_v4(),
+  organisation_id uuid not null references organisation(id) on delete cascade,
+  affiliation_id  uuid not null references affiliation(id) on delete cascade,
+  person_id       uuid not null references person(id) on delete cascade,
+  period          text not null check (period in ('annual','term','monthly')),
+  method          text not null check (method in ('card','direct_debit')),
+  provider        text not null,
+  provider_ref    text not null,
+  label           text not null,
+  status          text not null default 'active' check (status in ('active','paused','cancelled')),
+  failures        smallint not null default 0,
+  next_attempt_on date,
+  last_error      text,
+  agreed_by       uuid references account(id),
+  agreed_at       timestamptz not null default now(),
+  cancelled_at    timestamptz,
+  cancelled_by    uuid references account(id)
+);
+create unique index if not exists payment_agreement_one_live on payment_agreement (affiliation_id) where status <> 'cancelled';
+create index if not exists payment_agreement_org on payment_agreement (organisation_id, status);
+
+alter table training_session add column if not exists capacity smallint
+  check (capacity is null or capacity between 1 and 500);
+
+create table if not exists class_booking (
+  id            uuid primary key default uuid_generate_v4(),
+  session_id    uuid not null references training_session(id) on delete cascade,
+  session_date  date not null,
+  person_id     uuid not null references person(id) on delete cascade,
+  status        text not null default 'booked' check (status in ('booked','waiting','cancelled')),
+  booked_by     uuid references account(id),
+  created_at    timestamptz not null default now(),
+  promoted_at   timestamptz,
+  cancelled_at  timestamptz
+);
+create unique index if not exists class_booking_one_live on class_booking (session_id, session_date, person_id) where status <> 'cancelled';
+create index if not exists class_booking_day on class_booking (session_id, session_date, status, created_at);
+create index if not exists class_booking_person on class_booking (person_id, session_date);
+
+create table if not exists push_subscription (
+  id          uuid primary key default uuid_generate_v4(),
+  account_id  uuid not null references account(id) on delete cascade,
+  endpoint    text not null unique,
+  p256dh      text not null,
+  auth        text not null,
+  user_agent  text,
+  created_at  timestamptz not null default now(),
+  last_sent_at timestamptz,
+  failures    smallint not null default 0
+);
+create index if not exists push_subscription_account on push_subscription (account_id);
+
+create table if not exists api_token (
+  id              uuid primary key default uuid_generate_v4(),
+  organisation_id uuid not null references organisation(id) on delete cascade,
+  name            text not null check (char_length(name) between 2 and 80),
+  prefix          text not null,
+  token_hash      text not null unique,
+  scopes          text[] not null,
+  created_by      uuid references account(id),
+  created_at      timestamptz not null default now(),
+  last_used_at    timestamptz,
+  revoked_at      timestamptz
+);
+create index if not exists api_token_org on api_token (organisation_id);
+
+create table if not exists webhook_endpoint (
+  id              uuid primary key default uuid_generate_v4(),
+  organisation_id uuid not null references organisation(id) on delete cascade,
+  url             text not null check (char_length(url) <= 500),
+  secret          text not null,
+  events          text[] not null,
+  active          boolean not null default true,
+  disabled_at     timestamptz,
+  disabled_reason text,
+  consecutive_failures integer not null default 0,
+  created_by      uuid references account(id),
+  created_at      timestamptz not null default now()
+);
+create index if not exists webhook_endpoint_org on webhook_endpoint (organisation_id);
+
+create table if not exists webhook_delivery (
+  id              uuid primary key default uuid_generate_v4(),
+  endpoint_id     uuid not null references webhook_endpoint(id) on delete cascade,
+  event           text not null,
+  payload         jsonb not null,
+  status          text not null default 'pending' check (status in ('pending','delivered','failed')),
+  attempts        smallint not null default 0,
+  next_attempt_at timestamptz default now(),
+  last_status     integer,
+  last_error      text,
+  created_at      timestamptz not null default now(),
+  delivered_at    timestamptz
+);
+create index if not exists webhook_delivery_due on webhook_delivery (status, next_attempt_at);
+create index if not exists webhook_delivery_endpoint on webhook_delivery (endpoint_id, created_at desc);

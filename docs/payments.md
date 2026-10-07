@@ -36,7 +36,7 @@ moves, card `4000 0000 0000 0002` is declined, any other number is accepted, and
 internet banking and direct debit come back *waiting* — as the real ones do —
 until the "bank" confirms. Every screen says "Test payments" while it is on.
 
-Real providers are one file each behind the same two calls (`start`, `check`):
+Real providers are one file each behind the same calls (`start`, `check`, and for automatic renewal `saveMethod`, `charge`):
 
 - **Stripe** — cards. Needs a Stripe account per payee (Connect), because the
   money goes to the dojo or the federation, not through one account.
@@ -81,3 +81,14 @@ They stay members, are never asked for money, anything already asked is withdraw
 and **Carry membership on a year** moves their date on with no payment. It is a
 decision about a person, not a rule about a role, because dojos differ: some
 instructors pay, some do not.
+
+## Automatic renewal
+
+A member (or a parent) can turn on **Automatic renewal** from My payments: pick how often (year, term or month — only periods the dojo has a price for), pay by card or bank debit, and tick that they agree. The card number goes straight to the payment provider; we keep the provider's token and the last four digits (`payment_agreement`, migration 044).
+
+- **When**: the daily run (`/cron/renewals`) charges 3 days before fees run out, at the dojo's price for the member's age, through the ordinary payment path — so the membership extends from the later of today and where it already ran to, and the receipt is in the history like any other.
+- **If it fails**: tried again after 3 days, then after 7. The third failure pauses it, and the member is written to each time. Nothing is charged while paused.
+- **Stopping**: one press, immediate; anyone who may act for the person can do it. Members not charged by the dojo cannot be put on it.
+- **Reminders**: people on automatic renewal are left out of renewal reminders.
+- **The dojo** sees "Renewing themselves" on the Renewals screen, with anyone whose payments are failing or have stopped.
+- **Providers**: `saveMethod` and `charge` are the two calls a real provider adds beside `start`/`check`. The test provider implements them (card `4000 0000 0000 9995` saves but every later charge is declined). Stripe and Debitsuccess are not connected, so no real money moves yet.

@@ -158,6 +158,8 @@ console.log('\nEVERY INTERNAL LINK GOES SOMEWHERE');
       const clean = href.split('?')[0].replace(/\/$/, '') || '/';
       // /enquire/<club> is the enquiry form, answered by the application rather than built.
       if (clean.startsWith('/enquire/')) continue;
+      // /me is the member app, answered by the application: the offline page and the manifest point there.
+      if (clean === '/me') continue;
       if (served.has(clean) || served.has(`${clean}/index.html`)) continue;
       broken.push(`${href}  <-  ${at(f)}`);
     }
@@ -181,6 +183,17 @@ console.log('\nEVERY INTERNAL LINK GOES SOMEWHERE');
   }
   ok('no federation links into another federation', strays.length === 0,
     strays.slice(0, 3).join(' | '));
+}
+
+console.log('\nTHE INSTALLABLE APP');
+{
+  const m = JSON.parse(read('manifest.webmanifest'));
+  ok('a manifest starts the app at /me', m.start_url === '/me' && m.display === 'standalone' && m.name.length > 0);
+  ok('every icon it names was built, as a PNG', m.icons.every((i) => fs.readFileSync(path.join(OUT, i.src)).subarray(1, 4).toString() === 'PNG'));
+  const sw = read('sw.js');
+  ok('the service worker caches only the offline shell', !/cache\.put|cache\.add\(/.test(sw) && /addAll\(\['\/offline\.html', '\/icons\/icon-192\.png'\]\)/.test(sw));
+  ok('and answers pushes and clicks', /addEventListener\('push'/.test(sw) && /addEventListener\('notificationclick'/.test(sw));
+  ok('the offline page and both scripts are there', /offline/i.test(read('offline.html')) && fs.existsSync(path.join(OUT, 'vendor/pwa.js')) && fs.existsSync(path.join(OUT, 'vendor/push.js')));
 }
 
 console.log(`\n${pass} passed, ${fail} failed\n`);

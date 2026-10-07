@@ -33,7 +33,7 @@
 import crypto from 'node:crypto';
 import { URL } from 'node:url';
 import { photos, instructorRole, eventDetails, gallery, MAX_GALLERY, pool, orgs, people, rank, events, competition, pages, assets, news,
-         instructors, navigation, audit, cards, checkin, search, clubPages, appearance, clubs, clubProfile, family, myself, memberEvents, messages, emailPreferences, payments, fees, renewals, reminders, attendance, newcomers, reports, gradings, qualifications, forms, portal, enquiries, scheduledPublishing, TooMany, outsiders, trials, referrals, growth, clubMailer, terms,
+         instructors, navigation, audit, cards, checkin, search, clubPages, appearance, clubs, clubProfile, family, myself, memberEvents, messages, emailPreferences, payments, fees, renewals, reminders, attendance, newcomers, reports, gradings, qualifications, forms, autoRenew, booking, push, apiTokens, api, webhooks, platform, portal, enquiries, scheduledPublishing, TooMany, outsiders, trials, referrals, growth, clubMailer, terms,
          Forbidden, NotFound, Invalid } from './data.mjs';
 import * as auth from './auth.mjs';
 import * as V from './views.mjs';
@@ -53,6 +53,7 @@ import { readFee, readExemption, reminderText } from '../core/domain/membership.
 import { readVisitors, isDate } from '../core/domain/attendance.mjs';
 import { readNewcomer } from '../core/domain/newcomer.mjs';
 import { toCsv, fileName } from '../core/domain/csv.mjs';
+import { readScopes, readEvents } from '../core/domain/integrations.mjs';
 import { readPanel, readResults } from '../core/domain/grading.mjs';
 import { readQualification, readAward } from '../core/domain/qualification.mjs';
 import { paymentProviderFrom, isTestProvider } from '../infrastructure/payments/providers.mjs';
@@ -317,8 +318,9 @@ get('/dashboard', async (ctx) => {
   groups.sort((a, b) =>
     (a.federation?.name ?? a.key).localeCompare(b.federation?.name ?? b.key));
 
+  const platformOwner = !!(await pool.query(`select 1 from organisation o where o.parent_id is null and has_role_at($1::uuid, o.id, array['owner']::role_name[])`, [ctx.me.accountId])).rows[0];
   return ctx.send(200,
-    V.dashboard({ me: ctx.me, orgs: rows, parents, groups, csrf: ctx.csrf }));
+    V.dashboard({ me: ctx.me, orgs: rows, parents, groups, csrf: ctx.csrf, platformOwner }));
 });
 
 // ---- roster ---------------------------------------------------------------
@@ -1026,6 +1028,154 @@ async function payView(ctx, extra = {}) {
     test: isTestProvider(providerNow()), done: ctx.url.searchParams.get('done'), ...extra }));
 }
 
+// ---- automatic renewal: the member's side
+async function autoScreen(ctx, extra = {}) {
+  if (!UUID_RE.test(ctx.params.personId)) throw new NotFound('Person');
+  return ctx.send(extra.status ?? 200, V.autoRenewScreen({ me: ctx.me, csrf: ctx.csrf, ...(await autoRenew.forPerson(ctx.me.accountId, ctx.params.personId)),
+    test: isTestProvider(providerNow()), done: ctx.url.searchParams.get('done'), error: ctx.url.searchParams.get('error'), ...extra }));
+}
+get('/me/:personId/auto-renew', async (ctx) => { ctx.requireActor(); return autoScreen(ctx); });
+post('/me/:personId/auto-renew', async (ctx) => {
+  ctx.requireActor();
+  if (!UUID_RE.test(ctx.params.personId)) throw new NotFound('Person');
+  const f = await ctx.form();
+  await family.assertMayActFor(ctx.me.accountId, ctx.params.personId);
+  try {
+    if (!UUID_RE.test(String(f.affiliationId))) throw new Invalid('Choose a membership.');
+    await autoRenew.start(ctx.me.accountId, ctx.params.personId, f.affiliationId,
+      { method: f.method, period: f.period, card: f.card, agreed: f.agreed === 'on' }, { provider: providerNow() });
+    return ctx.redirect(`/me/${ctx.params.personId}/auto-renew?done=${encodeURIComponent('Automatic renewal is on.')}`);
+  } catch (e) { if (e instanceof Invalid) return ctx.redirect(`/me/${ctx.params.personId}/auto-renew?error=${encodeURIComponent(e.message)}`); throw e; }
+});
+post('/me/:personId/auto-renew/:agreementId/stop', async (ctx) => {
+  ctx.requireActor();
+  if (!UUID_RE.test(ctx.params.personId) || !UUID_RE.test(ctx.params.agreementId)) throw new NotFound('Automatic renewal');
+  await ctx.form();
+  await autoRenew.cancel(ctx.me.accountId, ctx.params.personId, ctx.params.agreementId);
+  return ctx.redirect(`/me/${ctx.params.personId}/auto-renew?done=${encodeURIComponent('Automatic renewal is off. Nothing more will be charged.')}`);
+});
+
+// ---- the read-only API. No session: a bearer token stands for one organisation and what is beneath it.
+async function apiCall(ctx, scope, run) {
+  const m = /^Bearer (\S+)$/.exec(String(ctx.req.headers.authorization ?? ''));
+  const a = await apiTokens.authenticate(m?.[1]);
+  if (!a) return ctx.json(401, { error: 'invalid_token', message: 'Send a valid token as "Authorization: Bearer <token>".' });
+  if (!a.scopes.includes(scope)) return ctx.json(403, { error: 'insufficient_scope', message: `This token cannot do that. It needs "${scope}".` });
+  const q = Object.fromEntries(ctx.url.searchParams);
+  return ctx.json(200, await run(a, q));
+}
+get('/api/v1/organisations', (ctx) => apiCall(ctx, 'organisations:read', async (a) => ({ data: await api.organisations(a) })));
+get('/api/v1/members', (ctx) => apiCall(ctx, 'members:read', (a, q) => api.members(a, q)));
+get('/api/v1/events', (ctx) => apiCall(ctx, 'events:read', (a, q) => api.events(a, q)));
+
+// ---- integrations: tokens and webhooks (owner or administrator)
+async function integrationsScreen(ctx, org, extra = {}) {
+  return ctx.send(extra.status ?? 200, V.integrationsScreen({ me: ctx.me, csrf: ctx.csrf, org,
+    tokens: await apiTokens.list(ctx.me.accountId, org.id), ...(await webhooks.list(ctx.me.accountId, org.id)),
+    scopes: apiTokens.SCOPES, events: webhooks.EVENTS, origin: originOf(ctx),
+    done: ctx.url.searchParams.get('done'), error: ctx.url.searchParams.get('error'), ...extra }));
+}
+const integrationsBack = (org, k, t) => `/o/${org.slug}/integrations?${k}=${encodeURIComponent(t)}`;
+get('/o/:slug/integrations', async (ctx) => integrationsScreen(ctx, await organisationFor(ctx)));
+post('/o/:slug/integrations/tokens', async (ctx) => {
+  const org = await organisationFor(ctx);
+  const f = await ctx.form();
+  try {
+    const made = await apiTokens.create(ctx.me.accountId, org.id, { name: f.name, scopes: readScopes(f) });
+    return integrationsScreen(ctx, org, { newToken: made.token });
+  } catch (e) { if (e instanceof Invalid) return ctx.redirect(integrationsBack(org, 'error', e.message)); throw e; }
+});
+post('/o/:slug/integrations/tokens/:tokenId/revoke', async (ctx) => {
+  const org = await organisationFor(ctx);
+  if (!UUID_RE.test(ctx.params.tokenId)) throw new NotFound('Token');
+  await ctx.form();
+  await apiTokens.revoke(ctx.me.accountId, org.id, ctx.params.tokenId);
+  return ctx.redirect(integrationsBack(org, 'done', 'Token revoked. It stops working at once.'));
+});
+post('/o/:slug/integrations/webhooks', async (ctx) => {
+  const org = await organisationFor(ctx);
+  const f = await ctx.form();
+  try {
+    const made = await webhooks.create(ctx.me.accountId, org.id, { url: f.url, events: readEvents(f) });
+    return integrationsScreen(ctx, org, { newSecret: made.secret });
+  } catch (e) { if (e instanceof Invalid) return ctx.redirect(integrationsBack(org, 'error', e.message)); throw e; }
+});
+const hookAction = (path, run, text) => post(`/o/:slug/integrations/webhooks/:hookId${path}`, async (ctx) => {
+  const org = await organisationFor(ctx);
+  if (!UUID_RE.test(ctx.params.hookId)) throw new NotFound('Webhook');
+  const f = await ctx.form();
+  const out = await run(ctx, org, f);
+  return ctx.redirect(integrationsBack(org, 'done', typeof text === 'function' ? text(out) : text));
+});
+hookAction('/test', (ctx, org) => webhooks.sendTest(ctx.me.accountId, org.id, ctx.params.hookId),
+  (r) => r?.status === 'delivered' ? 'The test message was delivered.' : `The test message was not delivered: ${r?.last_error ?? 'no answer'}`);
+hookAction('/on', (ctx, org) => webhooks.setActive(ctx.me.accountId, org.id, ctx.params.hookId, true), 'Switched on.');
+hookAction('/off', (ctx, org) => webhooks.setActive(ctx.me.accountId, org.id, ctx.params.hookId, false), 'Switched off.');
+hookAction('/remove', (ctx, org) => webhooks.remove(ctx.me.accountId, org.id, ctx.params.hookId), 'Removed.');
+
+// ---- the platform: how this installation is doing
+get('/platform', async (ctx) => {
+  ctx.requireActor();
+  const p = push.provider();
+  return ctx.send(200, V.platformScreen({ me: ctx.me, csrf: ctx.csrf, ...(await platform.overview(ctx.me.accountId, { provider: providerNow(), pushOn: !!p })) }));
+});
+
+// ---- booking a class: the member's side
+async function bookScreen(ctx, extra = {}) {
+  if (!UUID_RE.test(ctx.params.personId)) throw new NotFound('Person');
+  return ctx.send(extra.status ?? 200, V.bookScreen({ me: ctx.me, csrf: ctx.csrf, ...(await booking.forPerson(ctx.me.accountId, ctx.params.personId)),
+    done: ctx.url.searchParams.get('done'), error: ctx.url.searchParams.get('error'), ...extra }));
+}
+get('/me/:personId/book', async (ctx) => { ctx.requireActor(); return bookScreen(ctx); });
+post('/me/:personId/book', async (ctx) => {
+  ctx.requireActor();
+  if (!UUID_RE.test(ctx.params.personId)) throw new NotFound('Person');
+  const f = await ctx.form();
+  await family.assertMayActFor(ctx.me.accountId, ctx.params.personId);
+  const back = (k, t) => ctx.redirect(`/me/${ctx.params.personId}/book?${k}=${encodeURIComponent(t)}`);
+  try {
+    if (!UUID_RE.test(String(f.sessionId)) || !/^\d{4}-\d{2}-\d{2}$/.test(String(f.date))) throw new Invalid('Choose a class.');
+    const r = await booking.book(ctx.me.accountId, ctx.params.personId, f.sessionId, f.date);
+    return back('done', r.already ? 'Already booked.' : r.status === 'booked' ? 'You are booked in.' : 'The class is full, so you are on the waiting list. We will tell you if a place opens.');
+  } catch (e) { if (e instanceof Invalid) return back('error', e.message); throw e; }
+});
+post('/me/:personId/book/:bookingId/cancel', async (ctx) => {
+  ctx.requireActor();
+  if (!UUID_RE.test(ctx.params.personId) || !UUID_RE.test(ctx.params.bookingId)) throw new NotFound('Booking');
+  await ctx.form();
+  const origin = process.env.VERCEL_PROJECT_PRODUCTION_URL ? `https://${process.env.VERCEL_PROJECT_PRODUCTION_URL}` : originOf(ctx);
+  await booking.cancel(ctx.me.accountId, ctx.params.personId, ctx.params.bookingId, { notify: { messenger: messengerFrom(), origin, baseFrom: sendingAddress() } });
+  return ctx.redirect(`/me/${ctx.params.personId}/book?done=${encodeURIComponent('Cancelled. Thank you for letting us know.')}`);
+});
+
+// ---- notifications on this device
+get('/me/notifications', async (ctx) => {
+  ctx.requireActor();
+  return ctx.send(200, V.notificationsScreen({ me: ctx.me, csrf: ctx.csrf, ...(await push.status(ctx.me.accountId)),
+    done: ctx.url.searchParams.get('done') }));
+});
+post('/push/subscribe', async (ctx) => {
+  ctx.requireActor();
+  const f = await ctx.form();
+  try {
+    await push.subscribe(ctx.me.accountId, { endpoint: f.endpoint, p256dh: f.p256dh, auth: f.auth }, ctx.req.headers['user-agent']);
+    return ctx.send(200, 'ok');
+  } catch (e) { if (e instanceof Invalid) return ctx.send(422, e.message); throw e; }
+});
+post('/push/unsubscribe', async (ctx) => {
+  ctx.requireActor();
+  const f = await ctx.form();
+  await push.unsubscribe(ctx.me.accountId, f.endpoint);
+  return ctx.send(200, 'ok');
+});
+post('/me/notifications/:deviceId/remove', async (ctx) => {
+  ctx.requireActor();
+  if (!UUID_RE.test(ctx.params.deviceId)) throw new NotFound('Device');
+  await ctx.form();
+  await push.removeDevice(ctx.me.accountId, ctx.params.deviceId);
+  return ctx.redirect(`/me/notifications?done=${encodeURIComponent('Removed.')}`);
+});
+
 get('/me/payments/:paymentId', async (ctx) => { ctx.requireActor(); return payView(ctx); });
 
 post('/me/payments/:paymentId', async (ctx) => {
@@ -1633,6 +1783,23 @@ post('/unsubscribe/:token', async (ctx) => {
 
 // ---- classes and attendance --------------------------------------------------
 //
+// ---- booking a class: the club's side
+get('/o/:slug/bookings', async (ctx) => {
+  const org = await organisationFor(ctx);
+  if (org.type !== 'club') return ctx.redirect(`/o/${org.slug}/clubs`);
+  return ctx.send(200, V.bookingsScreen({ me: ctx.me, csrf: ctx.csrf, org, ...(await booking.forClub(ctx.me.accountId, org.id)),
+    canSet: await mayRegisterAt(ctx, org.id), done: ctx.url.searchParams.get('done'), error: ctx.url.searchParams.get('error') }));
+});
+post('/o/:slug/bookings/:sessionId/places', async (ctx) => {
+  const org = await organisationFor(ctx, { toRegister: true });
+  if (!UUID_RE.test(ctx.params.sessionId)) throw new NotFound('Class');
+  const f = await ctx.form();
+  try {
+    await booking.setCapacity(ctx.me.accountId, org.id, ctx.params.sessionId, f.capacity);
+    return ctx.redirect(`/o/${org.slug}/bookings?done=${encodeURIComponent('Saved.')}`);
+  } catch (e) { if (e instanceof Invalid) return ctx.redirect(`/o/${org.slug}/bookings?error=${encodeURIComponent(e.message)}`); throw e; }
+});
+
 // Instructors take the roll. The timetable itself is the club's page.
 
 async function rollScreen(ctx, org, extra = {}) {
@@ -1730,6 +1897,7 @@ async function renewalsScreen(ctx, org, extra = {}) {
   const canSetPrices = await mayManageAt(ctx, org.id);
   return ctx.send(extra.status ?? 200, V.renewalsScreen({
     me: ctx.me, org, csrf: ctx.csrf, today, rows, prices: await fees.list(actor, org.id),
+    auto: await autoRenew.forClub(actor, org.id),
     canSetPrices, canExempt: canSetPrices, reminderText: reminderText('due'),
     autoReminders: await renewals.reminderSetting(org.id),
     done: ctx.url.searchParams.get('done'), ...extra }));
@@ -2286,6 +2454,8 @@ get('/cron/renewals', async (ctx) => {
   const a = Buffer.from(given), b = Buffer.from(secret ?? '');
   if (!secret || a.length !== b.length || !crypto.timingSafeEqual(a, b))
     throw new Forbidden('Not permitted');
+  const autoReport = await autoRenew.run({ provider: providerNow(), messenger: messengerFrom(), baseFrom: sendingAddress(),
+    origin: process.env.VERCEL_PROJECT_PRODUCTION_URL ? `https://${process.env.VERCEL_PROJECT_PRODUCTION_URL}` : originOf(ctx) });
   const forgotten = await newcomers.purgeStale();
   const enquiriesDeleted = await enquiries.tidy();
   const qualReport = await qualifications.remind({ messenger: messengerFrom(), baseFrom: sendingAddress(),
@@ -2294,7 +2464,7 @@ get('/cron/renewals', async (ctx) => {
   const report = await reminders.run({ messenger: messengerFrom(), baseFrom: sendingAddress(), origin });
   const termsReport = await terms.run({ messenger: messengerFrom(), baseFrom: sendingAddress(), origin });
   const growthReport = await growth.run({ messenger: messengerFrom(), baseFrom: sendingAddress(), origin, signInLink: signInLinkFor(origin) });
-  return ctx.send(200, `<pre>${JSON.stringify({ report, qualifications: qualReport, newcomersForgotten: forgotten, enquiriesDeleted, growth: growthReport, terms: termsReport }, null, 1).replace(/</g, '&lt;')}</pre>`);
+  return ctx.send(200, `<pre>${JSON.stringify({ report, autoRenew: autoReport, qualifications: qualReport, newcomersForgotten: forgotten, enquiriesDeleted, growth: growthReport, terms: termsReport }, null, 1).replace(/</g, '&lt;')}</pre>`);
 });
 
 post('/o/:slug/renewals/fees', async (ctx) => {
@@ -4210,6 +4380,12 @@ export async function handler(req, res) {
         ...(setCookies.length ? { 'set-cookie': setCookies } : {}),
       });
       res.end(html);
+    },
+
+    /** JSON for programs, not people: never cached, and the same security headers as everything else. */
+    json(status, body) {
+      res.writeHead(status, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store', ...SECURITY_HEADERS });
+      res.end(JSON.stringify(body));
     },
 
     download(filename, type, text) {

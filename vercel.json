@@ -9,6 +9,18 @@
   },
   "rewrites": [
     {
+      "source": "/platform",
+      "destination": "/api/index"
+    },
+    {
+      "source": "/api/v1/:path*",
+      "destination": "/api/index"
+    },
+    {
+      "source": "/push/:path*",
+      "destination": "/api/index"
+    },
+    {
       "source": "/enter/:path*",
       "destination": "/api/index"
     },

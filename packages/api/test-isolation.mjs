@@ -96,8 +96,13 @@ const PUBLIC = new Map([
   ['POST /trial/:slug', 'starting a trial; same-site check, honeypot, rate limits; answers the same whether or not the person was known'],
   ['GET /trial/:slug/thanks', 'the thank-you page; the same words for everybody'],
   ['GET /r/:code', 'a referral invitation; shows a first name and a club, only for a live code'],
+  ['GET /api/v1/organisations', 'no session: a bearer token stands for one organisation and what is beneath it; without a valid token it answers 401'],
+  ['GET /api/v1/members', 'the same; a token only ever sees its own organisation\'s subtree, and never contact details'],
+  ['GET /api/v1/events', 'the same'],
   ['POST /signout', 'leaving must always work'],
   ['GET /dashboard', 'shows only what the signer-in may see'],
+  ['GET /o/:slug/bookings', 'a teacher or official of that club; booking.forClub asserts the role'],
+  ['POST /o/:slug/bookings/:sessionId/places', 'an official of that club; the class must belong to it'],
   ['GET /cron/renewals', 'the scheduler; refuses without the shared secret and when none is configured'],
   ['GET /unsubscribe/:token', 'the link in an email; the token is the authorisation and it shows only a setting'],
   ['POST /unsubscribe/:token', 'turning off announcements; the token is the authorisation'],
@@ -235,6 +240,11 @@ function pathFor(pattern) {
     feeId: theirFee.id,
     termId: theirTerm.id,
     formId: theirForm.id,
+    deviceId: '00000000-0000-0000-0000-000000000000',
+    hookId: '00000000-0000-0000-0000-000000000000',
+    tokenId: '00000000-0000-0000-0000-000000000000',
+    bookingId: '00000000-0000-0000-0000-000000000000',
+    agreementId: '00000000-0000-0000-0000-000000000000',
     fieldId: 'q1',
     galleryId: theirGallery.id,
     recordId: theirRecord.id,
@@ -296,6 +306,17 @@ const SCOPED = new Map([
   ['GET /me/forms/:personId', 'the forms of the signed-in person or a child they look after; family.assertMayActFor'],
   ['GET /me/forms/:formId/:personId', 'the same; the form must apply to that person through where they train'],
   ['POST /me/forms/:formId/:personId', 'signs only for the signed-in person or a child they look after; a child cannot sign for themselves'],
+  ['GET /me/:personId/auto-renew', 'the signed-in person or a child they look after; family.assertMayActFor'],
+  ['POST /me/:personId/auto-renew', 'the same; only their own memberships'],
+  ['POST /me/:personId/auto-renew/:agreementId/stop', 'the same; the agreement must be theirs'],
+  ['GET /me/:personId/book', 'the signed-in person or a child they look after; family.assertMayActFor'],
+  ['POST /me/:personId/book', 'the same; only classes at a club they belong to'],
+  ['POST /me/:personId/book/:bookingId/cancel', 'the same; the booking must be theirs'],
+  ['GET /me/notifications', 'the signed-in account\'s own devices only; push.status reads by account id'],
+  ['POST /push/subscribe', 'adds a device to the signed-in account only; nothing else is read or written'],
+  ['POST /push/unsubscribe', 'removes a device of the signed-in account only (the delete is keyed on account and endpoint)'],
+  ['POST /me/notifications/:deviceId/remove', 'removes a device of the signed-in account only; another account\'s device is not found'],
+  ['GET /platform', 'only the owner of the federation at the top of this installation; platform.overview asserts the role'],
   ['GET /me/terms', 'the terms open to the signed-in person and their children; scoped by terms.forPerson'],
   ['POST /me/terms/:termId/:personId', 'enrols only the signed-in person or a child they look after; family.mayActFor'],
   ['POST /me/terms/:termId/:personId/withdraw', 'the same'],
@@ -421,6 +442,9 @@ console.log('\nAND NOTHING OF THEIRS CAN BE CHANGED');
   for (const route of routes.filter((r) => r.method === 'POST')) {
     const key = `POST ${route.pattern}`;
     if (PUBLIC.has(key)) continue;
+    // These two take no id of anybody's: they act on the signed-in account's own devices, so there is nothing to aim
+    // at somebody else. Their scoping is asserted in test-push.mjs.
+    if (key === 'POST /push/subscribe' || key === 'POST /push/unsubscribe') continue;
 
     const { path, unknown } = pathFor(route.pattern);
     if (unknown.length) continue;
