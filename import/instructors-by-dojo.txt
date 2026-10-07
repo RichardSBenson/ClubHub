@@ -1,86 +1,86 @@
 === whanganui  ->  /o/whanganui/members/import ===
 first name,last name,role,grade
-Russell,Dilloway,instructor,5th dan
-Pete,Parson,instructor,4th dan
-Ryan,Trevor-Roper,instructor,3rd dan
-Pete,Shaw,instructor,3rd dan
-Richard,Benson,instructor,3rd dan
-Brian,Alderton,instructor,3rd dan
-Jessica,Shaw,instructor,2nd dan
-Sotiris,Grammaticogiannis,instructor,2nd dan
-Chris,Sheahon,instructor,2nd dan
-Tim,Sullivan,instructor,2nd dan
+Russell,Dilloway,member,5th dan
+Pete,Parson,member,4th dan
+Ryan,Trevor-Roper,member,3rd dan
+Pete,Shaw,member,3rd dan
+Richard,Benson,member,3rd dan
+Brian,Alderton,member,3rd dan
+Jessica,Shaw,member,2nd dan
+Sotiris,Grammaticogiannis,member,2nd dan
+Chris,Sheahon,member,2nd dan
+Tim,Sullivan,member,2nd dan
 
 === wellington  ->  /o/wellington/members/import ===
 first name,last name,role,grade
-Doug,Holloway,instructor,8th dan
-Mike,Kenworthy,instructor,7th dan
-Penina,Kenworthy,instructor,6th dan
+Doug,Holloway,member,8th dan
+Mike,Kenworthy,member,7th dan
+Penina,Kenworthy,member,6th dan
 
 === taumarunui  ->  /o/taumarunui/members/import ===
 first name,last name,role,grade
-Vincent,Nutter,instructor,3rd dan
+Vincent,Nutter,member,3rd dan
 
 === christchurch  ->  /o/christchurch/members/import ===
 first name,last name,role,grade
-Rob,Engelken,instructor,4th dan
-Hiroshi,Nakano,instructor,3rd dan
-Arthur,Bruce,instructor,2nd dan
-Sean,O'Connell,instructor,1st dan
-Alex,Odering,instructor,1st dan
-Nyetching,Engelken,instructor,1st dan
+Rob,Engelken,member,4th dan
+Hiroshi,Nakano,member,3rd dan
+Arthur,Bruce,member,2nd dan
+Sean,O'Connell,member,1st dan
+Alex,Odering,member,1st dan
+Nyetching,Engelken,member,1st dan
 
 === hornby  ->  /o/hornby/members/import ===
 first name,last name,role,grade
-Mark,Webster,instructor,4th dan
-Patricio,Ogalde,instructor,1st dan
+Mark,Webster,member,4th dan
+Patricio,Ogalde,member,1st dan
 
 === dunedin  ->  /o/dunedin/members/import ===
 first name,last name,role,grade
-Graeme,Gavegan,instructor,7th dan
-Kevin,Strange,instructor,5th dan
-Margaret,Strange,instructor,4th dan
+Graeme,Gavegan,member,7th dan
+Kevin,Strange,member,5th dan
+Margaret,Strange,member,4th dan
 
 === waikouaiti  ->  /o/waikouaiti/members/import ===
 first name,last name,role,grade
-Noah,Heath,instructor,4th dan
-Shelley,Heatley,instructor,2nd dan
-Danyon,McKean,instructor,2nd dan
+Noah,Heath,member,4th dan
+Shelley,Heatley,member,2nd dan
+Danyon,McKean,member,2nd dan
 
 === milton  ->  /o/milton/members/import ===
 first name,last name,role,grade
-Kelvin,McSkimming,instructor,5th dan
-Mark,Byrnes,instructor,1st dan
+Kelvin,McSkimming,member,5th dan
+Mark,Byrnes,member,1st dan
 
 === nagoya  ->  /o/nagoya/members/import ===
 first name,last name,role,grade
-Sean,O'Connell,instructor,6th dan
+Sean,O'Connell,member,6th dan
 
 === rawene  ->  /o/rawene/members/import ===
 first name,last name,role,grade
-Richard,Hood,instructor,3rd dan
-Tracey,Hood,instructor,1st dan
+Richard,Hood,member,3rd dan
+Tracey,Hood,member,1st dan
 
 === auckland  ->  /o/auckland/members/import ===
 first name,last name,role,grade
-Misha,Sharma,instructor,1st dan
-Yvette,Messina,instructor,1st dan
+Misha,Sharma,member,1st dan
+Yvette,Messina,member,1st dan
 
 === gisborne  ->  /o/gisborne/members/import ===
 first name,last name,role,grade
-Shane,Kingi,instructor,3rd dan
+Shane,Kingi,member,3rd dan
 
 === taranaki  ->  /o/taranaki/members/import ===
 first name,last name,role,grade
-Les,Crowe,instructor,5th dan
-Aaron,Smith,instructor,1st dan
+Les,Crowe,member,5th dan
+Aaron,Smith,member,1st dan
 
 === stratford  ->  /o/stratford/members/import ===
 first name,last name,role,grade
-Elaine,Rowe,instructor,1st dan
-Craig,Rowe,instructor,1st dan
+Elaine,Rowe,member,1st dan
+Craig,Rowe,member,1st dan
 
 === new-plymouth  ->  /o/new-plymouth/members/import ===
 first name,last name,role,grade
-Craig,Rowe,instructor,1st dan
-Elaine,Rowe,instructor,1st dan
+Craig,Rowe,member,1st dan
+Elaine,Rowe,member,1st dan

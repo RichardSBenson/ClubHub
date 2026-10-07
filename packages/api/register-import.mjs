@@ -92,7 +92,8 @@ export async function applyRegister(client, { dojos = [], sessions = [], instruc
      timed.map((t) => num(t.s.min_age)), timed.map((t) => num(t.s.max_age)), timed.map((t) => t.order)]);
 
   // ---- instructors: decided in memory from three lookups, written in four inserts -----------------------------
-  // They go on the roll; that does not put them on the website, which needs their consent, a write-up and checks.
+  // They go on the roll as members who also instruct. That does not put them on the website, which needs their
+  // consent, a write-up and checks.
   if (instructors.length) {
     const prefix = String(root.prefix).toUpperCase().replace(/[^A-Z]/g, '').slice(0, 5) || 'M';
     const [{ rows: [seq] }, { rows: ladder }] = await Promise.all([
@@ -113,10 +114,13 @@ export async function applyRegister(client, { dojos = [], sessions = [], instruc
       client.query(`select gr.person_id, max(g.rank_order) top from grading_record gr join grade g on g.id = gr.grade_id
                      where gr.person_id = any($1::uuid[]) and gr.result = 'pass' group by gr.person_id`, [known]),
     ]);
-    const affAt = new Map(affs.map((a) => [`${a.person_id}|${a.organisation_id}`, a]));
+    // An instructor is a member who also instructs: two rows, the way the instructor tick on a profile does it.
+    const has = new Set(affs.map((a) => `${a.person_id}|${a.organisation_id}|${a.role}`));
     const top = new Map(tops.map((t) => [t.person_id, t.top]));
+    // A person is a member of ONE dojo (their home); at any other dojo where they teach they are an instructor only.
+    const homed = new Set(affs.filter((a) => a.role === 'member').map((a) => a.person_id));
 
-    const newPeople = [], newAffs = [], promote = [], newGrades = [];
+    const newPeople = [], newAffs = [], newGrades = [];
     for (const r of instructors) {
       const org = orgBySlug.get(r.slug);
       if (!org) { report.notes.push(`No dojo "${r.slug}" for ${r.first_name} ${r.last_name}: skipped.`); continue; }
@@ -124,21 +128,20 @@ export async function applyRegister(client, { dojos = [], sessions = [], instruc
       const k = key(first, last);
       // The same name on another dojo's roll is the same person (two people teach at two dojo), unless the row says it is not.
       const candidates = byName.get(k) ?? [];
-      let id = yes(r.distinct) ? candidates.find((c) => affAt.has(`${c}|${org.id}`)) : candidates[0];
+      let id = yes(r.distinct) ? candidates.find((c) => has.has(`${c}|${org.id}|member`) || has.has(`${c}|${org.id}|instructor`)) : candidates[0];
       if (!id) {
         id = randomUUID(); next += 1;
         newPeople.push({ id, number: `${prefix}-${String(next).padStart(4, '0')}`, first, last });
         byName.set(k, [...candidates, id]);
         report.people.added++;
       }
-      const aff = affAt.get(`${id}|${org.id}`);
-      if (!aff) {
-        newAffs.push({ id, org: org.id });
-        affAt.set(`${id}|${org.id}`, { role: 'instructor', fresh: true });
-        report.people.instructors++;
-      } else if (aff.role === 'member') {
-        promote.push(aff.id); aff.role = 'instructor';
-        report.people.instructors++;
+      for (const role of ['member', 'instructor']) {
+        if (has.has(`${id}|${org.id}|${role}`)) continue;
+        if (role === 'member' && homed.has(id)) continue;
+        if (role === 'member') homed.add(id);
+        newAffs.push({ id, org: org.id, role });
+        has.add(`${id}|${org.id}|${role}`);
+        if (role === 'instructor') report.people.instructors++;
       }
       const target = ladder.find((g) => g.rank_order === 10 + Number(r.dan));
       if (target && !(top.get(id) >= target.rank_order)) {
@@ -152,9 +155,8 @@ export async function applyRegister(client, { dojos = [], sessions = [], instruc
       [newPeople.map((p) => p.id), newPeople.map((p) => p.number), newPeople.map((p) => p.first), newPeople.map((p) => p.last)]);
     if (newAffs.length) await client.query(
       `insert into affiliation (person_id, organisation_id, role, starts, status)
-       select p, o, 'instructor', current_date, 'active' from unnest($1::uuid[], $2::uuid[]) as t(p, o)`,
-      [newAffs.map((a) => a.id), newAffs.map((a) => a.org)]);
-    if (promote.length) await client.query(`update affiliation set role = 'instructor' where id = any($1::uuid[])`, [promote]);
+       select p, o, r::role_name, current_date, 'active' from unnest($1::uuid[], $2::uuid[], $3::text[]) as t(p, o, r)`,
+      [newAffs.map((a) => a.id), newAffs.map((a) => a.org), newAffs.map((a) => a.role)]);
     if (newGrades.length) await client.query(
       `insert into grading_record (person_id, grade_id, awarded_on, awarded_by_org, result, panel, notes)
        select p, g, current_date, o, 'pass', '[]', $4 from unnest($1::uuid[], $2::uuid[], $3::uuid[]) as t(p, g, o)`,

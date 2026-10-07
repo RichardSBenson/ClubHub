@@ -20,5 +20,5 @@ Rules, both ways:
 - Class times for a dojo are replaced by the file's. Instructors are found by name, never duplicated, and the same
   name at two dojo is one person (set `distinct` to `yes` when it is not). Grades are recorded as held on joining,
   not awarded.
-- Instructors go on the roll only. Showing them on the website still needs their consent, a write-up and current checks.
+- Instructors are members of their dojo who also instruct: a membership (at their home dojo; a person is a member of one dojo only) and the instructor role (at every dojo they teach at). They go on the roll only. Showing them on the website still needs their consent, a write-up and current checks.
 - Saving is written to the audit log.

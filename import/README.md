@@ -51,7 +51,7 @@ reading "Tuesday & Thursday".
 
 ## Instructors
 
-`instructors.csv` puts people on a dojo's roll as instructors, at the dan grade they hold:
+`instructors.csv` puts people on a dojo's roll as members who also instruct, at the dan grade they hold:
 
 ```bash
 node import.mjs dojos.csv sessions.csv instructors.csv

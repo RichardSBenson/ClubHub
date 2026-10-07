@@ -101,8 +101,10 @@ console.log('\nCONFIRMING SAVES IT');
   ok('Taumarunui is held back, with no venue invented', tau.published === false && tau.venue_name === null, JSON.stringify(tau));
   const times = await one(`select count(*)::int n from training_session s join organisation o on o.id = s.organisation_id where o.slug = 'wellington'`);
   ok('class times are in', times.n === 2, String(times.n));
-  const mike = await pool.query(`select o.slug, a.role from person p join affiliation a on a.person_id = p.id join organisation o on o.id = a.organisation_id where p.last_name = 'Kenworthy' and p.first_name = 'Mike' order by o.slug`);
-  ok('Mike Kenworthy is one person on two rolls, as an instructor', mike.rows.length === 2 && mike.rows.every((r) => r.role === 'instructor'), JSON.stringify(mike.rows));
+  const mike = await pool.query(`select o.slug, a.role from person p join affiliation a on a.person_id = p.id join organisation o on o.id = a.organisation_id where p.last_name = 'Kenworthy' and p.first_name = 'Mike' order by o.slug, a.role`);
+  ok('Mike Kenworthy is one person: a member of his home dojo, and an instructor at both', JSON.stringify(mike.rows.map((r) => `${r.slug}:${r.role}`)) === JSON.stringify(['hornby:instructor', 'wellington:instructor', 'wellington:member']), JSON.stringify(mike.rows));
+  const counted = await one(`select count(*)::int n from affiliation a join organisation o on o.id = a.organisation_id where o.slug = 'wellington' and a.role = 'member' and a.ends is null`);
+  ok('so Wellington counts them as members', counted.n >= 2, String(counted.n));
   ok('only one Mike Kenworthy exists', (await one(`select count(*)::int n from person where first_name='Mike' and last_name='Kenworthy'`)).n === 1);
   const grade = await one(`select g.label from grading_record r join grade g on g.id = r.grade_id join person p on p.id = r.person_id where p.first_name = 'Penina'`);
   ok('Penina holds a 6th dan', grade?.label === '6th dan', JSON.stringify(grade));
@@ -116,6 +118,15 @@ console.log('\nRUNNING IT AGAIN CHANGES NOTHING');
   await req(`/o/${slug}/register-import`, { method: 'POST', form: { ...files, confirm: 'yes' } });
   const after = await state();
   ok('no new dojo, people, class times or grades', JSON.stringify(before) === JSON.stringify(after), `${JSON.stringify(before)} ${JSON.stringify(after)}`);
+}
+
+console.log('\nREPAIRING INSTRUCTORS WHO WERE ONLY INSTRUCTORS');
+{
+  await pool.query(`delete from affiliation a using person p, organisation o where p.id = a.person_id and o.id = a.organisation_id and a.role = 'member' and p.first_name = 'Penina' and o.slug = 'wellington'`);
+  const gone = await one(`select count(*)::int n from affiliation a join person p on p.id = a.person_id where p.first_name = 'Penina' and a.role = 'member'`);
+  await req(`/o/${slug}/register-import`, { method: 'POST', form: { ...files, confirm: 'yes' } });
+  const back = await one(`select count(*)::int n from affiliation a join person p on p.id = a.person_id where p.first_name = 'Penina' and a.role = 'member' and a.ends is null`);
+  ok('running it again gives an instructor who lacked a membership one', gone.n === 0 && back.n === 1, `${gone.n} ${back.n}`);
 }
 
 console.log('\nMISTAKES AND WHO MAY');
