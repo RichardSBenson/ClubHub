@@ -31,6 +31,7 @@
  */
 
 import crypto from 'node:crypto';
+import { readFileSync } from 'node:fs';
 import { URL } from 'node:url';
 import { photos, instructorRole, eventDetails, gallery, MAX_GALLERY, pool, orgs, people, rank, events, competition, pages, assets, news,
          instructors, navigation, audit, cards, checkin, search, clubPages, appearance, clubs, registerImport, clubProfile, family, myself, memberEvents, messages, emailPreferences, payments, fees, renewals, reminders, attendance, newcomers, reports, gradings, qualifications, forms, autoRenew, booking, push, apiTokens, api, webhooks, platform, portal, enquiries, scheduledPublishing, TooMany, outsiders, trials, referrals, growth, clubMailer, terms,
@@ -2552,10 +2553,21 @@ async function registerImportScreen(ctx, org, extra = {}) {
   return ctx.send(extra.status ?? 200, V.registerImportScreen({ me: ctx.me, org, csrf: ctx.csrf, ...extra }));
 }
 
+// The three files that ship with this version (import/*.csv), for filling the boxes without pasting.
+const BUNDLED_REGISTER = ['dojos', 'sessions', 'instructors'];
+function bundledRegisterFiles() {
+  const files = {};
+  for (const name of BUNDLED_REGISTER) {
+    try { files[name] = readFileSync(new URL(`../../import/${name}.csv`, import.meta.url), 'utf8'); } catch { files[name] = ''; }
+  }
+  return files;
+}
+
 get('/o/:slug/register-import', async (ctx) => {
   const org = await organisationFor(ctx);
   if (org.type === 'club') throw new Forbidden('Only a federation or region can import dojo.');
-  return registerImportScreen(ctx, org);
+  const bundled = ctx.url.searchParams.get('use') === 'bundled';
+  return registerImportScreen(ctx, org, bundled ? { files: bundledRegisterFiles(), bundled: true } : {});
 });
 
 post('/o/:slug/register-import', async (ctx) => {

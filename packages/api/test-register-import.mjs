@@ -78,6 +78,16 @@ console.log('\nPREVIEW SAVES NOTHING');
   ok('nothing at all changed', JSON.stringify(before) === JSON.stringify(after), `${JSON.stringify(before)} ${JSON.stringify(after)}`);
 }
 
+console.log('\nNO PASTING NEEDED');
+{
+  const b = await req(`/o/${slug}/register-import?use=bundled`);
+  ok('the button fills the boxes from the bundled files', b.status === 200 && /slug,name,venue_name/.test(b.html) && /Kenworthy/.test(b.html) && /Fill the boxes|filled from the files/.test(b.html), String(b.status));
+  ok('and the offer to do so is on the empty screen', /use=bundled/.test((await req(`/o/${slug}/register-import`)).html));
+  const bd = await state();
+  const pv = await req(`/o/${slug}/register-import`, { method: 'POST', form: { dojos: (b.html.match(/<textarea id="dojos"[^>]*>([\s\S]*?)<\/textarea>/)?.[1] ?? '').replace(/&amp;/g, '&').replace(/&#39;/g, "'").replace(/&quot;/g, '"').replace(/&lt;/g, '<').replace(/&gt;/g, '>') } });
+  ok('previewing them works and saves nothing', pv.status === 200 && /Nothing is saved yet/.test(pv.html) && JSON.stringify(bd) === JSON.stringify(await state()), String(pv.status));
+}
+
 console.log('\nCONFIRMING SAVES IT');
 {
   const done = await req(`/o/${slug}/register-import`, { method: 'POST', form: { ...files, confirm: 'yes' } });

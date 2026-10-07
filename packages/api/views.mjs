@@ -2909,7 +2909,7 @@ export const appearanceEditor = ({ me, csrf, org, current, builtIn = [], home = 
 };
 
 /** Load the dojo register's CSV files into a federation: paste, preview, confirm. */
-export const registerImportScreen = ({ me, csrf, org, files = {}, report = null, saved = false, error }) => {
+export const registerImportScreen = ({ me, csrf, org, files = {}, report = null, saved = false, error, bundled = false }) => {
   const box = (id, label, hint) => `<label for="${id}">${esc(label)}</label>
     <p class="muted">${hint}</p>
     <textarea id="${id}" name="${id}" rows="6" spellcheck="false" style="font-family:monospace">${esc(files[id] ?? '')}</textarea>`;
@@ -2926,7 +2926,9 @@ export const registerImportScreen = ({ me, csrf, org, files = {}, report = null,
     ${report.held.length ? `<p>Held back, not published, because something a visitor needs is missing:</p>${list(report.held.map((h) => `${esc(h.name)} needs ${esc(h.missing.join(', '))}`))}` : ''}
     ${list(report.notes.map(esc))}
   </div>` : ''}
-  <p>Paste the contents of each CSV file. Blank means unknown and is never filled in for you.
+  ${report || error || (files.dojos ?? '') ? '' : `<p><a class="btn" href="/o/${esc(org.slug)}/register-import?use=bundled">Fill the boxes from the files that came with this version</a></p>`}
+  ${bundled ? '<div class="note">The boxes are filled from the files that came with this version. Press Preview to see what would happen. Nothing is saved yet.</div>' : ''}
+  <p>Paste the contents of each CSV file, or use the button above. Blank means unknown and is never filled in for you.
   Importing twice does not duplicate anything. This puts instructors on their dojo's roll; showing them on the
   website still needs their own consent, a write-up and current checks.</p>
   <form method="post" action="/o/${esc(org.slug)}/register-import">
