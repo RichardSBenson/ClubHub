@@ -487,8 +487,8 @@ export const person = ({ me, csrf, person, history, affiliations, eligibility,
 
   ${instructorSite ? `<div class="card" style="margin:12px 0"><h3 style="margin-top:0">On the ${esc(instructorSite.name)} website</h3>
     <p>${instructorSite.published ? '<span class="tag ok">Shown</span> on the dojo page and the Instructors page.' : '<span class="tag wait">Not shown yet</span> The dojo page says "Introductions coming soon".'}</p>
-    ${canManage ? `<p><a class="btn" href="/o/${esc(instructorSite.slug)}/instructors">${instructorSite.published ? 'Change what it says' : 'Show them on the website'}</a></p>
-    <p class="hint">On that screen, tick <strong>Show on the website</strong>, add what they teach and a short about, and save.</p>`
+    ${canManage ? `<p><a class="btn" href="/o/${esc(instructorSite.slug)}/instructors">${instructorSite.published ? 'Open Instructors' : 'Show them on the website'}</a></p>
+    <p class="hint">On that screen, tick them and press <strong>Make instructors and show on the website</strong>. They are shown once they have a write-up and their first aid, police vetting and child protection are current.</p>`
       : '<p class="hint">An owner or administrator of the dojo (or the federation) switches this on, under Instructors.</p>'}</div>` : ''}
 
   ${recognisable.length ? `<form method="post" action="/p/${esc(person.id)}/recognise-grade" class="card" style="margin:12px 0">
@@ -2276,81 +2276,6 @@ export const instructorList = ({ me, csrf, org, instructors = [], roll = [], lad
     return y;
   };
 
-  const bioText = (bio) => paragraphs(bio).join('\n\n');
-
-  const card = (i) => {
-    const years = age(i.date_of_birth);
-    const tooYoung = years !== null && years < 18;
-    const noDob = !i.date_of_birth;
-
-    return `<div class="card">
-      <h3>${esc(i.first_name)} ${esc(i.last_name)}
-        ${i.title ? `<span class="tag dan">${esc(i.title)}</span>` : ''}</h3>
-      <p class="muted">${i.grade ? esc(i.grade) : 'ungraded'}${
-        // Hanshi is both an MOKNZ dan grade and the title it confers, so
-        // "Hanshi · addressed as Hanshi" says one thing twice.
-        i.address_as && i.address_as !== i.grade && i.address_as !== i.title
-          ? ` · addressed as ${esc(i.address_as)}` : ''}${
-        i.published ? '' : ' · not on the website'}</p>
-
-      ${tooYoung ? `<div class="note"><strong>Under 18.</strong>
-        They can hold the instructor role on the roll, but this platform does
-        not put a name, photograph and grade of anybody under 18 on a page
-        that anybody can read.</div>` : ''}
-      ${noDob ? `<div class="note">Their date of birth is not recorded, so the
-        system cannot tell whether they are old enough to be published.
-        <a href="/p/${esc(i.person_id)}/edit">Add it</a> first.</div>` : ''}
-
-      <form method="post"
-            action="/o/${esc(org.slug)}/instructors/${esc(i.person_id)}">
-        <input type="hidden" name="_csrf" value="${esc(csrf ?? '')}">
-
-        <p><label>What they teach
-          <span class="hint">One line. "Tuesday and Thursday evenings",
-            "Children's classes".</span><br>
-          <input type="text" name="teaches" maxlength="200"
-            value="${esc(i.teaches ?? '')}"></label></p>
-
-        <p><label>Training since
-          <span class="hint">The year they started, such as 1998.</span><br>
-          <input type="number" name="startedYear" min="1930" max="2100" style="max-width:120px"
-            value="${esc(i.started_year ?? '')}"></label></p>
-
-        <p><label>About them
-          <span class="hint">A few sentences a parent or a new student would find useful: where they trained, what they
-            enjoy teaching. The cards show the first 280 characters; the Instructors page shows all of it.</span><br>
-          <textarea name="bio" rows="4">${esc(bioText(i.bio))}</textarea>
-          <span class="hint">Leave a blank line between paragraphs.</span>
-        </label></p>
-
-        <p><label><input type="checkbox" name="showChecks"${i.show_checks ? ' checked' : ''}>
-          Show that they are cleared to work with children
-          <span class="hint">Lists their current police vetting, first aid and similar checks by name (never what a check
-            found). Ask them first.</span></label></p>
-
-        <p><label>Order on the page
-          <span class="hint">Lower numbers first.</span><br>
-          <input type="number" name="sortOrder" min="0" max="999"
-            style="max-width:120px" value="${i.sort_order ?? 0}"></label></p>
-
-        ${tooYoung || noDob ? '' : `<p><label>
-          <input type="checkbox" name="published"${i.published ? ' checked' : ''}>
-          Show them on the public website</label>
-          <span class="hint">Ask them first. This puts their name, grade and
-            photograph on a page anybody can read.</span></p>`}
-
-        <p><button class="btn" type="submit">Save</button>
-        ${i.profile_id ? `<button class="btn quiet" type="submit"
-          name="op" value="remove">Take off the website</button>` : ''}</p>
-      </form>
-
-      ${i.published && i.published_at ? `<p class="hint">On the site since
-        ${esc(new Date(i.published_at).toISOString().slice(0, 10))}.</p>` : ''}
-      ${i.photo_asset_id ? '' : `<p class="hint">No photograph on their record.
-        <a href="/p/${esc(i.person_id)}">Add one on their profile</a>; the same photograph is used on their card.</p>`}
-    </div>`;
-  };
-
   const shown = instructors.filter((i) => i.published).length;
   const here = `/o/${esc(org.slug)}/instructors`;
   const q = (extra = {}) => new URLSearchParams(Object.entries({ grade: filter.grade, band: filter.band, ...extra })
@@ -2409,15 +2334,11 @@ export const instructorList = ({ me, csrf, org, instructors = [], roll = [], lad
   ${rebuild ? `<div class="note">${esc(rebuild)}</div>` : ''}
 
   ${picker}
-  <h2>Their cards</h2>
-
-  ${instructors.length ? `<p class="muted">${instructors.length} with the
-    instructor role here; ${shown} on the public website.</p>` : ''}
-
-  ${instructors.length ? instructors.map(card).join('')
-    : `<div class="note">Nobody here holds the instructor role. The website
-        follows the roll, so give somebody that role on the
-        <a href="/o/${esc(org.slug)}/roster">roll</a> first.</div>`}` });
+  ${instructors.length ? `<p class="muted">${instructors.length} with the instructor role here; ${shown} on the public website.</p>` : ''}
+  <p class="hint">A card shows their photograph, grade, the few words they wrote about themselves and their current checks, all taken
+    from their own profile. To be shown on the website a person needs: to be 18 or over, a current first aid certificate, police
+    vetting and child protection training (whatever this federation requires of instructors), and a write-up. Anyone who is not
+    ready yet is made an instructor and the screen tells you what is missing.</p>` });
 };
 
 /**

@@ -1943,7 +1943,7 @@ export const instructors = {
       and ends is null and status='active' and person_id = any($2::uuid[])`, [orgId, ids])).map((r) => r.person_id));
     const out = { changed: 0, shown: 0, skipped: [] };
     for (const id of ids) {
-      const who = await one(`select first_name || ' ' || last_name as name, date_of_birth from person where id=$1`, [id]);
+      const who = await one(`select first_name || ' ' || last_name as name, date_of_birth, nullif(about, '') as about from person where id=$1`, [id]);
       if (!who || !onRoll.has(id)) { out.skipped.push({ name: who?.name ?? 'Someone', reason: 'not on this dojo\'s roll' }); continue; }
       if (mode === 'off') {
         if ((await instructorRole.set(actor, id, false)).changed) out.changed += 1;
@@ -1955,10 +1955,20 @@ export const instructors = {
       const why = reasonNotToPublish({ person: { dateOfBirth: who.date_of_birth }, isInstructor: true,
         on: new Date().toISOString().slice(0, 10), settings: org?.settings ?? {} });
       if (why) { out.skipped.push({ name: who.name, reason: 'an instructor, but not shown on the website: ' + (/under/.test(why) ? 'under 18' : 'no date of birth recorded') }); continue; }
+
+      // Shown only when they are cleared to teach (every check this federation requires of instructors is
+      // current) and have written their few words. Anything missing is named, not just refused.
+      const required = await q(`select q.id, q.label ${CATALOGUE_FROM} and 'instruct' = any(q.required_for) order by q.label`, [orgId]);
+      const awards = await q(`${AWARD_SELECT} where qa.person_id = $1`, [id]);
+      const c = clearance(required, awards, await qualToday(orgId));
+      const missing = c.barred.map((b) => (b.state === 'expired' ? `${b.label} (expired)` : b.label));
+      if (!who.about) missing.push('a write-up about themselves');
+      if (missing.length) { out.skipped.push({ name: who.name, reason: 'an instructor, not shown yet. Still needs ' + missing.join(', ') }); continue; }
+
       const cur = await one(`select bio, teaches, sort_order, started_year, show_checks, published from instructor_profile
         where organisation_id=$1 and person_id=$2`, [orgId, id]);
       await this.save(actor, orgId, id, { bio: cur?.bio ?? { blocks: [] }, teaches: cur?.teaches ?? null, published: true,
-        sortOrder: cur?.sort_order ?? 0, startedYear: cur?.started_year ?? null, showChecks: !!cur?.show_checks });
+        sortOrder: cur?.sort_order ?? 0, startedYear: cur?.started_year ?? null, showChecks: true });
       if (!cur?.published) out.shown += 1;
     }
     return out;

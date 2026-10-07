@@ -25,13 +25,16 @@ age (juniors under 18, seniors 18 and over). Tick the people who teach, or press
 - **Make instructors only**: gives the role without showing them.
 - **Take off as instructors**: ends the role today (history is kept) and takes them off the website.
 
-Under-18s and people with no date of birth get the role but are never shown; the result names each of them and why.
-People on another dojo's roll are refused by name. Who can do it: an owner or administrator of the dojo, or anyone above
-(region, federation). A registrar or the instructor themselves cannot, because appearing on a public page is the dojo's
-decision as well as the person's.
+**Who is actually shown.** "Show on the website" only shows people who are ready: 18 or over, every check the federation
+requires of instructors current (for MOKNZ: first aid, police vetting, child protection; set under Compliance), and a
+write-up (below). Everyone else still becomes an instructor, but is held back, and the screen names each person and
+exactly what is missing ("Still needs First aid certificate, a write-up about themselves"). Once they have it, tick them
+and press the button again. Their current checks are listed on the card automatically. People on another dojo's roll are
+refused by name. Who can do it: an owner or administrator of the dojo, or anyone above (region, federation). A registrar
+or the instructor themselves cannot.
 
-Everyone's profile also has the single-person tick, and the cards below the picker are for the optional extras (what
-they teach, training since, which checks to show).
+There is no per-person form any more: the card is built from the person's own profile (photograph, grade, write-up,
+checks). The older single-person tick on a profile still works.
 
 ## The 280-character write-up
 Every person has a **few words about yourself** box on their own *My details* page, up to 280 characters. It is the

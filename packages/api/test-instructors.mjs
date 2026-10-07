@@ -91,12 +91,15 @@ console.log('\nNOBODY UNDER EIGHTEEN GOES ON A PUBLIC WEBSITE');
     insert into affiliation (person_id, organisation_id, role, status, starts)
     values ($1,$2,'instructor','active', current_date)`, [teen.id, wh.id]);
 
-  const screen = await req('/o/whanganui/instructors');
-  ok('they are listed as an instructor', screen.html.includes('Mere'));
-  ok('with a note explaining why they cannot be published',
-    screen.html.includes('Under 18'));
-  ok('and no checkbox offering to do it anyway',
-    !new RegExp(`${teen.id}[\\s\\S]{0,2000}name="published"`).test(screen.html));
+  await pool.query(`
+    insert into affiliation (person_id, organisation_id, role, status, starts)
+    values ($1,$2,'member','active', current_date)`, [teen.id, wh.id]);
+
+  const screen = await req('/o/whanganui/instructors?grade=all&band=junior');
+  ok('they are on the roll picker, marked as a junior', screen.html.includes('Mere') && /junior/.test(screen.html));
+  const picked = await req('/o/whanganui/instructors/bulk', { method: 'POST', form: { action: 'show', [`pick_${teen.id}`]: 'on' } });
+  ok('showing them on the website is declined, saying why', /Mere/.test(decodeURIComponent(picked.location)) && /under 18/.test(decodeURIComponent(picked.location)));
+  ok('and they are not on the website', !(await one(`select 1 x from instructor_profile where person_id=$1 and published`, [teen.id])));
 
   // The checkbox being absent is not the protection. Posting it directly is.
   const forced = await req(`/o/whanganui/instructors/${teen.id}`,
