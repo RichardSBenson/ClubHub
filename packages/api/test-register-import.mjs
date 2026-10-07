@@ -41,7 +41,8 @@ const federation = await one('select * from organisation where parent_id is null
 const DOJOS = `slug,name,venue_name,address_line,suburb,city,postcode,latitude,longitude,phone,email,directions,blurb,who_trains,instructor_name,instructor_grade,publish
 wellington,Wellington,Toitu Hub,49 Kilbirnie Crescent,Kilbirnie,Wellington,6022,,,+64 27 564 7822,kenworthydojo@gmail.com,,,,,,yes
 hornby,Hornby,Webster Dojo,442 Main South Road,Hornby,Christchurch,8042,,,+64 21 031 1606,sensei@example.test,,,,,,yes
-taumarunui,Taumarunui,,4 Marae Street,,Taumarunui,3920,,,+64 21 0297 7149,v@example.test,,,,,,yes`;
+taumarunui,Taumarunui,,4 Marae Street,,Taumarunui,3920,,,+64 21 0297 7149,v@example.test,,,,,,yes
+carterton,Carterton,,,,Carterton,,,,+64 6 000 0000,c@example.test,,,,,,yes`;
 const SESSIONS = `slug,label,weekday,starts,ends,min_age,max_age
 wellington,Juniors and Seniors,Monday,18:30,20:00,,
 wellington,Juniors and Seniors,Wednesday,18:30,20:00,,
@@ -73,7 +74,7 @@ console.log('\nPREVIEW SAVES NOTHING');
   ok('a preview says it is a preview', prev.status === 200 && /Nothing is saved yet/.test(prev.html), String(prev.status));
   ok('it offers to save', /Save these changes/.test(prev.html));
   ok('it says a dojo would be added', /Hornby would be added/.test(prev.html));
-  ok('it says what would be held back, and why', /Taumarunui needs venue/.test(prev.html));
+  ok('it says what would be held back, and why', /Carterton needs address/.test(prev.html));
   const after = await state();
   ok('nothing at all changed', JSON.stringify(before) === JSON.stringify(after), `${JSON.stringify(before)} ${JSON.stringify(after)}`);
 }
@@ -98,7 +99,9 @@ console.log('\nCONFIRMING SAVES IT');
   const hornby = await one(`select o.parent_id, o.type, p.published from organisation o join dojo_profile p on p.organisation_id = o.id where o.slug = 'hornby'`);
   ok('Hornby is a new dojo under the federation', hornby?.type === 'club' && hornby.parent_id === federation.id && hornby.published === true, JSON.stringify(hornby));
   const tau = await one(`select p.published, p.venue_name from organisation o join dojo_profile p on p.organisation_id = o.id where o.slug = 'taumarunui'`);
-  ok('Taumarunui is held back, with no venue invented', tau.published === false && tau.venue_name === null, JSON.stringify(tau));
+  ok('Taumarunui publishes on its address, with no venue name invented', tau.published === true && tau.venue_name === null, JSON.stringify(tau));
+  const cart = await one(`select p.published from organisation o join dojo_profile p on p.organisation_id = o.id where o.slug = 'carterton'`);
+  ok('Carterton has no address, so it is held back', cart.published === false, JSON.stringify(cart));
   const times = await one(`select count(*)::int n from training_session s join organisation o on o.id = s.organisation_id where o.slug = 'wellington'`);
   ok('class times are in', times.n === 2, String(times.n));
   const mike = await pool.query(`select o.slug, a.role from person p join affiliation a on a.person_id = p.id join organisation o on o.id = a.organisation_id where p.last_name = 'Kenworthy' and p.first_name = 'Mike' order by o.slug, a.role`);

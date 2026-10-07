@@ -492,7 +492,7 @@ export function dojoPage({ dojo, federation, events, origin, fonts, nav,
 
     facts: () => `
 <div class="facts"><div class="wrap">
-  <div><b>WHERE</b><p>${esc(dojo.venue_name ?? 'Venue to confirm')}
+  <div><b>WHERE</b><p>${esc(dojo.venue_name ?? dojo.address_line ?? 'Venue to confirm')}
     <small>${esc([dojo.suburb, dojo.city, dojo.postcode].filter(Boolean).join(', ') || 'Address to confirm')}</small></p></div>
   <div><b>WHEN</b><p>${esc(daysLine)}<small>${
     groups.map((g) => `${esc(g.label)} ${time(g.starts)}`).slice(0,2).join(' · ') || 'Times to confirm'}</small></p></div>
@@ -569,7 +569,7 @@ export function dojoPage({ dojo, federation, events, origin, fonts, nav,
     title: `${capitalise(artOf(federation))} in ${town} — ${federation.name}`,
     description: `${capitalise(artOf(federation))} classes in ${town} for adults and ` +
       `children.${dojo.first_class_free ? ' First class free.' : ''}` +
-      (groups.length ? ` ${daysLine} at ${dojo.venue_name}.` : ''),
+      (groups.length ? ` ${daysLine} at ${dojo.venue_name ?? dojo.address_line ?? town}.` : ''),
     canonical: `${origin}${at(`/${dojo.slug}`)}`,
     jsonLd: [dojoJsonLd(dojo, federation, origin, base)],
     image: dojo.hero_url ?? null,

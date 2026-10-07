@@ -17,8 +17,7 @@ Re-runnable. Importing twice changes nothing extra.
 Setting `publish=yes` is a request, not an instruction. A dojo page goes live
 only when a visitor could actually turn up:
 
-- a venue
-- an address or at least a suburb
+- an address, or at least a suburb (a venue's own name is optional)
 - training times
 - a phone number or an email
 

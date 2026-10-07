@@ -13,7 +13,7 @@ what saving does. Owners and administrators of the federation only; a club canno
 
 Rules, both ways:
 - Blank means unknown and stays NULL. Nothing is invented to make a page look finished.
-- A dojo is published only if `publish` is `yes` **and** it has a venue, an address or suburb, class times, and a
+- A dojo is published only if `publish` is `yes` **and** it has an address (or at least a suburb), class times, and a
   phone or email. Otherwise it is held back and the screen names what is missing.
 - A dojo the register does not know is added beneath the federation. `country` and `timezone` columns are for dojo
   outside the federation's own country (Japan: `JP`, `Asia/Tokyo`).

@@ -43,7 +43,7 @@ export const DAYS = ['sunday','monday','tuesday','wednesday','thursday','friday'
 /** Enough for a stranger to turn up: where, when, and who to ask. Returns what is missing. */
 export function publishable(row, sessionCount) {
   const missing = [];
-  if (!nul(row.venue_name)) missing.push('venue');
+  // Where to turn up is the street address (or at least the suburb); a venue's own name is a nicety, not a need.
   if (!nul(row.address_line) && !nul(row.suburb)) missing.push('address');
   if (!sessionCount) missing.push('training times');
   if (!nul(row.phone) && !nul(row.email)) missing.push('phone or email');
