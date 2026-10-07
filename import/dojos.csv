@@ -1,5 +1,5 @@
 slug,name,venue_name,address_line,suburb,city,postcode,latitude,longitude,phone,email,directions,blurb,who_trains,instructor_name,instructor_grade,publish,country,timezone
-whanganui,Whanganui,Whanganui Kenworthy Kyokushin Dojo,151 St Hill Street,,Whanganui,4500,,,+64 21 345 718,peter@ethan.co.nz,,,,Russell Dilloway,5th dan,yes
+whanganui,Whanganui,,151 St Hill Street,,Whanganui,4500,,,+64 21 345 718,peter@ethan.co.nz,,,,Russell Dilloway,5th dan,yes
 far-north,Far North,,,,Kaitaia,,,,,,,,,,,no
 rawene,Rawene,Rawene Town Hall,9 Parnell Street,,Rawene,,,,+64 27 362 8089,rawenekyokushinkarate@gmail.com,,,,Richard Hood,3rd dan,yes
 auckland,Auckland,Kelston Girls College,1 Archibald Road,Kelston,Auckland,,,,+64 21 0868 9169,misha.sharma20@icloud.com,,,,Misha Sharma,1st dan,yes
@@ -12,8 +12,7 @@ taumarunui,Taumarunui,,4 Marae Street,,Taumarunui,3920,,,+64 21 0297 7149,vtnutt
 napier,Napier,,,,Napier,,,,,,,,,,,no
 carterton,Carterton,,,,Carterton,,,,,,,,,,,no
 wellington,Wellington,Toitu Hub,49 Kilbirnie Crescent,Kilbirnie,Wellington,6022,,,+64 27 564 7822,kenworthydojo@gmail.com,,,,Michael Kenworthy,7th dan,yes
-christchurch,Christchurch,,,,Christchurch,,,,,,,,,,,no
-hoon-hay,Hoon Hay,Kaikan Dojo,89A Sparks Road,Hoon Hay,Christchurch,8025,,,+64 27 476 2243,robert.engelken@gmail.com,,,,Rob Engelken,4th dan,yes
+christchurch,Christchurch,Kaikan Dojo,89A Sparks Road,Hoon Hay,Christchurch,8025,,,+64 27 476 2243,robert.engelken@gmail.com,,,,Rob Engelken,4th dan,yes
 hornby,Hornby,Webster Dojo,442 Main South Road,Hornby,Christchurch,8042,,,+64 21 031 1606,sensei@websterdojo.co.nz,,,,Mark Webster,4th dan,yes
 dunedin,Dunedin,Centre City Martial Arts,121 Crawford Street,,Dunedin,9016,,,+64 21 472 778,centrecitymartialarts@hotmail.com,,,,Graeme Gavegan,7th dan,yes
 waikouaiti,Waikouaiti,Waikouaiti Church Hall,Kildare Street,,Waikouaiti,9510,,,+64 27 283 5043,noah.heath@slingshot.co.nz,,,,Noah Heath,4th dan,yes
