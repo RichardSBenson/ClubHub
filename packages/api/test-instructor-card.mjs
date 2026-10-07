@@ -139,7 +139,7 @@ console.log('\nWHAT THE WEBSITE SAYS');
 let year = new Date().getFullYear() - 25;
 {
   let r = await req('/o/whanganui/instructors');
-  ok('the instructors screen is the roll picker, not a form per person', /Choose your instructors/.test(r.html) && !/name="startedYear"/.test(r.html));
+  ok('there is no per-person card form: the roll is where instructors are chosen', r.status === 302 && /roster\?show=instructors/.test(r.location));
   const form = { teaches: 'Juniors, Tuesday and Thursday', bio: 'Hana has taught children for twenty years.\n\nShe grades regularly.', sortOrder: '0', startedYear: String(year), published: 'on', showChecks: 'on' };
   r = await req(`/o/whanganui/instructors/${sensei.id}`, { method: 'POST', form: { ...form, startedYear: '1850' } });
   ok('a silly year is refused', /error=/.test(r.location) && /year/.test(decodeURIComponent(r.location)));

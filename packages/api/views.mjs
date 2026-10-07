@@ -423,36 +423,89 @@ export const dashboard = ({ me, csrf, orgs, parents = [], groups = [] }) => {
   </div>`).join('')}</div>`).join('')}` });
 };
 
-export const roster = ({ me, csrf, org, roster, canRegister = false, canManage = false,
-                        done }) => page({
+export const roster = ({ me, csrf, org, roster, total = null, canRegister = false, canManage = false,
+                        filter = {}, ladder = [], done, error, rebuild }) => {
+  const here = `/o/${esc(org.slug)}/roster`;
+  const withDojo = org.type !== 'club';
+  const q = (extra = {}) => new URLSearchParams(Object.entries({ grade: filter.grade !== 'all' ? filter.grade : '', band: filter.band, show: filter.show, ...extra })
+    .filter(([, v]) => v)).toString();
+  const filtered = filter.grade !== 'all' && filter.grade || filter.band || filter.show;
+  const nowCell = (p) => {
+    if (!p.isInstructor) return '';
+    const i = p.instructor;
+    if (!canManage || !i) return '<span class="tag">Instructor</span>';
+    if (i.published) return '<span class="tag ok">Instructor · on the website</span>';
+    const why = i.never ? `never shown: ${i.never}` : i.missing.length ? `needs ${i.missing.join(', ')}` : 'ready to show';
+    return `<span class="tag wait">Instructor · not shown</span> <span class="muted">${esc(why)}</span>`;
+  };
+  return page({
   title: `${org.name} roster`, me, csrf, body: `
   <h1>${esc(org.name)}</h1>
-  <p class="sub">${roster.length} on the roll ·
+  <p class="sub">${total ?? roster.length} on the roll ·
     <a href="/o/${esc(org.slug)}/grading">Run a grading</a> ·
     <a href="/o/${esc(org.slug)}/history">History</a> ·
     <a href="/o/${esc(org.slug)}/events">Events</a> ·
-    ${canManage ? `<a href="/o/${esc(org.slug)}/instructors">Instructors</a> ·` : ''}
     <a href="/o/${esc(org.slug)}/pages">Website</a></p>
 
   ${done ? `<div class="good">${esc(done)}</div>` : ''}
-  ${canRegister || canManage ? `<p class="actions" style="margin:0 0 20px">
-    ${canRegister ? `<a class="btn" href="/o/${esc(org.slug)}/members/new">Add someone</a>
-    <a class="btn quiet" href="/o/${esc(org.slug)}/members/import">Import a spreadsheet</a>` : ''}
-    ${canManage ? `<a class="btn quiet" href="/o/${esc(org.slug)}/instructors">Choose instructors</a>` : ''}
+  ${error ? `<div class="bad">${esc(error)}</div>` : ''}
+  ${rebuild ? `<div class="note">${esc(rebuild)}</div>` : ''}
+  ${canRegister ? `<p class="actions" style="margin:0 0 20px">
+    <a class="btn" href="/o/${esc(org.slug)}/members/new">Add someone</a>
+    <a class="btn quiet" href="/o/${esc(org.slug)}/members/import">Import a spreadsheet</a>
   </p>` : ''}
-  ${roster.length ? `<table>
-    <thead><tr><th>Name</th><th>Grade</th><th class="hide-sm">Age</th>
-      <th class="hide-sm">Role</th><th>Paid until</th></tr></thead>
+
+  <form method="get" action="${here}" class="card" style="margin:0 0 16px">
+    <div class="row">
+      <div><label for="f-grade">Grade</label><select id="f-grade" name="grade">
+        <option value="all"${filter.grade === 'all' || !filter.grade ? ' selected' : ''}>Every grade</option>
+        <option value="dan"${filter.grade === 'dan' ? ' selected' : ''}>All black belts</option>
+        ${[...ladder].sort((a, b) => b.rank_order - a.rank_order).map((g) => `<option value="${esc(g.id)}"${filter.grade === g.id ? ' selected' : ''}>${esc(g.label)}</option>`).join('')}
+      </select></div>
+      <div><label for="f-band">Age</label><select id="f-band" name="band">
+        <option value=""${!filter.band ? ' selected' : ''}>Juniors and seniors</option>
+        <option value="senior"${filter.band === 'senior' ? ' selected' : ''}>Seniors (18 and over)</option>
+        <option value="junior"${filter.band === 'junior' ? ' selected' : ''}>Juniors (under 18)</option>
+      </select></div>
+      <div><label for="f-show">Show</label><select id="f-show" name="show">
+        <option value=""${!filter.show ? ' selected' : ''}>Everyone</option>
+        <option value="instructors"${filter.show === 'instructors' ? ' selected' : ''}>Instructors only</option>
+      </select></div>
+    </div>
+    <p style="margin-bottom:0"><button class="btn quiet" type="submit">Filter</button>
+      ${filtered ? `<a href="${here}">Clear</a> <span class="muted">${roster.length} of ${total}</span>` : ''}</p>
+  </form>
+
+  ${roster.length ? `
+  ${canManage ? `<form method="post" action="/o/${esc(org.slug)}/instructors/bulk">
+    <input type="hidden" name="_csrf" value="${esc(csrf ?? '')}">
+    <input type="hidden" name="grade" value="${esc(filter.grade ?? 'all')}"><input type="hidden" name="band" value="${esc(filter.band ?? '')}"><input type="hidden" name="show" value="${esc(filter.show ?? '')}">
+    <p><input type="checkbox" id="pickall" hidden> <label for="pickall" hidden style="display:inline">Select all ${roster.length} shown</label>
+      <a id="pickall-link" href="${here}?${esc(q({ all: '1' }))}">Select everyone shown (${roster.length})</a></p>` : ''}
+  <table>
+    <thead><tr>${canManage ? '<th></th>' : ''}<th>Name</th><th>Grade</th><th class="hide-sm">Age</th>
+      ${withDojo ? '<th class="hide-sm">Dojo</th>' : ''}<th>${canManage ? 'Instructor' : 'Role'}</th><th>Paid until</th></tr></thead>
     <tbody>${roster.map((p) => `<tr>
+      ${canManage ? `<td><input class="pick" type="checkbox" name="pick_${esc(p.id)}" aria-label="Choose ${esc(p.first_name)} ${esc(p.last_name)}"${filter.all ? ' checked' : ''}></td>` : ''}
       <td><a href="/p/${p.id}">${esc(p.first_name)} ${esc(p.last_name)}</a>
-        <span class="muted">${esc(p.display_number ?? '')}</span></td>
+        <span class="muted">${esc(p.display_number ?? '')}</span>${p.age != null && p.age < 18 ? ' <span class="tag">junior</span>' : ''}</td>
       <td>${p.grade ? `<span class="tag ${p.is_dan ? 'dan' : 'ok'}">${esc(p.grade)}</span>`
         : '<span class="tag no">ungraded</span>'}</td>
       <td class="hide-sm">${p.age ?? ''}</td>
-      <td class="hide-sm">${esc(p.role)}</td>
+      ${withDojo ? `<td class="hide-sm">${esc(p.dojo ?? '')}</td>` : ''}
+      <td>${canManage ? nowCell(p) : (p.isInstructor ? '<span class="tag">Instructor</span>' : '<span class="hide-sm">' + esc(p.role) + '</span>')}</td>
       <td>${p.paid_until ? String(new Date(p.paid_until).toISOString().slice(0,10)) : '—'}</td>
-    </tr>`).join('')}</tbody></table>`
-    : '<div class="note">Nobody on the roll yet.</div>'}` });
+    </tr>`).join('')}</tbody></table>
+  ${canManage ? `<p style="margin-top:12px"><button class="btn" type="submit" name="action" value="show">Make instructors and show on the website</button>
+      <button class="btn quiet" type="submit" name="action" value="role">Make instructors only</button>
+      <button class="btn quiet" type="submit" name="action" value="off">Take off as instructors</button></p>
+    <p class="hint">Tick the people who teach. They are shown on their dojo's website once they are 18 or over, their first aid, police vetting and child
+      protection are current, and they have written a few words about themselves (on <em>My details</em>); anyone not ready is made an instructor and
+      the screen says what is missing. Showing puts their name, grade and photograph on a page anybody can read, so only do it for people who have agreed.</p>
+  </form>
+  <script src="/vendor/select-all.js" defer></script>` : ''}`
+    : `<div class="note">${filtered ? 'Nobody matches those filters.' : 'Nobody on the roll yet.'}</div>`}` });
+};
 
 export const person = ({ me, csrf, person, history, affiliations, eligibility,
                         titles = [], changes = [], guardians = null, training = null,
@@ -487,8 +540,8 @@ export const person = ({ me, csrf, person, history, affiliations, eligibility,
 
   ${instructorSite ? `<div class="card" style="margin:12px 0"><h3 style="margin-top:0">On the ${esc(instructorSite.name)} website</h3>
     <p>${instructorSite.published ? '<span class="tag ok">Shown</span> on the dojo page and the Instructors page.' : '<span class="tag wait">Not shown yet</span> The dojo page says "Introductions coming soon".'}</p>
-    ${canManage ? `<p><a class="btn" href="/o/${esc(instructorSite.slug)}/instructors">${instructorSite.published ? 'Open Instructors' : 'Show them on the website'}</a></p>
-    <p class="hint">On that screen, tick them and press <strong>Make instructors and show on the website</strong>. They are shown once they have a write-up and their first aid, police vetting and child protection are current.</p>`
+    ${canManage ? `<p><a class="btn" href="/o/${esc(instructorSite.slug)}/instructors">${instructorSite.published ? 'See instructors on the roll' : 'Show them on the website'}</a></p>
+    <p class="hint">On the roll, tick them and press <strong>Make instructors and show on the website</strong>. They are shown once they have a write-up and their first aid, police vetting and child protection are current.</p>`
       : '<p class="hint">An owner or administrator of the dojo (or the federation) switches this on, under Instructors.</p>'}</div>` : ''}
 
   ${recognisable.length ? `<form method="post" action="/p/${esc(person.id)}/recognise-grade" class="card" style="margin:12px 0">
@@ -2251,94 +2304,6 @@ export const menuEditor = ({ me, csrf, org, items = [], destinations = [],
 
   <p class="muted">Only pages this site has are offered. Write a page first
     and it appears in this list.</p>` });
-};
-
-/**
- * Who is on the public site, and who could be.
- *
- * Everybody with the instructor role is listed, including those with no
- * profile, because half this screen's job is showing an administrator who is
- * not on the website — a federation whose site lists two of its nine
- * instructors usually has not decided that, it has just not got round to it.
- *
- * The wording is deliberate. Publishing somebody is phrased as a thing done to
- * a person, because it is: their name, their photograph and their grade on a
- * page anybody can read, indefinitely.
- */
-export const instructorList = ({ me, csrf, org, instructors = [], roll = [], ladder = [], filter = {},
-                                 done, error, rebuild }) => {
-  const age = (dob) => {
-    if (!dob) return null;
-    const d = new Date(dob), now = new Date();
-    let y = now.getFullYear() - d.getFullYear();
-    const m = now.getMonth() - d.getMonth();
-    if (m < 0 || (m === 0 && now.getDate() < d.getDate())) y -= 1;
-    return y;
-  };
-
-  const shown = instructors.filter((i) => i.published).length;
-  const here = `/o/${esc(org.slug)}/instructors`;
-  const q = (extra = {}) => new URLSearchParams(Object.entries({ grade: filter.grade, band: filter.band, ...extra })
-    .filter(([, v]) => v)).toString();
-  const picker = `
-  <h2>Choose your instructors</h2>
-  <p class="muted">Everyone on the roll, highest grade first. Tick the people who teach, then choose what to do. Their
-    photograph and a short write-up (they add it on their own <em>My details</em> page, 280 characters) show on the card.</p>
-  <form method="get" action="${here}" class="card" style="margin:12px 0">
-    <div class="row">
-      <div><label for="f-grade">Grade</label><select id="f-grade" name="grade">
-        <option value="dan"${filter.grade === 'dan' || !filter.grade ? ' selected' : ''}>All black belts</option>
-        <option value="all"${filter.grade === 'all' ? ' selected' : ''}>Every grade</option>
-        ${[...ladder].sort((a, b) => b.rank_order - a.rank_order).map((g) => `<option value="${esc(g.id)}"${filter.grade === g.id ? ' selected' : ''}>${esc(g.label)}</option>`).join('')}
-      </select></div>
-      <div><label for="f-band">Age</label><select id="f-band" name="band">
-        <option value=""${!filter.band ? ' selected' : ''}>Juniors and seniors</option>
-        <option value="senior"${filter.band === 'senior' ? ' selected' : ''}>Seniors (18 and over)</option>
-        <option value="junior"${filter.band === 'junior' ? ' selected' : ''}>Juniors (under 18)</option>
-      </select></div>
-    </div>
-    <p><button class="btn quiet" type="submit">Show</button></p>
-  </form>
-  ${roll.length ? `
-  <form method="post" action="${here}/bulk">
-    <input type="hidden" name="_csrf" value="${esc(csrf ?? '')}">
-    <input type="hidden" name="grade" value="${esc(filter.grade ?? '')}"><input type="hidden" name="band" value="${esc(filter.band ?? '')}">
-    <p><input type="checkbox" id="pickall" hidden> <label for="pickall" hidden style="display:inline">Select all ${roll.length} shown</label>
-      <a id="pickall-link" href="${here}?${esc(q({ all: '1' }))}">Select everyone shown (${roll.length})</a></p>
-    <table><thead><tr><th></th><th>Name</th><th>Grade</th><th>Now</th></tr></thead><tbody>
-    ${roll.map((r) => `<tr>
-      <td><input class="pick" type="checkbox" name="pick_${esc(r.person_id)}" aria-label="Choose ${esc(r.first_name)} ${esc(r.last_name)}"${filter.all ? ' checked' : ''}></td>
-      <td><a href="/p/${esc(r.person_id)}">${esc(r.first_name)} ${esc(r.last_name)}</a>${r.age != null && r.age < 18 ? ' <span class="tag">junior</span>' : ''}</td>
-      <td>${r.grade ? esc(r.grade) : '<span class="muted">ungraded</span>'}</td>
-      <td>${r.published ? '<span class="tag ok">On the website</span>' : r.is_instructor ? '<span class="tag wait">Instructor, not shown</span>' : '<span class="muted">—</span>'}
-        ${r.about ? '' : r.is_instructor ? ' <span class="muted">no write-up yet</span>' : ''}</td></tr>`).join('')}
-    </tbody></table>
-    <p style="margin-top:12px"><button class="btn" type="submit" name="action" value="show">Make instructors and show on the website</button>
-      <button class="btn quiet" type="submit" name="action" value="role">Make instructors only</button>
-      <button class="btn quiet" type="submit" name="action" value="off">Take off as instructors</button></p>
-    <p class="hint">Showing puts a person's name, grade, photograph and write-up on a page anybody can read, so only do it for
-      people who have agreed. Under-18s are never shown on the website.</p>
-  </form>
-  <script src="/vendor/select-all.js" defer></script>`
-    : '<div class="note">Nobody on the roll matches. Try "Every grade".</div>'}
-`;
-
-  return page({ title: `Instructors — ${org.name}`, me, csrf, body: `
-  <h1>Instructors</h1>
-  <p class="sub">${esc(org.name)} ·
-    <a href="/o/${esc(org.slug)}/pages">Website</a> ·
-    <a href="/o/${esc(org.slug)}/roster">Back to the roll</a></p>
-
-  ${done ? `<div class="good">${esc(done)}</div>` : ''}
-  ${error ? `<div class="bad">${esc(error)}</div>` : ''}
-  ${rebuild ? `<div class="note">${esc(rebuild)}</div>` : ''}
-
-  ${picker}
-  ${instructors.length ? `<p class="muted">${instructors.length} with the instructor role here; ${shown} on the public website.</p>` : ''}
-  <p class="hint">A card shows their photograph, grade, the few words they wrote about themselves and their current checks, all taken
-    from their own profile. To be shown on the website a person needs: to be 18 or over, a current first aid certificate, police
-    vetting and child protection training (whatever this federation requires of instructors), and a write-up. Anyone who is not
-    ready yet is made an instructor and the screen tells you what is missing.</p>` });
 };
 
 /**

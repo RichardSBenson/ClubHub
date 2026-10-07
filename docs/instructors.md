@@ -16,14 +16,16 @@ Not a registrar, and not the person themselves. Ticking is recorded with a date;
 - **Shown on the website**: a separate consent tick on the Instructors screen. Giving somebody the job is not
   agreement to a public page. Under-18s cannot be listed.
 
-## Choosing instructors: one screen
-**Instructors** in the dojo's admin menu opens with **Choose your instructors**: the dojo's roll, highest grade first.
-It starts on *all black belts* (the usual instructors) and can be filtered by grade (one grade, or every grade) and by
-age (juniors under 18, seniors 18 and over). Tick the people who teach, or press *Select everyone shown*, then:
+## Choosing instructors: from the roll
+There is no separate instructors list to keep. Instructors are chosen on the **roll** itself (`/o/:slug/roster`), at any level:
 
-- **Make instructors and show on the website**: gives the instructor role and puts their card on the dojo's page.
-- **Make instructors only**: gives the role without showing them.
-- **Take off as instructors**: ends the role today (history is kept) and takes them off the website.
+- **Filter** by grade (every grade, all black belts, or one grade), age (juniors under 18 / seniors) and *Instructors only*.
+  Highest grade first. At a region or the federation the roll covers every dojo beneath it and shows the dojo.
+- **Tick** people (or *Select everyone shown*, which works without scripts), then press one of:
+  **Make instructors and show on the website**, **Make instructors only**, or **Take off as instructors**.
+  Each person is dealt with at their own dojo, so a region or the federation can do it for several dojos at once.
+- The **Instructor** column says who holds the role, who is on the website, and what is holding the others back.
+- The old `/instructors` address redirects to the roll filtered to instructors.
 
 **Who is actually shown.** "Show on the website" only shows people who are ready: 18 or over, every check the federation
 requires of instructors current (for MOKNZ: first aid, police vetting, child protection; set under Compliance), and a
@@ -33,7 +35,7 @@ and press the button again. Their current checks are listed on the card automati
 refused by name. Who can do it: an owner or administrator of the dojo, or anyone above (region, federation). A registrar
 or the instructor themselves cannot.
 
-There is no per-person form any more: the card is built from the person's own profile (photograph, grade, write-up,
+There is no per-person form: the card is built from the person's own profile (photograph, grade, write-up,
 checks). The older single-person tick on a profile still works.
 
 ## The 280-character write-up

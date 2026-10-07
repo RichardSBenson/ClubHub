@@ -327,13 +327,37 @@ get('/o/:slug/roster', async (ctx) => {
   ctx.requireActor();
   const org = await orgs.bySlug(ctx.params.slug);
   if (!org) throw new NotFound('Organisation');
-  const roster = await people.roster(ctx.me.accountId, org.id,
-    { subtree: org.type !== 'club' });
+  const q = ctx.url.searchParams;
+  const filter = { grade: q.get('grade') || 'all', band: ['junior', 'senior'].includes(q.get('band')) ? q.get('band') : '',
+                   show: q.get('show') === 'instructors' ? 'instructors' : '', all: q.get('all') === '1' };
+  const rows = await people.roster(ctx.me.accountId, org.id, { subtree: org.type !== 'club' });
+  // One line per person: the roster has a row per affiliation, and somebody who is a member and an instructor has two.
+  const byId = new Map();
+  for (const r of rows) {
+    const have = byId.get(r.id);
+    if (!have) byId.set(r.id, { ...r, isInstructor: r.role === 'instructor' });
+    else {
+      if (r.role === 'instructor') have.isInstructor = true;
+      if (r.role === 'member' && have.role !== 'member') Object.assign(have, { role: r.role, paid_until: r.paid_until, status: r.status, dojo: r.dojo, dojo_slug: r.dojo_slug });
+    }
+  }
+  const canManage = await mayPublishAt(ctx, org.id).catch(() => false);
+  const all = [...byId.values()];
+  const states = await instructors.stateFor(all.filter((r) => r.isInstructor).map((r) => r.id));
+  const shown = all.filter((r) => {
+    if (filter.grade === 'dan' && !r.is_dan) return false;
+    if (filter.grade !== 'all' && filter.grade !== 'dan' && r.grade_id !== filter.grade) return false;
+    if (filter.band === 'junior' && !(r.age != null && r.age < 18)) return false;
+    if (filter.band === 'senior' && !(r.age == null || r.age >= 18)) return false;
+    if (filter.show === 'instructors' && !r.isInstructor) return false;
+    return true;
+  }).map((r) => ({ ...r, instructor: states.get(r.id) ?? null }));
+  const ladderOwner = await orgs.ladderOwnerOf(org.id);
   return ctx.send(200, V.roster({
-    me: ctx.me, org, roster, csrf: ctx.csrf,
-    canRegister: await mayRegisterAt(ctx, org.id),
-    canManage: await mayPublishAt(ctx, org.id).catch(() => false),
-    done: ctx.url.searchParams.get('done'),
+    me: ctx.me, org, roster: shown, total: all.length, csrf: ctx.csrf,
+    canRegister: await mayRegisterAt(ctx, org.id), canManage, filter,
+    ladder: ladderOwner ? await rank.ladder(ladderOwner.id) : [],
+    done: q.get('done'), error: q.get('error'), rebuild: q.get('rebuild'),
   }));
 });
 
@@ -2614,29 +2638,20 @@ post('/o/:slug/club-pages/:clubId/decide', async (ctx) => {
 
 // ---- instructors -----------------------------------------------------------
 
+// The roll is where instructors are chosen; this address is kept so old links and menu entries still land.
 get('/o/:slug/instructors', async (ctx) => {
   const org = await organisationFor(ctx, { toWrite: true });
-  const q = ctx.url.searchParams;
-  const grade = q.get('grade') || 'dan', band = ['junior', 'senior'].includes(q.get('band')) ? q.get('band') : '';
-  return ctx.send(200, V.instructorList({
-    me: ctx.me, org, csrf: ctx.csrf,
-    instructors: await instructors.listFor(ctx.me.accountId, org.id),
-    roll: await instructors.rollFor(ctx.me.accountId, org.id, { grade, band }),
-    ladder: await rank.ladder((await orgs.ladderOwnerOf(org.id))?.id ?? org.id),
-    filter: { grade, band, all: q.get('all') === '1' },
-    done: ctx.url.searchParams.get('done'),
-    error: ctx.url.searchParams.get('error'),
-    rebuild: ctx.url.searchParams.get('rebuild'),
-  }));
+  return ctx.redirect(`/o/${org.slug}/roster?show=instructors`);
 });
 
 post('/o/:slug/instructors/bulk', async (ctx) => {
   const org = await organisationFor(ctx, { toWrite: true });
   const form = await ctx.form();
   const keep = new URLSearchParams();
-  if (form.grade) keep.set('grade', form.grade);
+  if (form.grade && form.grade !== 'all') keep.set('grade', form.grade);
   if (form.band) keep.set('band', form.band);
-  const back = `/o/${org.slug}/instructors`;
+  if (form.show) keep.set('show', form.show);
+  const back = `/o/${org.slug}/roster`;
   const go = (extra) => ctx.redirect(`${back}?${keep}${keep.size ? '&' : ''}${extra}`);
   const picked = Object.keys(form).filter((k) => k.startsWith('pick_')).map((k) => k.slice(5)).filter((id) => UUID_RE.test(id));
   if (!picked.length) return go('error=' + encodeURIComponent('Tick the people first.'));

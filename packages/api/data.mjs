@@ -184,7 +184,7 @@ export const people = {
              -- to place, and no under-16 was ever asked for a guardian.
              date_part('year', age(p.date_of_birth))::int as age,
              p.date_of_birth, p.gender,
-             cg.label as grade, cg.rank_order, cg.is_dan, cg.awarded_on as graded_on,
+             cg.label as grade, cg.grade_id, cg.rank_order, cg.is_dan, cg.awarded_on as graded_on,
              a.role, a.status, a.paid_until,
              o.name as dojo, o.slug as dojo_slug
              ${includePrivate ? `, pv.emergency_name, pv.emergency_phone` : ''}
@@ -1904,70 +1904,74 @@ export const news = {
 
 export const instructors = {
   /**
-   * The dojo's roll, highest grade first, for picking instructors. `grade` is 'dan' (black belts, the default),
-   * 'all' or one grade's id; `band` is 'junior' (under 18), 'senior' or ''.
+   * Why somebody cannot be shown on their dojo's website yet, or an empty list if they can. Shown only when
+   * they are 18 or over, every check the federation requires of instructors is current, and they have written
+   * their few words. `never` is set when the reason is one nothing can fix by waiting for paperwork (a minor).
    */
-  async rollFor(actor, orgId, { grade = 'dan', band = '' } = {}) {
-    await assertRole(actor, orgId, MANAGE);
-    const { rows } = await pool.query(`
-      select p.id as person_id, p.first_name, p.last_name, p.date_of_birth::text as date_of_birth,
-             p.photo_asset_id, nullif(p.about, '') as about,
-             cg.label as grade, cg.is_dan, cg.rank_order, cg.grade_id,
-             extract(year from age(current_date, p.date_of_birth))::int as age,
-             exists (select 1 from affiliation i where i.person_id = p.id and i.organisation_id = $1
-                     and i.role = 'instructor' and i.ends is null and i.status = 'active') as is_instructor,
-             coalesce(ip.published, false) as published
+  async readiness(dojoId, personId) {
+    const who = await one(`select date_of_birth::text as dob, nullif(about, '') as about from person where id=$1`, [personId]);
+    const org = await one('select settings from organisation where id=$1', [dojoId]);
+    const why = reasonNotToPublish({ person: { dateOfBirth: who?.dob }, isInstructor: true,
+      on: new Date().toISOString().slice(0, 10), settings: org?.settings ?? {} });
+    if (why) return { never: /under/.test(why) ? 'under 18' : 'no date of birth recorded', missing: [] };
+    const required = await q(`select q.id, q.label ${CATALOGUE_FROM} and 'instruct' = any(q.required_for) order by q.label`, [dojoId]);
+    const awards = await q(`${AWARD_SELECT} where qa.person_id = $1`, [personId]);
+    const c = clearance(required, awards, await qualToday(dojoId));
+    const missing = c.barred.map((b) => (b.state === 'expired' ? `${b.label} (expired)` : b.label));
+    if (!who?.about) missing.push('a write-up about themselves');
+    return { never: null, missing };
+  },
+
+  /** For the roll: who holds the instructor role, whether the website shows them, and what holds them back. */
+  async stateFor(personIds) {
+    const out = new Map();
+    if (!personIds.length) return out;
+    const rows = await q(`
+      select a.person_id, a.organisation_id as dojo_id, coalesce(ip.published, false) as published
       from affiliation a
-      join person p on p.id = a.person_id
-      left join person_current_grade cg on cg.person_id = p.id
-      left join instructor_profile ip on ip.person_id = p.id and ip.organisation_id = $1
-      where a.organisation_id = $1 and a.role = 'member' and a.ends is null and a.status = 'active'
-      order by cg.rank_order desc nulls last, p.last_name, p.first_name`, [orgId]);
-    return rows.filter((r) => {
-      if (grade === 'dan' && !r.is_dan) return false;
-      if (grade && grade !== 'dan' && grade !== 'all' && r.grade_id !== grade) return false;
-      if (band === 'junior' && !(r.age != null && r.age < 18)) return false;
-      if (band === 'senior' && !(r.age == null || r.age >= 18)) return false;
-      return true;
-    });
+      left join instructor_profile ip on ip.person_id = a.person_id and ip.organisation_id = a.organisation_id
+      where a.person_id = any($1::uuid[]) and a.role = 'instructor' and a.ends is null and a.status = 'active'`, [personIds]);
+    for (const r of rows) {
+      const ready = r.published ? { never: null, missing: [] } : await this.readiness(r.dojo_id, r.person_id);
+      out.set(r.person_id, { published: r.published, ...ready });
+    }
+    return out;
   },
 
   /**
    * Make several people instructors in one go, optionally showing them on the website, or take the role away.
-   * Nobody is skipped silently: the ones who could not be shown (under 18, no date of birth) come back with why.
+   * `scopeOrgId` is where the actor is working (a dojo, a region or the federation): people must be on the roll
+   * of a dojo beneath it, and each is dealt with at their own dojo. Nobody is skipped silently.
    */
-  async bulk(actor, orgId, personIds, mode) {
-    await assertRole(actor, orgId, MANAGE);
+  async bulk(actor, scopeOrgId, personIds, mode) {
+    await assertRole(actor, scopeOrgId, MANAGE);
     const ids = [...new Set(personIds)];
-    const onRoll = new Set((await q(`select person_id from affiliation where organisation_id=$1 and role='member'
-      and ends is null and status='active' and person_id = any($2::uuid[])`, [orgId, ids])).map((r) => r.person_id));
+    const homes = new Map((await q(`
+      select distinct on (a.person_id) a.person_id, a.organisation_id
+      from affiliation a join organisation o on o.id = a.organisation_id
+      join organisation scope on scope.id = $1 and o.path <@ scope.path
+      where a.role = 'member' and a.ends is null and a.status = 'active' and a.person_id = any($2::uuid[])
+      order by a.person_id, a.starts desc`, [scopeOrgId, ids])).map((r) => [r.person_id, r.organisation_id]));
     const out = { changed: 0, shown: 0, skipped: [] };
     for (const id of ids) {
-      const who = await one(`select first_name || ' ' || last_name as name, date_of_birth, nullif(about, '') as about from person where id=$1`, [id]);
-      if (!who || !onRoll.has(id)) { out.skipped.push({ name: who?.name ?? 'Someone', reason: 'not on this dojo\'s roll' }); continue; }
+      const who = await one(`select first_name || ' ' || last_name as name from person where id=$1`, [id]);
+      const dojo = homes.get(id);
+      if (!who || !dojo) { out.skipped.push({ name: who?.name ?? 'Someone', reason: 'not on the roll here' }); continue; }
       if (mode === 'off') {
         if ((await instructorRole.set(actor, id, false)).changed) out.changed += 1;
         continue;
       }
       if ((await instructorRole.set(actor, id, true)).changed) out.changed += 1;
       if (mode !== 'show') continue;
-      const org = await one('select settings from organisation where id=$1', [orgId]);
-      const why = reasonNotToPublish({ person: { dateOfBirth: who.date_of_birth }, isInstructor: true,
-        on: new Date().toISOString().slice(0, 10), settings: org?.settings ?? {} });
-      if (why) { out.skipped.push({ name: who.name, reason: 'an instructor, but not shown on the website: ' + (/under/.test(why) ? 'under 18' : 'no date of birth recorded') }); continue; }
 
-      // Shown only when they are cleared to teach (every check this federation requires of instructors is
-      // current) and have written their few words. Anything missing is named, not just refused.
-      const required = await q(`select q.id, q.label ${CATALOGUE_FROM} and 'instruct' = any(q.required_for) order by q.label`, [orgId]);
-      const awards = await q(`${AWARD_SELECT} where qa.person_id = $1`, [id]);
-      const c = clearance(required, awards, await qualToday(orgId));
-      const missing = c.barred.map((b) => (b.state === 'expired' ? `${b.label} (expired)` : b.label));
-      if (!who.about) missing.push('a write-up about themselves');
-      if (missing.length) { out.skipped.push({ name: who.name, reason: 'an instructor, not shown yet. Still needs ' + missing.join(', ') }); continue; }
+      // Shown only when ready; anything missing is named, not just refused.
+      const r = await this.readiness(dojo, id);
+      if (r.never) { out.skipped.push({ name: who.name, reason: `an instructor, but not shown on the website: ${r.never}` }); continue; }
+      if (r.missing.length) { out.skipped.push({ name: who.name, reason: 'an instructor, not shown yet. Still needs ' + r.missing.join(', ') }); continue; }
 
       const cur = await one(`select bio, teaches, sort_order, started_year, show_checks, published from instructor_profile
-        where organisation_id=$1 and person_id=$2`, [orgId, id]);
-      await this.save(actor, orgId, id, { bio: cur?.bio ?? { blocks: [] }, teaches: cur?.teaches ?? null, published: true,
+        where organisation_id=$1 and person_id=$2`, [dojo, id]);
+      await this.save(actor, dojo, id, { bio: cur?.bio ?? { blocks: [] }, teaches: cur?.teaches ?? null, published: true,
         sortOrder: cur?.sort_order ?? 0, startedYear: cur?.started_year ?? null, showChecks: true });
       if (!cur?.published) out.shown += 1;
     }
