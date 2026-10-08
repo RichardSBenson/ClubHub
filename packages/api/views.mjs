@@ -428,7 +428,7 @@ export const dashboard = ({ me, csrf, orgs, parents = [], groups = [], platformO
   </div>`).join('')}</div>`).join('')}` });
 };
 
-export const roster = ({ me, csrf, org, roster, total = null, canRegister = false, canManage = false,
+export const roster = ({ me, csrf, org, roster, total = null, canRegister = false, canManage = false, unlinked = [],
                         filter = {}, ladder = [], done, error, rebuild }) => {
   const here = `/o/${esc(org.slug)}/roster`;
   const withDojo = org.type !== 'club';
@@ -455,6 +455,9 @@ export const roster = ({ me, csrf, org, roster, total = null, canRegister = fals
   ${done ? `<div class="good">${esc(done)}</div>` : ''}
   ${error ? `<div class="bad">${esc(error)}</div>` : ''}
   ${rebuild ? `<div class="note">${esc(rebuild)}</div>` : ''}
+  ${unlinked.length ? `<div class="note"><strong>${unlinked.length} ${unlinked.length === 1 ? 'child has' : 'children have'} no parent or guardian linked.</strong>
+    A child should always sit under a parent. They are marked below; open each one and link a parent.
+    <a href="${here}?band=junior">Show the children</a></div>` : ''}
   ${canRegister ? `<p class="actions" style="margin:0 0 20px">
     <a class="btn" href="/o/${esc(org.slug)}/members/new">Add someone</a>
     <a class="btn quiet" href="/o/${esc(org.slug)}/members/import">Import a spreadsheet</a>
@@ -498,7 +501,7 @@ export const roster = ({ me, csrf, org, roster, total = null, canRegister = fals
         : '<span class="tag no">ungraded</span>'}</td>
       <td class="hide-sm">${p.age ?? ''}</td>
       ${withDojo ? `<td class="hide-sm">${esc(p.dojo ?? '')}</td>` : ''}
-      <td>${canManage ? nowCell(p) : (p.isInstructor ? '<span class="tag">Instructor</span>' : '<span class="hide-sm">' + esc(p.role) + '</span>')}</td>
+      <td>${p.noGuardian ? '<span class="tag wait">No parent linked</span> ' : ''}${canManage ? nowCell(p) : (p.isInstructor ? '<span class="tag">Instructor</span>' : '<span class="hide-sm">' + esc(p.role) + '</span>')}</td>
       <td>${p.paid_until ? String(new Date(p.paid_until).toISOString().slice(0,10)) : '—'}</td>
     </tr>`).join('')}</tbody></table>
   ${canManage ? `<p style="margin-top:12px"><button class="btn" type="submit" name="action" value="show">Make instructors and show on the website</button>
@@ -4137,6 +4140,8 @@ const dashCss = `<style>
 const personTiles = (p, csrf) => {
   const base = `/me/${esc(p.person.id)}`;
   const m = p.memberships.filter((x) => x.role === 'member');
+  const sup = p.memberships.filter((x) => x.role === 'supporter');
+  const supporterOnly = !!sup.length && !p.memberships.some((x) => x.role !== 'supporter');
   return `
   <h2>${p.how === 'self' ? esc(p.person.preferred_name || p.person.first_name) + ' ' + esc(p.person.last_name)
     : esc(p.person.first_name) + ' ' + esc(p.person.last_name)}${p.how === 'self' ? '' : ' <span class="muted">· you look after this person</span>'}</h2>
@@ -4149,12 +4154,13 @@ const personTiles = (p, csrf) => {
         ${x.status !== 'active' ? `<span class="tag no">${esc(x.status)}</span> ` : ''}${
           x.standing ? `<span class="tag ${['current', 'exempt'].includes(x.standing) ? 'ok' : 'wait'}">${esc(STANDING_WORDS_[x.standing] ?? x.standing)}</span>` : ''}${
           x.paid_until ? ` <span class="muted">until ${esc(x.paid_until)}</span>` : ''}</p>`).join('')
+        : supporterOnly ? sup.map((x) => `<p><span class="big">Supporter</span><br><span class="muted">${esc(x.name)} · not a member</span></p>`).join('')
         : '<p class="muted">Not on a club\'s roll.</p>'}
       <p><a href="${base}">Details</a>${m.length ? ` · <a href="${base}/card">Membership card</a>` : ''}</p></div>
-    <div class="tile"><h3>Current grade</h3>
+    ${supporterOnly ? '' : `<div class="tile"><h3>Current grade</h3>
       ${p.grade ? `<p class="big">${esc(p.grade.label)}</p><p class="muted">since ${esc(p.grade.awarded_on)}</p>`
         : '<p class="muted">No grade recorded yet.</p>'}
-      <p><a href="${base}/record">Grade history</a></p></div>
+      <p><a href="${base}/record">Grade history</a></p></div>`}
     <div class="tile"><h3>Next class</h3>
       ${p.next ? `<p class="big">${p.next.daysAway === 0 ? 'Today' : p.next.daysAway === 1 ? 'Tomorrow' : esc(p.next.weekdayName)} ${esc(p.next.starts)}</p>
         <p>${esc(p.next.label)}<br><span class="muted">${esc(p.next.club)}</span></p>`
@@ -4172,10 +4178,10 @@ const personTiles = (p, csrf) => {
         ${p.counts.consents} signed declaration${p.counts.consents === 1 ? '' : 's'} ·
         ${p.qualifications.length} qualification${p.qualifications.length === 1 ? '' : 's'}</p>
       <p><a href="${base}/documents">Open</a></p></div>
-    <div class="tile"><h3>Training</h3>
+    ${supporterOnly ? '' : `<div class="tile"><h3>Training</h3>
       <p class="big">${p.counts.recent_classes} class${p.counts.recent_classes === 1 ? '' : 'es'}</p>
       <p class="muted">in the last 90 days${p.counts.last_trained ? ` · last on ${esc(p.counts.last_trained)}` : ''}</p>
-      <p><a href="${base}/record">Attendance</a></p></div>
+      <p><a href="${base}/record">Attendance</a></p></div>`}
   </div>`;
 };
 

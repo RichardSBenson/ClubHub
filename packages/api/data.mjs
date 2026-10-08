@@ -14,6 +14,7 @@ import { parseCsv } from '../core/domain/register-csv.mjs';
 import { pool } from '../infrastructure/postgres/pool.mjs';
 import { problemsWithPerson, problemsWithMembership, normaliseGender }
   from '../core/domain/people.mjs';
+import { whyNotInstructor, SUPPORTER_NO_RANK, problemsWithRoleAndGrade } from '../core/domain/roles.mjs';
 import { payeeFor, groupByPayee, problemsWithPaymentRequest, problemsWithPayment, KINDS as PAY_KINDS }
   from '../core/domain/payments.mjs';
 import { isTestProvider } from '../infrastructure/payments/providers.mjs';
@@ -161,6 +162,19 @@ export const orgs = {
 // people and affiliation
 // ---------------------------------------------------------------------------
 
+/**
+ * A supporter is somebody whose only current tie to a club is as a supporter.
+ * They have no part in ranking, so nothing that writes a grade, a grading
+ * entry or a recognition may proceed for them.
+ */
+async function assertNoRankingForSupporter(personId, client = null) {
+  const run = (client ?? pool);
+  const { rows: [r] } = await run.query(`
+    select bool_or(role = 'supporter') as sup, bool_or(role <> 'supporter') as other
+    from affiliation where person_id = $1 and ends is null`, [personId]);
+  if (r?.sup && !r?.other) throw new Invalid(SUPPORTER_NO_RANK);
+}
+
 export const people = {
   /** Roster for one organisation. Private detail only for registrars and above. */
   async roster(actor, orgId, { includePrivate = false, subtree = false } = {}) {
@@ -291,6 +305,7 @@ export const people = {
       ...problemsWithPerson({ firstName, lastName, dateOfBirth, email, gender }),
       ...problemsWithMembership({ role, starts, paidUntil }),
     ];
+    problems.push(...problemsWithRoleAndGrade({ role, hasGrade: false }));
     if (problems.length) throw new Invalid(problems.join('; '));
 
     const client = await pool.connect();
@@ -806,6 +821,7 @@ export const rank = {
   async award(actor, { personId, gradeId, awardedByOrg, awardedOn, panel = [],
                        eventId = null, result = 'pass' }, client = null) {
     await assertRole(actor, awardedByOrg, REGISTER);
+    await assertNoRankingForSupporter(personId, client);
 
     const grade = await one('select * from grade where id = $1', [gradeId]);
     if (!grade) throw new NotFound('Grade');
@@ -853,6 +869,9 @@ export const rank = {
     if (!home) return { grades: [], current: null, fed: null, mayKyu: false, mayDan: false };
     const fed = await orgs.ladderOwnerOf(home.organisation_id);
     if (!fed) return { grades: [], current: null, fed: null, mayKyu: false, mayDan: false };
+    const sup = await one(`select bool_or(role = 'supporter') as sup, bool_or(role <> 'supporter') as other
+      from affiliation where person_id = $1 and ends is null`, [personId]);
+    if (sup?.sup && !sup?.other) return { grades: [], current: null, fed, home, mayKyu: false, mayDan: false };
     const mayKyu = (await one('select has_role_at($1,$2,$3) as ok', [actor, home.organisation_id, REGISTER]))?.ok;
     const mayDan = (await one('select has_role_at($1,$2,$3) as ok', [actor, fed.id, REGISTER]))?.ok;
     const current = await one('select rank_order from person_current_grade where person_id = $1', [personId]);
@@ -864,6 +883,7 @@ export const rank = {
   async recognise(actor, { personId, gradeId, heldOn, note }) {
     const { grades, fed, home, mayKyu, mayDan } = await this.recognisable(actor, personId);
     if (!mayKyu && !mayDan) throw new Forbidden();
+    await assertNoRankingForSupporter(personId);
     const grade = grades.find((g) => g.id === gradeId);
     if (!grade) {
       const any = fed ? (await this.ladder(fed.id)).find((g) => g.id === gradeId) : null;
@@ -2324,6 +2344,16 @@ async function homesOf(personId) {
 }
 
 export const family = {
+  /** Which of these people are children with nobody linked as parent or guardian. */
+  async withoutGuardian(ids = []) {
+    if (!ids.length) return new Set();
+    const { rows } = await pool.query(`
+      select p.id from person p
+      where p.id = any($1::uuid[]) and p.date_of_birth > current_date - interval '18 years'
+        and not exists (select 1 from guardian_link gl where gl.child_id = p.id and gl.ended_on is null)`, [ids]);
+    return new Set(rows.map((r) => r.id));
+  },
+
   /** The person behind an account, and the children they may act for. */
   async mine(actor) {
     const self = await one(`
@@ -4784,6 +4814,7 @@ export const gradings = {
     try {
       await client.query('begin');
       for (const { m, gradeId } of plan) {
+        await assertNoRankingForSupporter(m.id, client);
         const g = gradeRows.find((r) => r.id === gradeId);
         const kind = g.is_dan ? 'dan_grading' : 'kyu_grading';
         const fee = ev.fee_cents;
@@ -6638,6 +6669,9 @@ export const instructorRole = {
     const club = home.organisation_id;
     const now = await is_(personId);
     if (on && !now) {
+      const g = await one('select label, is_dan from person_current_grade where person_id = $1', [personId]);
+      const why = whyNotInstructor(g);
+      if (why) throw new Invalid(why);
       await pool.query(`insert into affiliation (person_id, organisation_id, role, starts, status)
         values ($1,$2,'instructor', current_date, 'active')`, [personId, club]);
     } else if (!on && now) {

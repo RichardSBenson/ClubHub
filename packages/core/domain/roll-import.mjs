@@ -16,6 +16,7 @@
 
 import { problemsWithPerson, problemsWithMembership, ROLES, isRealDate }
   from './people.mjs';
+import { problemsWithRoleAndGrade } from './roles.mjs';
 
 // ---------------------------------------------------------------------------
 // what a column might be called
@@ -318,6 +319,10 @@ export function planImport({ headers, rows }, {
 
     problems.push(...problemsWithPerson(values, { today }));
     problems.push(...problemsWithMembership(values));
+    {
+      const g = values.gradeId ? [...gradeIndex.values()].find((x) => x.id === values.gradeId) : null;
+      problems.push(...problemsWithRoleAndGrade({ role: values.role, grade: g, hasGrade: !!values.gradeId }));
+    }
 
     const key = nameKey(values);
     const email = values.email ? String(values.email).toLowerCase() : null;

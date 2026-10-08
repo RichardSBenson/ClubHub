@@ -83,6 +83,10 @@ const login = async (person, email) => {
 const sensei = await enrol('Hana', 'Sensei', '1980-03-03', 'hana.sensei@example.nz');
 const plain = await enrol('Pat', 'Plain', '1990-04-04', 'pat.plain@example.nz');
 await login(sensei, 'hana.sensei@example.nz'); await login(plain, 'pat.plain@example.nz');
+{
+  const g = await one(`select g.id from grade g join organisation o on o.id = g.organisation_id where g.label = '1st dan' and o.parent_id is null limit 1`);
+  await pool.query(`insert into grading_record (person_id, grade_id, awarded_on, awarded_by_org, result, panel) values ($1,$2,'2015-01-01',$3,'pass','[]')`, [sensei.id, g.id, root.id]);
+}
 const instructorRows = async () => (await one(`select count(*)::int as n from affiliation where person_id=$1 and role='instructor' and ends is null`, [sensei.id])).n;
 
 console.log('\nONE PROFILE, ONE TICK');

@@ -360,9 +360,11 @@ get('/o/:slug/roster', async (ctx) => {
     if (filter.show === 'instructors' && !r.isInstructor) return false;
     return true;
   }).map((r) => ({ ...r, instructor: states.get(r.id) ?? null }));
+  const unlinked = await family.withoutGuardian(all.filter((r) => r.age != null && r.age < 18).map((r) => r.id));
+  for (const r of shown) r.noGuardian = unlinked.has(r.id);
   const ladderOwner = await orgs.ladderOwnerOf(org.id);
   return ctx.send(200, V.roster({
-    me: ctx.me, org, roster: shown, total: all.length, csrf: ctx.csrf,
+    me: ctx.me, org, roster: shown, total: all.length, unlinked: all.filter((r) => unlinked.has(r.id)), csrf: ctx.csrf,
     canRegister: await mayRegisterAt(ctx, org.id), canManage, filter,
     ladder: ladderOwner ? await rank.ladder(ladderOwner.id) : [],
     done: q.get('done'), error: q.get('error'), rebuild: q.get('rebuild'),
