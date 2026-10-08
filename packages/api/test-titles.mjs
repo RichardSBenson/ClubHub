@@ -24,6 +24,23 @@ console.log('\nSOME TITLES ARE CONFERRED BY RANK');
     tane.some(t=>t.label==='Senpai') && !tane.some(t=>t.label==='Sensei'));
 }
 
+console.log('\nANOTHER FEDERATION\'S TITLES DO NOT LEAK');
+{
+  // Two federations in one database, both with conferred titles on the same grade numbers.
+  const { rows:[other] } = await pool.query(`
+    insert into organisation (parent_id,type,name,slug,path,country_code)
+    values (null,'country','Leak Test Taekwondo','leak-tkd','leak_tkd','NZ') returning id`);
+  await pool.query(`insert into title (organisation_id,label,rank_order,min_grade_order,max_grade_order,conferred_by_rank)
+    values ($1,'Sabeom',2,11,20,true)`,[other.id]);
+  const labels = await q(`select label from person_title pt join person p on p.id=pt.person_id where p.display_number='NZ-0001'`);
+  ok('a MOKNZ 8th dan holds no title from the other federation', !labels.some(t => t.label==='Sabeom'));
+  ok('and still holds their own', labels.some(t => t.label==='Hanshi'));
+  const cur = await q(`select label from person_current_title pt join person p on p.id=pt.person_id where p.display_number='NZ-0001'`);
+  ok('the title they are addressed by is their own', cur[0]?.label==='Hanshi');
+  await pool.query(`delete from title where organisation_id=$1`,[other.id]);
+  await pool.query(`delete from organisation where id=$1`,[other.id]);
+}
+
 console.log('\nCONFERRED TITLES MOVE WITH THE GRADE');
 {
   const { rows:[aroha] } = await pool.query(

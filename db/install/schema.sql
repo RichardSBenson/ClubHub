@@ -1070,8 +1070,10 @@ create or replace view person_title as
          t.short_label, t.rank_order, t.address_as,
          'conferred'::text as how, null::date as awarded_on
   from person_current_grade cg
+  join grade g on g.id = cg.grade_id
   join title t
     on t.conferred_by_rank
+   and g.organisation_id = t.organisation_id
    and cg.rank_order >= coalesce(t.min_grade_order, 0)
    and (t.max_grade_order is null or cg.rank_order <= t.max_grade_order)
   union all
