@@ -1,7 +1,7 @@
 === whanganui  ->  /o/whanganui/members/import ===
 first name,last name,role,grade
 Russell,Dilloway,member,5th dan
-Pete,Parson,member,4th dan
+Pete,Parsons,member,4th dan
 Ryan,Trevor-Roper,member,3rd dan
 Pete,Shaw,member,3rd dan
 Richard,Benson,member,3rd dan
