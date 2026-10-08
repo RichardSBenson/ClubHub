@@ -3,6 +3,7 @@
  *
  * Pure: no database, no server. It renders pages straight from the functions the build calls.
  */
+process.env.TZ = 'UTC';   // the build server's clock: a date must not depend on it
 import { readTheme, exportTheme, lookOf, LAYOUTS } from './theme.mjs';
 import { BUILT_IN } from './builtin-themes.mjs';
 import { safeHref, safeImage } from './showcase.mjs';
@@ -142,6 +143,23 @@ console.log('\nTHE OTHER PAGES WEAR THE SAME CHROME');
   ok('events carries the federation\'s introduction', ev.includes('Nationals and camps.'));
   const au = R.authoredPage({ ...page, page: { slug: 'about', title: 'About us' }, html: '<p>Hello</p>', federation: f });
   ok('a written page has the crumb and a page heading', au.includes('class="crumb"') && au.includes('<h1 class="page">About us</h1>'));
+}
+
+
+console.log('\nTHE DATE IS THE DATE WHERE THE EVENT IS HELD');
+{
+  // 11:00 UTC on Friday 13 November is midnight at the start of Saturday 14 November in New Zealand.
+  const ev = { id: 'e', title: 'Kyu Grading', slug: 'kyu-grading', kind: 'grading', starts_at: '2026-11-13T11:00:00Z', ends_at: null,
+    from_org: 'Whanganui', host_timezone: 'Pacific/Auckland', venue_name: 'Whanganui Dojo' };
+  const html = R.eventsPage({ ...page, events: [ev], federation: fed() }).replace(/<script[\s\S]*?<\/script>/g, '');
+  ok('the showcase card says Saturday 14 November', /Saturday, 14 November/.test(html) && !/Friday, 13 November/.test(html));
+  const classic = R.eventsPage({ ...page, events: [ev], federation: fed({ layoutName: 'classic' }) });
+  ok('and so does the classic page', /14 November/.test(classic) && !/13 November/.test(classic));
+  const noZone = R.eventsPage({ ...page, events: [{ ...ev, host_timezone: undefined }], federation: fed() });
+  ok('an event with no zone recorded still reads in New Zealand time', /Saturday, 14 November/.test(noZone));
+  const home = R.homePage({ ...page, federation: fed(), dojos: DOJOS, events: [ev], articles: [{ slug: 'a', title: 'A', published_at: '2026-10-07T23:30:00Z' }], vocabulary: page.vocabulary });
+  ok('the home page lists it on the 14th', />14<\/b>/.test(home) || /14 Nov/.test(home) || /Saturday, 14 November/.test(home));
+  ok('and a news item from 11:30am on the 8th is the 8th', />8<\/b>/.test(home) || !/news/i.test(home));
 }
 
 console.log(`\n${pass} passed, ${fail} failed\n`);

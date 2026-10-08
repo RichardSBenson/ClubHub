@@ -330,7 +330,8 @@ export function makeShowcase(h) {
 
   // ---- the shared pieces ---------------------------------------------------
 
-  const day = (d) => new Date(d).toLocaleDateString('en-NZ', { weekday: 'long', day: 'numeric', month: 'long' });
+  // In the timezone of the place the event is held, never the server's own: a Saturday event must not read as Friday.
+  const day = (d, tz = 'Pacific/Auckland') => new Date(d).toLocaleDateString('en-NZ', { weekday: 'long', day: 'numeric', month: 'long', timeZone: tz });
 
   /** An event as a card: the federation's text banner, then what, when and where. */
   function eventCard(e, { at, federation, logoUrl, vocabulary, dojoSlug = null }) {
@@ -341,7 +342,7 @@ export function makeShowcase(h) {
     return `<a class="card${national ? '' : ' local'}" href="${at(href)}">
   <div class="pic">${h.eventBanner(e, { logoUrl, federationName: federation.name, small: true, vocabulary })}</div>
   <div class="body"><span class="badge ${national ? 'national' : 'local'}">${esc(national ? 'NATIONAL' : String(e.from_org ?? '').toUpperCase())}</span>
-  <p class="when">${esc(day(e.starts_at))}${where}</p><h3>${esc(e.title)}</h3>
+  <p class="when">${esc(day(e.starts_at, e.host_timezone ?? undefined))}${where}</p><h3>${esc(e.title)}</h3>
   ${e.summary ? `<p>${esc(e.summary)}</p>` : '<p></p>'}<span class="more">Details →</span></div>
 </a>`;
   }
@@ -486,8 +487,8 @@ export function makeShowcase(h) {
       news: () => articles.length ? `<section><div class="wrap">
   <div class="sechead"><h2>News</h2><a href="${at('/news')}">All news</a></div>
   <ul class="events">${articles.map((a) =>
-    `<li><div class="d"><b>${new Date(a.published_at).getDate()}</b>
-      <span>${new Date(a.published_at).toLocaleDateString('en-NZ', { month: 'short' })}</span></div>
+    `<li><div class="d"><b>${h.dayNum(a.published_at)}</b>
+      <span>${h.monthShort(a.published_at)}</span></div>
       <div>${a.about_org ? `<span class="tag">${esc(a.about_org)}</span>` : ''}
       <h3><a href="${at(`/news/${esc(a.slug)}`)}">${esc(a.title)}</a></h3>
       <p>${esc(a.summary ?? '')}</p></div></li>`).join('')}</ul>

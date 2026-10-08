@@ -339,7 +339,7 @@ export class PostgresSiteContent {
              e.venue_name, e.address_line, e.visibility, e.entries_close,
              d.type_key, d.contact_name, d.contact_email, d.contact_phone, d.cost_note, d.info_url, d.description,
              coalesce(d.latitude, e.latitude)::float as latitude, coalesce(d.longitude, e.longitude)::float as longitude,
-             o.name as from_org, o.slug as from_slug, (o.id = target.id) as is_own
+             o.name as from_org, o.slug as from_slug, o.timezone as host_timezone, (o.id = target.id) as is_own
       from organisation target
       join event e on true
       left join event_detail d on d.event_id = e.id

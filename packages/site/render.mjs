@@ -36,6 +36,10 @@ const time = (t) => {
 const date = (d, tz = 'Pacific/Auckland') => new Date(d).toLocaleDateString('en-NZ',
   { weekday:'long', day:'numeric', month:'long', timeZone: tz });
 
+/** The day of the month and the short month, as people read them where the event is: never the server's own clock. */
+const dayNum = (d, tz = 'Pacific/Auckland') => new Date(d).toLocaleDateString('en-NZ', { day: 'numeric', timeZone: tz });
+const monthShort = (d, tz = 'Pacific/Auckland') => new Date(d).toLocaleDateString('en-NZ', { month: 'short', timeZone: tz });
+
 const clock = (d, tz = 'Pacific/Auckland') => new Date(d).toLocaleTimeString('en-NZ',
   { hour: 'numeric', minute: '2-digit', hour12: true, timeZone: tz }).replace(/\s/g, '').toLowerCase();
 
@@ -63,7 +67,7 @@ function eventBanner(ev, { logoUrl = null, federationName = '', small = false, v
   <div class="evtext">
     ${top ? `<span class="evtop">${esc(top)}</span>` : ''}
     <span class="evmain">${esc(main)}</span>
-    <span class="evwhen">${esc(shortRange(ev.starts_at, ev.ends_at))}</span>
+    <span class="evwhen">${esc(shortRange(ev.starts_at, ev.ends_at, ev.host_timezone ?? undefined))}</span>
     ${host ? `<span class="evhost">${esc(host)}</span>` : ''}
   </div>
 </div>`;
@@ -860,13 +864,13 @@ export function eventPage({ ev, federation, origin, fonts, nav,
     ? ev.slug.slice(0, -(ev.from_slug.length + 1)) : ev.slug;
   const canEnter = ev.entries_close && new Date(ev.entries_close) > new Date();
   const when = ev.all_day
-    ? date(ev.starts_at)
-    : `${date(ev.starts_at)}, ${clock(ev.starts_at)}${ev.ends_at ? ` – ${clock(ev.ends_at)}` : ''}`;
+    ? date(ev.starts_at, ev.host_timezone ?? undefined)
+    : `${date(ev.starts_at, ev.host_timezone ?? undefined)}, ${clock(ev.starts_at, ev.host_timezone ?? undefined)}${ev.ends_at ? ` – ${clock(ev.ends_at, ev.host_timezone ?? undefined)}` : ''}`;
   const detail = [
     ['When', esc(when)],
     ev.venue_name || ev.address_line ? ['Where', `${ev.venue_name ? `<strong>${esc(ev.venue_name)}</strong><br>` : ''}${esc(ev.address_line ?? '')}`] : null,
     ev.cost_note ? ['Cost', esc(ev.cost_note)] : null,
-    ev.entries_close ? ['Entries close', esc(date(ev.entries_close))] : null,
+    ev.entries_close ? ['Entries close', esc(date(ev.entries_close, ev.host_timezone ?? undefined))] : null,
     ev.contact_name || ev.contact_phone || ev.contact_email ? ['Contact',
       [ev.contact_name ? esc(ev.contact_name) : '',
        ev.contact_phone ? `<a href="tel:${esc(String(ev.contact_phone).replace(/[^+\d]/g, ''))}">${esc(ev.contact_phone)}</a>` : '',
@@ -904,7 +908,7 @@ ${eventBanner(ev, { logoUrl, federationName: federation.name, vocabulary })}
 
   return layout({
     title: `${ev.title} — ${federation.name}`,
-    description: ev.summary ?? `${ev.title}, ${date(ev.starts_at)}.`,
+    description: ev.summary ?? `${ev.title}, ${date(ev.starts_at, ev.host_timezone ?? undefined)}.`,
     canonical: `${origin}${at(path ?? `/events/${ev.slug}`)}`,
     jsonLd: [eventJsonLd(ev, federation, origin, base)],
     federation, fonts, nav, base, vocabulary, logoUrl, body,
@@ -1055,9 +1059,8 @@ export function homePage({ federation, dojos, events, articles, origin, fonts,
     events: () => events.length ? `<section style="background:var(--canvas-alt)"><div class="wrap">
   <h2>Coming up</h2>
   <ul class="events">${events.slice(0,5).map((e) => {
-    const d = new Date(e.starts_at);
-    return `<li><div class="d"><b>${d.getDate()}</b>
-      <span>${d.toLocaleDateString('en-NZ',{month:'short'})}</span></div>
+    return `<li><div class="d"><b>${dayNum(e.starts_at, e.host_timezone ?? undefined)}</b>
+      <span>${monthShort(e.starts_at, e.host_timezone ?? undefined)}</span></div>
       <div><h3><a href="${at(`/events/${esc(e.slug)}`)}">${esc(e.title)}</a></h3>
       <p>${esc(e.venue_name ?? e.from_org ?? '')}</p></div></li>`;
   }).join('')}</ul>
@@ -1066,8 +1069,8 @@ export function homePage({ federation, dojos, events, articles, origin, fonts,
     news: () => articles.length ? `<section><div class="wrap">
   <h2>News</h2>
   <ul class="events">${articles.map((a) =>
-    `<li><div class="d"><b>${new Date(a.published_at).getDate()}</b>
-      <span>${new Date(a.published_at).toLocaleDateString('en-NZ',{month:'short'})}</span></div>
+    `<li><div class="d"><b>${dayNum(a.published_at)}</b>
+      <span>${monthShort(a.published_at)}</span></div>
       <div>${a.about_org ? `<span class="tag">${esc(a.about_org)}</span>` : ''}
       <h3><a href="${at(`/news/${esc(a.slug)}`)}">${esc(a.title)}</a></h3>
       <p>${esc(a.summary ?? '')}</p></div></li>`).join('')}</ul>
@@ -1092,6 +1095,6 @@ export function homePage({ federation, dojos, events, articles, origin, fonts,
 }
 
 // The showcase layout's builders, given the helpers they share with this file.
-const S = makeShowcase({ esc, time, groupSessions, capitalise, artOf, clubWord, clubsWordOf, eventBanner, instructorCard });
+const S = makeShowcase({ dayNum, monthShort, esc, time, groupSessions, capitalise, artOf, clubWord, clubsWordOf, eventBanner, instructorCard });
 
 export { esc, groupSessions, time, date };
