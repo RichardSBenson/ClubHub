@@ -16,7 +16,25 @@
     "discipline": "Karate",
     "_discipline": "The art, as schema.org should label it. Judo, Taekwondo, Brazilian Jiu-Jitsu.",
     "artName": "Kyokushin karate",
-    "_artName": "What the pages call the art, which need not match the schema.org sport above. \"Kyokushin karate\" reads better in a page title than \"Karate\"."
+    "_artName": "What the pages call the art, which need not match the schema.org sport above. \"Kyokushin karate\" reads better in a page title than \"Karate\".",
+    "logo": "/media/crest-full-colour.png",
+    "_logo": "The crest, as a file under data/media. Used in the header and on event banners until one is uploaded in the admin.",
+    "stripe": [
+      "#F4F4F5",
+      "#D9761F",
+      "#1F4E8C",
+      "#F0CE41",
+      "#2E6B33",
+      "#6B4322",
+      "#1C1C1E"
+    ],
+    "_stripe": "Belt colours for the thin stripe above the header and the footer (showcase layout). Leave it out for none.",
+    "wordmark": {
+      "main": "Mas Oyama Karate",
+      "sub": "NEW ZEALAND"
+    },
+    "footerLine": "Mas Oyama Karate New Zealand · dojo throughout New Zealand and Japan",
+    "eventsIntro": "National gradings, tournaments and camps. Individual dojo also run their own events — see your dojo's page."
   },
   "vocabulary": {
     "_readme": "What this federation calls things. The platform serves any graded martial art, so none of these words are built in. A taekwondo body types Dojang, a kung fu body Kwoon, a BJJ body Academy, a Muay Thai body Gym. Leave a value out and the neutral word is used.",
@@ -73,7 +91,160 @@
     ],
     "heroHeading": "Everyone starts as a white belt.",
     "heroText": "Full-contact Kyokushin karate, taught in New Zealand since 1965. Your first class is free.",
-    "heroButton": "Find your dojo"
+    "heroButton": "Find your dojo",
+    "_showcase": [
+      "Words for the showcase layout. A section with nothing written here is left out, never filled in.",
+      "Pictures are files under data/media, named like /media/seiza.jpg. Links must be to pages that exist."
+    ],
+    "stats": [
+      {
+        "value": "1965",
+        "label": "First Kyokushin dojo in New Zealand"
+      },
+      {
+        "value": "{clubs}",
+        "label": "Dojo across New Zealand and Japan"
+      },
+      {
+        "value": "5–65",
+        "label": "Ages training on the same floor"
+      },
+      {
+        "value": "Free",
+        "label": "Your first class, at every dojo",
+        "when": "allFree"
+      }
+    ],
+    "firstNight": {
+      "heading": "What your first night looks like",
+      "items": [
+        {
+          "title": "Wear anything",
+          "text": "Shorts and a t-shirt is fine. You'll train barefoot. Buy a gi later, once you know you're staying.",
+          "image": "/media/seiza.jpg",
+          "alt": "Three instructors in seiza at the front of the dojo"
+        },
+        {
+          "title": "Line up and learn the basics",
+          "text": "Stances, blocks, counting in Japanese. You'll sweat, you'll get a few things wrong, and nobody will mind.",
+          "image": "/media/camp-sunset.jpg",
+          "alt": "Summer camp: kicking in line at sunset"
+        },
+        {
+          "title": "Talk to the sensei after",
+          "text": "Fees, training nights and where to buy gear. No contract on the night, no pressure to sign anything.",
+          "image": "/media/hanshi-kick.jpg",
+          "alt": "Hanshi Doug Holloway performing mae geri"
+        }
+      ]
+    },
+    "pathway": {
+      "heading": "Where it can take you",
+      "intro": "Nobody starts thinking about a black belt. But the road is there, and it runs a long way.",
+      "steps": [
+        {
+          "kicker": "Year one",
+          "title": "White belt",
+          "text": "Your first grading is usually within a few months. Small steps, close together.",
+          "colour": "#F4F4F5"
+        },
+        {
+          "kicker": "Juniors",
+          "title": "Coloured belts",
+          "text": "Grade with your own dojo, then at national gradings alongside every other dojo in the country.",
+          "colour": "#F0CE41"
+        },
+        {
+          "kicker": "Compete",
+          "title": "National tournament",
+          "text": "Fight at the national championships. Age and grade divisions, so you're matched fairly.",
+          "colour": "#2E6B33"
+        },
+        {
+          "kicker": "Black belt",
+          "title": "Shodan",
+          "text": "Years, not months. Graded by a panel that includes 7th and 8th dan.",
+          "colour": "#1C1C1E"
+        },
+        {
+          "kicker": "Beyond",
+          "title": "Japan, and the 50",
+          "text": "Train at our Japan branch. Eight New Zealanders have completed the 50 Man Kumite.",
+          "colour": "#CE372C"
+        }
+      ]
+    },
+    "photoBand": {
+      "image": "/media/hero-lineup.jpg",
+      "alt": "Kaikan dojo members lined up in the hall, all ages and grades",
+      "position": 38
+    },
+    "regions": [
+      {
+        "name": "North Island",
+        "slugs": [
+          "far-north",
+          "rawene",
+          "kohukohu",
+          "auckland",
+          "gisborne",
+          "taranaki",
+          "stratford",
+          "new-plymouth",
+          "hawera",
+          "taumarunui",
+          "napier",
+          "whanganui",
+          "carterton",
+          "wellington"
+        ]
+      },
+      {
+        "name": "South Island",
+        "slugs": [
+          "christchurch",
+          "dunedin",
+          "waikouaiti",
+          "milton"
+        ]
+      },
+      {
+        "name": "Japan",
+        "slugs": [
+          "japan",
+          "nagoya"
+        ]
+      }
+    ],
+    "lineage": {
+      "heading": "Sixty years of unbroken lineage",
+      "paragraphs": [
+        "Hanshi Doug Holloway, 8th dan, set up the first Kyokushin karate dojo in New Zealand in 1965, after returning from Japan as a student of Sosai Mas Oyama.",
+        "Kyokushin means \"the ultimate truth\". It is taught here by people who learned it from the source."
+      ],
+      "button": {
+        "label": "Read our history",
+        "href": "/about"
+      },
+      "image": "/media/hanshi-portrait.jpg",
+      "alt": "Hanshi Doug Holloway"
+    },
+    "spotlight": {
+      "heading": "Eight times in sixty years",
+      "paragraphs": [
+        "Fifty consecutive full-contact fights, no rest. The 50 Man Kumite has been completed eight times in New Zealand — and most of the names on the board are the people who run MOKNZ today."
+      ],
+      "image": "/media/honours-board.jpg",
+      "alt": "MOKNZ honours board"
+    },
+    "memberBand": {
+      "heading": "Already training with us?",
+      "text": "Renew, enter a grading, or show your MOKNZ card.",
+      "button": {
+        "label": "Member login",
+        "href": "/signin"
+      }
+    }
   },
   "dojoPage": {
     "_readme": [
@@ -90,7 +261,33 @@
       "findUs"
     ],
     "startAnyWeekText": "You can start any week — there is no term to wait for.",
-    "showFirstClassFree": true
+    "showFirstClassFree": true,
+    "_showcase": "Words for the showcase layout on every dojo page.",
+    "firstNight": {
+      "heading": "Your first night",
+      "items": [
+        {
+          "title": "Turn up ten minutes early",
+          "text": "Come in, say hello, and tell whoever's at the door it's your first time. No need to book."
+        },
+        {
+          "title": "Wear shorts and a t-shirt",
+          "text": "You'll train barefoot. Bring a water bottle. That's the whole list."
+        },
+        {
+          "title": "Nobody hits you",
+          "text": "You'll learn stances, blocks and how we line up. Contact comes much later, and only when you're ready."
+        }
+      ]
+    },
+    "federationBand": {
+      "heading": "Part of Mas Oyama Karate New Zealand",
+      "text": "{clubs} dojo across New Zealand and Japan, led by Hanshi Doug Holloway, 8th dan, since 1965.",
+      "button": {
+        "label": "National gradings & events",
+        "href": "/events"
+      }
+    }
   },
   "navigation": {
     "_readme": [

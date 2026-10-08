@@ -23,11 +23,14 @@ export class SettingsError extends Error {
 
 const HEX = /^#[0-9a-fA-F]{6}$/;
 
-// Only what the renderer actually builds. photoBand, pathway and lineage were
+// Only what a renderer actually builds. photoBand, pathway and lineage were
 // accepted here for a long time and rendered nothing, so a site that listed one
 // looked exactly like a site that did not.
-const HOME_SECTIONS = ['hero','dojoGrid','events','news'];
-const DOJO_SECTIONS = ['hero','facts','startAnyWeek','times','about','instructors','gallery','events','findUs'];
+const HOME_SECTIONS = ['hero','dojoGrid','events','news',
+  // The showcase layout's. The classic layout skips any it does not draw, so listing one there costs nothing.
+  'proof','firstNight','pathway','quotes','photoBand','lineage','spotlight','memberBand'];
+const DOJO_SECTIONS = ['hero','facts','startAnyWeek','times','about','instructors','gallery','events','findUs',
+  'firstNight','enquire','federationBand'];
 
 /**
  * The neutral words. A federation overrides whichever it uses differently —
@@ -140,6 +143,7 @@ function complete(s) {
     dojoPage: { ...DEFAULTS.dojoPage, ...(s.dojoPage ?? {}) },
     navigation: s.navigation?.items ?? [],
     seo: s.seo ?? {},
+    layout: s.layout,
     // One note per colour. The derived engine reports the same constraints in
     // different words, and three lines saying one thing is noise.
     notes: dedupe([...notes, ...derived.warnings]),

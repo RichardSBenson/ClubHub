@@ -1,7 +1,7 @@
 /* Photo viewer for gallery pictures. Without this script each picture is a plain
    link to the full-size file, so nothing is lost if it does not run. */
 (function () {
-  var links = Array.prototype.slice.call(document.querySelectorAll('.gallery a.glink'));
+  var links = Array.prototype.slice.call(document.querySelectorAll('.gallery a.glink, .gal a.glink'));
   if (!links.length) return;
   var box, img, cap, count, at = 0, last = null;
 

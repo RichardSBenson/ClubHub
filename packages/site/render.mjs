@@ -16,6 +16,7 @@
 import { calendarLinks } from '../core/domain/calendar-file.mjs';
 import { bannerLines, typeFor, mapLinks } from '../core/domain/event-types.mjs';
 import { CalendarDay } from '../core/domain/values.mjs';
+import { makeShowcase, SHOWCASE_CSS } from './showcase.mjs';
 
 const esc = (s = '') => String(s)
   .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
@@ -159,18 +160,18 @@ export function eventJsonLd(ev, org, origin, base = '') {
 // theme — CSS built from the brand tokens, nothing hand-authored per customer
 // ---------------------------------------------------------------------------
 
-export function themeCss(tokens, fonts) {
+export function themeCss(tokens, fonts, layoutName = 'classic') {
   const v = Object.entries(tokens)
     .filter(([, x]) => x)
     .map(([k, x]) => `  --${k.replace(/[A-Z]/g, (m) => '-' + m.toLowerCase())}: ${x};`)
     .join('\n');
 
-  return `:root{
+  const root = `:root{
 ${v}
   --display: "${fonts.display ?? 'Georgia'}", Georgia, serif;
   --body: "${fonts.body ?? 'system-ui'}", system-ui, sans-serif;
-}
-*{box-sizing:border-box}
+}`;
+  const classic = `*{box-sizing:border-box}
 body{margin:0;background:var(--canvas);color:var(--ink);font-family:var(--body);
   font-size:17px;line-height:1.7}
 .wrap{max-width:1100px;margin:0 auto;padding:0 24px}
@@ -371,6 +372,12 @@ footer.site a{color:var(--neutral)}
   .stickycta .btn{display:block;text-align:center;width:100%}
   ul.events li{grid-template-columns:64px 1fr;gap:14px}
 }`;
+
+  if (layoutName !== 'showcase') return `${root}\n${classic}`;
+  // The showcase layout replaces the shell (header, hero, buttons, grid) and keeps the components
+  // every layout shares: event banners, instructor cards, galleries, the lightbox, event lists.
+  const from = classic.indexOf('.sr{'), to = classic.indexOf('footer.site{');
+  return `${root}\n${SHOWCASE_CSS}\n${classic.slice(from, to)}`;
 }
 
 // ---------------------------------------------------------------------------
@@ -388,6 +395,7 @@ export function layout({ title, description, canonical, body, jsonLd = [],
                          federation, fonts, nav = [], base = '', vocabulary = {}, logoUrl = null, image = null }) {
   const at = (p) => `${base}${p}`;
   logoUrl = logoUrl ?? federation.logoUrl ?? null;
+  const showcase = federation.layoutName === 'showcase';
   // The picture a chat app or Facebook shows when the page is shared. A page can offer its own;
   // otherwise it is the federation's share picture. It has to be an absolute address.
   let shareHref = null;
@@ -414,21 +422,22 @@ ${shareHref ? `<meta property="og:image" content="${esc(shareHref)}">\n<meta nam
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?${fontHref}&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="${at('/theme.css')}">
-${jsonLd.map((l) => `<script type="application/ld+json">${JSON.stringify(l)}</script>`).join('\n')}
+${/* security-ok: '<' is escaped, so a name cannot close the script element */ jsonLd.map((l) => `<script type="application/ld+json">${JSON.stringify(l).replace(/</g, '\\u003c')}</script>`).join('\n')}
 </head>
-<body>
-<header class="site"><div class="wrap">
+<body${showcase ? ' class="showcase"' : ''}>
+${showcase ? S.header({ federation, nav, at, logoUrl }) : `<header class="site"><div class="wrap">
   <a class="brandmark" href="${at('/')}">${logoUrl ? `<img class="crestmark" src="${esc(logoUrl)}" alt="">` : ''}<div>${esc(federation.name)}<span>${esc(federation.country_code ?? '')}</span></div></a>
   <input type="checkbox" class="navtoggle" id="navtoggle" aria-label="Open the menu">
   <label class="navbtn" for="navtoggle" aria-hidden="true"><i></i><i></i><i></i></label>
   <label class="navscrim" for="navtoggle" aria-hidden="true"></label>
   <nav class="main" aria-label="Main"><label class="navclose" for="navtoggle" aria-hidden="true">×</label>${nav.map((n) => `<a href="${at(n.href)}">${esc(n.label)}</a>`).join('')}</nav>
-</div></header>
+</div></header>`}
 ${body}
-<footer class="site"><div class="wrap">
+${showcase ? S.footer({ federation, at, logoUrl, footerLinks: federation.footerLinks ?? [] }) : `<footer class="site"><div class="wrap">
   ${esc(federation.name)} · <a href="${at('/find-a-dojo')}">${esc(clubsWord)}</a> · <a href="${at('/events')}">Events</a>
-</div></footer>
-${body.includes('class="gallery"') ? `<script src="${at('/vendor/lightbox.js')}" defer></script>` : ''}
+</div></footer>`}
+${/class="(gallery|gal)"/.test(body) ? `<script src="${at('/vendor/lightbox.js')}" defer></script>` : ''}
+${body.includes('data-finder') ? `<script src="${at('/vendor/finder.js')}" defer></script>` : ''}
 </body>
 </html>`;
 }
@@ -476,6 +485,37 @@ export function dojoPage({ dojo, federation, events, origin, fonts, nav,
     ? [...new Set(groups.flatMap((g) => g.days))].join(', ')
     : 'Training nights to confirm';
   const free = showFirstClassFree && dojo.first_class_free;
+
+  if (federation.layoutName === 'showcase') {
+    const copy = federation.dojoCopy ?? {};
+    const parts = S.dojoParts({ dojo, federation, events, at, copy, logoUrl, vocabulary, gallery, galleryTotal,
+      instructors, groups, daysLine, free, startAnyWeekText, clubCount: federation.clubCount });
+    // Every section is its own band, except the three that read as one column: the turn-up notice, the times and the about text.
+    const column = new Set(['startAnyWeek', 'times', 'about']);
+    const order = [...sections];
+    if (!order.includes('facts')) order.splice(Math.min(1, order.length), 0, 'facts');
+    if (!order.includes('enquire')) order.push('enquire');
+    const out = [];
+    let col = [];
+    const flush = () => { if (col.length) { out.push(`<section><div class="wrap narrow">${col.join('\n')}</div></section>`); col = []; } };
+    for (const name of order) {
+      const html = parts[name]?.();
+      if (!html) continue;
+      if (column.has(name)) col.push(html); else { flush(); out.push(html); }
+    }
+    flush();
+    return layout({
+      title: `${capitalise(artOf(federation))} in ${town} — ${federation.name}`,
+      description: `${capitalise(artOf(federation))} classes in ${town} for adults and ` +
+        `children.${dojo.first_class_free ? ' First class free.' : ''}` +
+        (groups.length ? ` ${daysLine} at ${dojo.venue_name ?? dojo.address_line ?? town}.` : ''),
+      canonical: `${origin}${at(`/${dojo.slug}`)}`,
+      jsonLd: [dojoJsonLd(dojo, federation, origin, base)],
+      image: dojo.hero_url ?? null,
+      federation, fonts, nav, base, vocabulary, logoUrl,
+      body: S.crumb(at, [{ href: '/find-a-dojo', label: `Find a ${clubWord(vocabulary)}` }, { label: town }]) + out.join('\n'),
+    });
+  }
 
   const parts = {
     hero: () => `
@@ -588,6 +628,15 @@ export function dojoPage({ dojo, federation, events, origin, fonts, nav,
 export function authoredPage({ page, html, federation, origin, fonts, nav,
                                base = '', vocabulary = {}, description }) {
   const at = (p) => `${base}${p}`;
+  if (federation.layoutName === 'showcase') {
+    return layout({
+      title: page.meta_title ?? `${page.title} — ${federation.name}`,
+      description: page.meta_description ?? description ?? '',
+      canonical: `${origin}${at('/' + page.slug)}`,
+      federation, fonts, nav, base, vocabulary,
+      body: `${S.crumb(at, [{ label: page.title }])}<section><div class="wrap narrow"><h1 class="page">${esc(page.title)}</h1>${html}</div></section>`,
+    });
+  }
   return layout({
     title: page.meta_title ?? `${page.title} — ${federation.name}`,
     description: page.meta_description ?? description ?? '',
@@ -757,6 +806,17 @@ export function findADojoPage({ dojos, federation, origin, fonts, nav,
                                 base = '', vocabulary = {} }) {
   const at = (p) => `${base}${p}`;
   const ready = dojos.filter((d) => d.published);
+  if (federation.layoutName === 'showcase') {
+    const body = S.findBody({ dojos, federation, at, copy: federation.homeCopy ?? {}, vocabulary, lede: welcomeLine(dojos) });
+    return layout({
+      title: `Find a dojo — ${federation.name}`,
+      description: `${dojos.length} ${clubsWordOf(vocabulary)}. Find your nearest.${welcomeLine(dojos)}`,
+      canonical: `${origin}${at('/find-a-dojo')}`,
+      jsonLd: [{ '@context':'https://schema.org','@type':'SportsOrganization', name: federation.name, url: `${origin}${base}`,
+        subOrganization: dojos.map((d) => ({ '@type':'SportsActivityLocation', name: `${d.name} ${vocabulary.club ?? 'Club'}`, url: `${origin}${at(`/${d.slug}`)}` })) }],
+      federation, fonts, nav, base, vocabulary, body,
+    });
+  }
   const body = `
 <section><div class="wrap">
   <h1 style="font-family:var(--display);font-size:clamp(30px,5vw,46px);margin:0 0 12px">Find a dojo</h1>
@@ -862,6 +922,15 @@ export function eventsPage({ events, federation, origin, fonts, nav,
                              base = '', vocabulary = {}, logoUrl = null }) {
   logoUrl = logoUrl ?? federation.logoUrl ?? null;
   const at = (p) => `${base}${p}`;
+  if (federation.layoutName === 'showcase') {
+    return layout({
+      title: `Events — ${federation.name}`,
+      description: `Gradings, tournaments, camps and seminars run by ${federation.name}.`,
+      canonical: `${origin}${at('/events')}`,
+      federation, fonts, nav, base, vocabulary, logoUrl,
+      body: S.eventsBody({ events, at, federation, logoUrl, vocabulary, intro: federation.eventsIntro ?? null }),
+    });
+  }
   const body = `
 <div class="hero small"><div class="wrap">
   <h1>Events</h1>
@@ -943,6 +1012,23 @@ export function homePage({ federation, dojos, events, articles, origin, fonts,
      + `${clubsWordOf(vocabulary)}.`;
   const heroButton = homeCopy.heroButton ?? `Find your ${clubWord(vocabulary)}`;
 
+  if (federation.layoutName === 'showcase') {
+    const parts = S.homeParts({ federation, dojos, events, articles, at, copy: homeCopy, heroUrl,
+      logoUrl: federation.logoUrl ?? null, vocabulary, heading, heroText });
+    return layout({
+      title: `${federation.name} — ${capitalise(artOf(federation))}`,
+      description: `${capitalise(artOf(federation))}. ${dojos.length} ${clubsWordOf(vocabulary)} nationwide.`,
+      canonical: `${origin}${base}`,
+      jsonLd: [{
+        '@context':'https://schema.org','@type':'SportsOrganization',
+        name: federation.name, url: `${origin}${base}`, sport: disciplineOf(federation),
+        foundingDate: CalendarDay.from(federation.founded)?.value ?? undefined,
+      }],
+      federation, fonts, nav, base, vocabulary,
+      body: sections.map((name) => parts[name]?.() ?? '').filter(Boolean).join('\n'),
+    });
+  }
+
   const parts = {
     hero: () => `
 <div class="hero${heroUrl ? ' photo' : ''}"${heroUrl
@@ -1002,5 +1088,8 @@ export function homePage({ federation, dojos, events, articles, origin, fonts,
     federation, fonts, nav, base, vocabulary, body,
   });
 }
+
+// The showcase layout's builders, given the helpers they share with this file.
+const S = makeShowcase({ esc, time, groupSessions, capitalise, artOf, clubWord, clubsWordOf, eventBanner, instructorCard });
 
 export { esc, groupSessions, time, date };

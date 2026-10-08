@@ -4,6 +4,7 @@
   "name": "Ink",
   "description": "Black and white with one warm highlight. Calm, lets the photographs and the words do the work.",
   "author": "Honbu",
+  "layout": "classic",
   "colours": {
     "primary": "#15171A",
     "accent": "#F2C94C",

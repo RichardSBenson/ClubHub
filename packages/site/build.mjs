@@ -13,7 +13,7 @@ import { renderBlocks, excerpt, paragraphs } from '../content/blocks.mjs';
 import { extensionFor } from '../content/images.mjs';
 import { menuFor } from '../content/navigation.mjs';
 import { loadSettings, SettingsError } from './settings.mjs';
-import { readTheme, lookOf } from './theme.mjs';
+import { readTheme, lookOf, LAYOUTS } from './theme.mjs';
 import * as R from './render.mjs';
 import * as PWA from './pwa.mjs';
 import { eventToIcs } from '../core/domain/calendar-file.mjs';
@@ -268,6 +268,9 @@ for (const target of SITES) {
     : { ...(brand?.fonts ?? {}), ...(atRoot ? rootSettings.fonts : {}) };
 
   const fromFile = (key) => atRoot ? rootSettings[key] : orgSettings[key];
+  // The same order as everything else: the theme the federation chose, then the settings file, then classic.
+  const fileLayout = atRoot ? rootSettings.layout : null;
+  const layoutName = look?.layout ?? (LAYOUTS.includes(fileLayout) ? fileLayout : 'classic');
   const homeSections = look?.homeSections ?? fromFile('homePage')?.sections;
   const dojoSections = look?.dojoSections ?? fromFile('dojoPage')?.sections;
   // Words, not look: these stay the federation's own whatever theme is chosen.
@@ -387,9 +390,34 @@ for (const target of SITES) {
   });
 
   // The crest: one image the federation chose, used in the header and on every event banner.
-  const logoUrl = assets[federation.settings?.logoAssetId] ?? null;
+  // The organisation's own words about itself: from the settings file at the root, from its record elsewhere.
+  const orgWords = atRoot ? (rootSettings.organisation ?? {}) : orgSettings;
+  // A crest kept as a file under data/media is the fallback for an install that has not uploaded one.
+  const mediaCrest = /^\/media\/[A-Za-z0-9._-]+$/.test(orgWords.logo ?? '') ? `${base}${orgWords.logo}` : null;
+  const logoUrl = assets[federation.settings?.logoAssetId] ?? mediaCrest;
   const shareUrl = assets[orgSettings.homePage?.shareAssetId] ?? null;
-  const shared = { federation: { ...federation, logoUrl, shareUrl }, fonts, nav, base, vocabulary, origin: ORIGIN };
+
+  // What the chosen layout needs beyond the theme: the federation's words, which are never in a theme.
+  const homeCopy = { ...(atRoot ? strip(rootSettings.homePage ?? {}) : {}), ...strip(orgSettings.homePage ?? {}) };
+  const footerLinks = [
+    { href: '/find-a-dojo', label: clubsWord },
+    { href: '/events', label: 'Events' },
+    ...(articles.length ? [{ href: '/news', label: 'News' }] : []),
+    ...authored.map((p) => ({ href: `/${p.slug}`, label: p.title })),
+  ];
+  const shared = {
+    federation: {
+      ...federation, logoUrl, shareUrl,
+      layoutName,
+      stripe: orgWords.stripe, wordmark: orgWords.wordmark, footerLine: orgWords.footerLine,
+      eventsIntro: orgWords.eventsIntro ?? null,
+      footerLinks, homeCopy, dojoCopy, clubCount: dojos.length,
+      // Every path this site will have a page for, so a layout never draws a button that leads to a 404.
+      knownPaths: new Set(['/', '/find-a-dojo', '/events', '/news', '/instructors', '/signin',
+        ...authored.map((p) => `/${p.slug}`)]),
+    },
+    fonts, nav, base, vocabulary, origin: ORIGIN,
+  };
 
   // "Add to calendar": one small file beside each event page that is not cancelled.
   const writeCalendar = async (ev, dir, at) => {
@@ -398,7 +426,7 @@ for (const target of SITES) {
     if (ics) await write(`${dir}/event.ics`, ics);
   };
 
-  await write('theme.css', R.themeCss(tokens, fonts));
+  await write('theme.css', R.themeCss(tokens, fonts, layoutName));
 
   // The admin's editor, copied into the static output so it is served from
   // this origin. The admin's Content-Security-Policy is default-src 'self',
@@ -421,6 +449,20 @@ for (const target of SITES) {
     written.push('vendor/lightbox.js');
     await fs.copyFile(new URL('../../vendor/honbu/select-all.js', import.meta.url).pathname, path.join(OUT, 'vendor', 'select-all.js'));
     written.push('vendor/select-all.js');
+    await fs.copyFile(new URL('../../vendor/honbu/finder.js', import.meta.url).pathname, path.join(OUT, 'vendor', 'finder.js'));
+    written.push('vendor/finder.js');
+
+    // The federation's own pictures, kept as plain files under data/media and published as they are.
+    // Flat files first: nothing here needs a database, and a photograph is not a record.
+    const mediaDir = path.join(DATA, 'media');
+    try {
+      for (const f of await fs.readdir(mediaDir)) {
+        if (!/^[A-Za-z0-9._-]+\.(jpe?g|png|webp)$/i.test(f)) continue;
+        await fs.mkdir(path.join(OUT, 'media'), { recursive: true });
+        await fs.copyFile(path.join(mediaDir, f), path.join(OUT, 'media', f));
+        written.push(`media/${f}`);
+      }
+    } catch (e) { if (e.code !== 'ENOENT') throw e; }
 
     // The installable app: manifest, icons, offline page, service worker, and the two small scripts that use them.
     for (const f of ['pwa.js', 'push.js']) {
@@ -502,7 +544,7 @@ for (const target of SITES) {
   await write('index.html', R.homePage({
     dojos, events: evs, articles,
     // The file supplies defaults at the root; what the federation stored wins.
-    homeCopy: { ...(atRoot ? strip(rootSettings.homePage ?? {}) : {}), ...strip(orgSettings.homePage ?? {}) },
+    homeCopy,
     sections: homeSections,
     heroUrl: assets[orgSettings.homePage?.heroAssetId]
       ?? (atRoot ? assets[rootSettings.homePage?.heroAssetId] : null) ?? null,

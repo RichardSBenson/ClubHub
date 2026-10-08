@@ -4,6 +4,7 @@
   "name": "Slate",
   "description": "Cool blue-grey with a clear blue for actions. Modern and sporting without being loud.",
   "author": "Honbu",
+  "layout": "classic",
   "colours": {
     "primary": "#2543B8",
     "accent": "#7DD3FC",
