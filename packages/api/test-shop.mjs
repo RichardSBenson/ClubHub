@@ -89,6 +89,13 @@ console.log('\nWHO SEES WHAT');
   const theirs = await shop.forPerson((await one(`select id from account where email='ollie@example.nz'`)).id, ollie.id);
   ok('the other dojo\'s member sees their own tee and not Whanganui\'s', names(theirs.clubs[0]).includes('Other dojo tournament tee') && !names(theirs.clubs[0]).includes('Whanganui tournament tee'));
 }
+{
+  // Both a member and an instructor of the same dojo: one dojo's shop, not two.
+  await pool.query(`insert into affiliation (person_id, organisation_id, role, status, starts) values ($1,$2,'instructor','active', current_date)`, [ann.id, wh.id]);
+  const both = await shop.forPerson((await one(`select id from account where email='ann@example.nz'`)).id, ann.id);
+  ok('a member who also instructs sees their dojo once', both.clubs.length === 1, String(both.clubs.length));
+  await pool.query(`delete from affiliation where person_id=$1 and role='instructor'`, [ann.id]);
+}
 await signIn('ann@example.nz');
 {
   let r = await req('/me/shop');

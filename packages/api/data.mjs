@@ -7404,7 +7404,8 @@ export const shop = {
     await family.assertMayActFor(actor, personId);
     const person = await one('select id, first_name, last_name from person where id=$1', [personId]);
     if (!person) throw new NotFound('Person');
-    const clubs = await q(`select o.id, o.name from affiliation a join organisation o on o.id = a.organisation_id
+    // distinct: somebody who is both a member and an instructor at a club is one club, not two
+    const clubs = await q(`select distinct o.id, o.name from affiliation a join organisation o on o.id = a.organisation_id
       where a.person_id=$1 and a.ends is null and a.role in ('member','instructor','assistant') and a.status in ('active','trial') and o.type='club' order by o.name`, [personId]);
     const out = [];
     for (const club of clubs) {
