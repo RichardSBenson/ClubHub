@@ -198,8 +198,8 @@ console.log('\nTHE INSTALLABLE APP');
     && m.shortcuts.every((x) => x.url.startsWith('/')));
   const sw = read('sw.js');
   ok('the service worker keeps public pages and the shell', /honbu-shell-/.test(sw) && /honbu-pages-/.test(sw) && /offline\.html/.test(sw));
-  ok('the only signed-in pages it keeps are the card and the class roll, and sign-out empties them',
-    /\/card\$\//.test(sw) && /attendance/.test(sw) && /e\.data === 'purge'/.test(sw) && /caches\.delete\(DEVICE\)/.test(sw)
+  ok('the only signed-in pages it keeps are the card, the events list and the class roll, and sign-out empties them',
+    /\/card\$\//.test(sw) && /me\\\/events\$/.test(sw) && /attendance/.test(sw) && /e\.data === 'purge'/.test(sw) && /caches\.delete\(DEVICE\)/.test(sw)
     && !/\/me\/payments|\/me\/shop|dashboard/.test(sw.split('var KEEP')[1]?.split('\n')[0] ?? ''));
   ok('it never stores a page the server marked private', /isPrivate\(res\)/.test(sw));
   ok('and answers pushes and clicks', /addEventListener\('push'/.test(sw) && /addEventListener\('notificationclick'/.test(sw));

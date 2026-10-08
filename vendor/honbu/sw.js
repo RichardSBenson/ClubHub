@@ -5,8 +5,8 @@
  *   1. THE SHELL. The offline page, the icons and the two small scripts. Nothing personal.
  *   2. PUBLIC PAGES. A page the server did not mark private or no-store (the club and event pages anybody can read) is
  *      kept so it still opens with no signal. Each visit refreshes it.
- *   3. TWO SIGNED-IN PAGES, ON PURPOSE. A member's own membership card, and a club's class roll. Those are the two
- *      things that must work in a hall with no reception. They live in their own cache that is emptied on sign-out
+ *   3. THREE SIGNED-IN PAGES, ON PURPOSE. A member's own membership card, their list of upcoming events, and a club's
+ *      class roll. Those are what must work in a hall or a car park with no reception. They live in their own cache that is emptied on sign-out
  *      (pwa.js sends 'purge'), and nothing else signed-in is ever stored.
  *
  * Everything else signed-in goes straight to the network and, with no signal, shows the offline page.
@@ -20,7 +20,7 @@ var MAX_PAGES = 40;
 var SHELL_FILES = ['/offline.html', '/icons/icon-192.png', '/icons/icon-512.png', '/vendor/pwa.js', '/vendor/push.js'];
 
 /* The only signed-in pages the device may keep. */
-var KEEP = [/^\/me\/[0-9a-f-]{36}\/card$/, /^\/o\/[a-z0-9-]+\/attendance(\/[0-9a-f-]{36})?$/];
+var KEEP = [/^\/me\/[0-9a-f-]{36}\/card$/, /^\/me\/events$/, /^\/o\/[a-z0-9-]+\/attendance(\/[0-9a-f-]{36})?$/];
 var keepOnDevice = function (url) { return KEEP.some(function (re) { return re.test(url.pathname); }); };
 
 self.addEventListener('install', function (e) {

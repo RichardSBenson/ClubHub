@@ -9,7 +9,7 @@
  */
 (function () {
   var DEVICE = 'honbu-device';
-  var KEEP = [/^\/me\/[0-9a-f-]{36}\/card$/, /^\/o\/[a-z0-9-]+\/attendance(\/[0-9a-f-]{36})?$/];
+  var KEEP = [/^\/me\/[0-9a-f-]{36}\/card$/, /^\/me\/events$/, /^\/o\/[a-z0-9-]+\/attendance(\/[0-9a-f-]{36})?$/];
   var ROLL_POST = /^\/o\/[a-z0-9-]+\/attendance\/[0-9a-f-]{36}$/;
   var online = true;
 
@@ -43,7 +43,7 @@
     online = !on;
     style();
     if (on && !offlineBar) {
-      offlineBar = el('div', { class: 'pwa-bar', role: 'status' }, 'You are offline. You can still use your card and take the class roll; anything else needs a connection.');
+      offlineBar = el('div', { class: 'pwa-bar', role: 'status' }, 'You are offline. You can still use your card, see your upcoming events and take the class roll; anything else needs a connection.');
       document.body.appendChild(offlineBar);
     } else if (!on && offlineBar) { offlineBar.remove(); offlineBar = null; }
   }

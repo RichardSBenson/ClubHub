@@ -35,6 +35,8 @@ const server = http.createServer((req, res) => {
   if (url.pathname.startsWith('/icons/')) return send('image/png', iconPng(192));
   if (url.pathname === '/') return page('Public home', '<h1>Public home</h1>', false);
   if (url.pathname === `/me/${ID}/card`) return page('Card', '<h1>MY CARD</h1>');
+  if (url.pathname === '/me/events') return page('Events', '<h1>MY EVENTS</h1><a href="/me/events/e1/p1">Enter</a>');
+  if (url.pathname === '/me/events/e1/p1') return page('Entry', '<h1>ENTRY FORM</h1>');
   if (url.pathname === '/me/payments') return page('Payments', '<h1>MY PAYMENTS</h1>');
   if (url.pathname === '/o/club/attendance') return page('Attendance', `<h1>Attendance</h1><a href="/o/club/attendance/${ID}">Take the roll</a>`);
   if (url.pathname === `/o/club/attendance/${ID}` && req.method === 'GET')
@@ -60,7 +62,7 @@ await go('/');
 await page.evaluate(() => navigator.serviceWorker.ready);
 await go('/');                                   // now controlled
 ok('the page is controlled by the service worker', await page.evaluate(() => !!navigator.serviceWorker.controller));
-await go(`/me/${ID}/card`); await go('/me/payments'); await go('/o/club/attendance');
+await go(`/me/${ID}/card`); await go('/me/events'); await go('/me/events/e1/p1'); await go('/me/payments'); await go('/o/club/attendance');
 await page.waitForTimeout(1200);                  // pwa.js warms the roll link
 await go(`/o/club/attendance/${ID}`);
 ok('the roll opens', (await text()).includes('ROLL'));
@@ -71,6 +73,10 @@ await go('/');
 ok('a public page still opens', (await text()).includes('Public home'), await text());
 await go(`/me/${ID}/card`);
 ok('the membership card still opens', (await text()).includes('MY CARD'), await text());
+await go('/me/events');
+ok('the list of upcoming events still opens', (await text()).includes('MY EVENTS'), await text());
+await go('/me/events/e1/p1');
+ok('but an entry form, with the person\'s details, is not kept', (await text()).includes('You are offline') && !(await text()).includes('ENTRY FORM'), await text());
 await go('/me/payments');
 ok('other signed-in pages are NOT kept, the offline page shows instead', (await text()).includes('You are offline') && !(await text()).includes('MY PAYMENTS'), await text());
 await go(`/o/club/attendance/${ID}`);
@@ -91,13 +97,15 @@ await page.waitForTimeout(500);
 ok('and not sent twice', posts.length === 1, String(posts.length));
 
 console.log('\nSIGNING OUT EMPTIES THE DEVICE');
-await go(`/me/${ID}/card`);
+await go(`/me/${ID}/card`); await go('/me/events');
 await page.evaluate(() => { const f = document.createElement('form'); f.method = 'post'; f.action = '/signout'; f.innerHTML = '<button id="so">Sign out</button>'; document.body.appendChild(f); });
 await Promise.all([page.waitForNavigation().catch(() => {}), page.click('#so')]);
 await page.waitForTimeout(500);
 await ctx.setOffline(true);
 await go(`/me/${ID}/card`);
 ok('the card is gone from the device', (await text()).includes('You are offline') && !(await text()).includes('MY CARD'), await text());
+await go('/me/events');
+ok('and so is the events list', (await text()).includes('You are offline') && !(await text()).includes('MY EVENTS'), await text());
 
 await browser.close(); server.close();
 console.log(`\n${pass} passed, ${fail} failed\n`);

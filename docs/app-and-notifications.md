@@ -12,7 +12,7 @@ The service worker (`/sw.js`) keeps three things, and says why in its own header
 
 1. **The shell**: the offline page, icons and the two small scripts.
 2. **Public pages** (anything the server did not mark private): a club or event page opens again with no signal. Each visit refreshes it.
-3. **Two signed-in pages, on purpose**: a member's own **membership card**, and a club's **class roll** (the attendance list and each class's roll). Those are what must work in a hall with no reception. They sit in their own cache on that device, are refreshed on every visit, and are **emptied when somebody signs out**.
+3. **Three signed-in pages, on purpose**: a member's own **membership card**, their **list of upcoming events** (the list only, never an entry form), and a club's **class roll** (the attendance list and each class's roll). Those are what must work in a hall or car park with no reception. They sit in their own cache on that device, are refreshed on every visit, and are **emptied when somebody signs out**.
 
 Every other signed-in page goes straight to the network and, with no signal, shows the offline page. Signed-in pages are sent `Cache-Control: private, no-store`, which is also how the worker knows not to keep them.
 
