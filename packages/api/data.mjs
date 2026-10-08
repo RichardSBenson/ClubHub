@@ -12,8 +12,9 @@ export { pool } from '../infrastructure/postgres/pool.mjs';
 import { applyRegister } from './register-import.mjs';
 import { parseCsv } from '../core/domain/register-csv.mjs';
 import { pool } from '../infrastructure/postgres/pool.mjs';
-import { problemsWithPerson, problemsWithMembership, normaliseGender }
+import { problemsWithPerson, problemsWithMembership, normaliseGender, ageOn }
   from '../core/domain/people.mjs';
+import { problemsWithDocument, photoNeedsConsent } from '../core/domain/documents.mjs';
 import { whyNotInstructor, SUPPORTER_NO_RANK, problemsWithRoleAndGrade } from '../core/domain/roles.mjs';
 import { payeeFor, groupByPayee, problemsWithPaymentRequest, problemsWithPayment, KINDS as PAY_KINDS }
   from '../core/domain/payments.mjs';
@@ -6641,6 +6642,96 @@ export const gallery = {
 };
 
 // ---------------------------------------------------------------------------
+// Documents a member sends to their club
+// ---------------------------------------------------------------------------
+
+export const memberDocuments = {
+  async _homeOf(personId) {
+    return (await one(`select organisation_id from affiliation where person_id = $1 and ends is null
+      order by (role = 'member') desc limit 1`, [personId]))?.organisation_id ?? null;
+  },
+  async _isOfficial(actor, personId) {
+    for (const h of await homesOf(personId))
+      if ((await one('select has_role_at($1,$2,$3) as ok', [actor, h, REGISTER]))?.ok) return h;
+    return null;
+  },
+
+  /** Qualifications the person's club asks for, for the "what is it?" list. */
+  async choices(personId) {
+    const home = await this._homeOf(personId);
+    return home ? q(`select q.id, q.label ${CATALOGUE_FROM} order by q.label`, [home]) : [];
+  },
+
+  /** The person, a parent or guardian, or an official of their club: never the file itself. */
+  async list(actor, personId) {
+    const official = await this._isOfficial(actor, personId);
+    if (!official && !(await family.mayActFor(actor, personId))) throw new Forbidden();
+    const rows = await q(`select d.id, d.title, d.awarded_on::text as awarded_on, d.expires_on::text as expires_on, d.note, d.filename,
+        d.mime, d.size_bytes, d.status, d.created_at, d.review_note, qq.label as qualification
+      from member_document d left join qualification qq on qq.id = d.qualification_id
+      where d.person_id = $1 order by d.created_at desc`, [personId]);
+    return { rows, official: !!official };
+  },
+
+  async add(actor, personId, { file, qualificationId = null, title = '', awardedOn = null, expiresOn = null, note = '' }) {
+    if (!(await family.mayActFor(actor, personId)) && !(await this._isOfficial(actor, personId))) throw new Forbidden();
+    const home = await this._homeOf(personId);
+    if (!home) throw new Invalid('This person is not on a club\'s roll yet, so there is nobody to send it to.');
+    const qual = qualificationId
+      ? await one(`select q.id, q.label ${CATALOGUE_FROM} and q.id = $2`, [home, qualificationId]) : null;
+    if (qualificationId && !qual) throw new Invalid('That is not something this club asks for.');
+    const today = await qualToday(home);
+    const problems = problemsWithDocument({ title, awardedOn: awardedOn || '', expiresOn: expiresOn || '', hasQualification: !!qual },
+      { size: file?.bytes?.length ?? 0 }, { today });
+    if (problems.length) throw new Invalid(problems.join(' '));
+    const row = await one(`insert into member_document (person_id, organisation_id, qualification_id, title, awarded_on, expires_on, note,
+        filename, mime, bytes, size_bytes, uploaded_by)
+      values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) returning id`,
+      [personId, home, qual?.id ?? null, (qual?.label ?? String(title).trim()).slice(0, 120), awardedOn || null, expiresOn || null,
+       String(note ?? '').trim().slice(0, 300) || null, file.filename ?? null, file.mime, file.bytes, file.bytes.length, actor]);
+    await pool.query(`insert into audit_log (account_id, organisation_id, action, entity, entity_id, after)
+      values ($1,$2,'document_sent','person',$3,$4)`, [actor, home, personId, JSON.stringify({ documentId: row.id, title: qual?.label ?? title })]);
+    return row;
+  },
+
+  async file(actor, personId, docId) {
+    const official = await this._isOfficial(actor, personId);
+    if (!official && !(await family.mayActFor(actor, personId))) throw new Forbidden();
+    const d = await one('select mime, bytes, filename from member_document where id = $1 and person_id = $2', [docId, personId]);
+    if (!d) throw new NotFound('Document');
+    return d;
+  },
+
+  /** A registrar accepts or declines. Accepting a qualification records it, with this file as the proof. */
+  async review(actor, personId, docId, { accept, note = '', awardedOn = null, expiresOn = null }) {
+    const home = await this._isOfficial(actor, personId);
+    if (!home) throw new Forbidden();
+    const d = await one('select id, status, title, qualification_id, awarded_on::text as awarded_on, expires_on::text as expires_on from member_document where id = $1 and person_id = $2', [docId, personId]);
+    if (!d) throw new NotFound('Document');
+    if (d.status !== 'pending') throw new Invalid('That one has already been dealt with.');
+    let awardId = null;
+    if (accept && d.qualification_id) {
+      const on = awardedOn || d.awarded_on;
+      if (!on) throw new Invalid('There is no issue date on this one. Add the date it was issued before accepting.');
+      const a = await one(`insert into qualification_award (person_id, qualification_id, awarded_on, expires_on, reference, recorded_by)
+        values ($1,$2,$3,$4,$5,$6) returning id`, [personId, d.qualification_id, on, expiresOn || d.expires_on || null, 'Sent in by the member', actor]);
+      awardId = a.id;
+    }
+    await pool.query(`update member_document set status = $2, reviewed_by = $3, reviewed_at = now(), review_note = $4, award_id = $5 where id = $1`,
+      [docId, accept ? 'accepted' : 'declined', actor, String(note ?? '').trim().slice(0, 300) || null, awardId]);
+    await pool.query(`insert into audit_log (account_id, organisation_id, action, entity, entity_id, after)
+      values ($1,$2,$3,'person',$4,$5)`, [actor, home, accept ? 'document_accepted' : 'document_declined', personId, JSON.stringify({ documentId: docId, title: d.title })]);
+  },
+
+  async waiting(actor, orgId) {
+    await assertRole(actor, orgId, REGISTER);
+    return q(`select d.id, d.title, d.person_id, p.first_name, p.last_name, d.created_at from member_document d join person p on p.id = d.person_id
+      join organisation o on o.id = d.organisation_id
+      where d.status = 'pending' and o.path <@ (select path from organisation where id = $1) order by d.created_at`, [orgId]);
+  },
+};
+
+// ---------------------------------------------------------------------------
 // A person's photograph: one picture on their record, used wherever they appear
 // ---------------------------------------------------------------------------
 
@@ -6661,13 +6752,15 @@ export const photos = {
    */
   async set(actor, personId, { bytes, identified, filename }, { consent } = {}) {
     await this.assertMay(actor, personId);
-    if (!consent) throw new Invalid('Please confirm that the person (or their parent or guardian) agrees to this photograph being kept.');
+    const kid = await one('select date_of_birth::text as dob from person where id = $1', [personId]);
+    if (photoNeedsConsent(ageOn(kid?.dob, null)) && !consent)
+      throw new Invalid('Please confirm that their parent or guardian agrees to this photograph being kept.');
     const home = await one(`select organisation_id from affiliation where person_id = $1 and ends is null
       order by (role = 'member') desc limit 1`, [personId]);
     if (!home) throw new NotFound('Person has no current affiliation');
     const who = await one(`select first_name || ' ' || last_name as name from person where id = $1`, [personId]);
     const asset = await insertAsset(actor, home.organisation_id, { bytes, identified, filename,
-      altText: `Photograph of ${who.name}`, consentRef: `Agreed to by the person or their guardian, recorded ${new Date().toISOString().slice(0, 10)}` });
+      altText: `Photograph of ${who.name}`, consentRef: `Kept with the agreement of the person or their guardian, recorded ${new Date().toISOString().slice(0, 10)}` });
     await pool.query('update person set photo_asset_id = $2, updated_at = now() where id = $1', [personId, asset.id]);
     await pool.query(`insert into audit_log (account_id, organisation_id, action, entity, entity_id, after)
       values ($1,$2,'person_photo_set','person',$3,$4)`, [actor, home.organisation_id, personId, JSON.stringify({ assetId: asset.id })]);

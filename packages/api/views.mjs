@@ -5,6 +5,8 @@ import { highlight as searchHighlight, linkTo as searchLinkTo }
   from '../content/search.mjs';
 import { REASON_WORDS } from '../core/domain/repeat-entry.mjs';
 import { EVENT_TYPES } from '../core/domain/event-types.mjs';
+import { photoNeedsConsent } from '../core/domain/documents.mjs';
+import { ageOn as personAgeOn } from '../core/domain/people.mjs';
 import { slotHint, slotTable } from '../content/image-slots.mjs';
 import { WRITING_HELP } from '../content/document-text.mjs';
 import path from 'node:path';
@@ -428,7 +430,7 @@ export const dashboard = ({ me, csrf, orgs, parents = [], groups = [], platformO
   </div>`).join('')}</div>`).join('')}` });
 };
 
-export const roster = ({ me, csrf, org, roster, total = null, canRegister = false, canManage = false, unlinked = [],
+export const roster = ({ me, csrf, org, roster, total = null, canRegister = false, canManage = false, unlinked = [], waitingDocs = [],
                         filter = {}, ladder = [], done, error, rebuild }) => {
   const here = `/o/${esc(org.slug)}/roster`;
   const withDojo = org.type !== 'club';
@@ -455,6 +457,8 @@ export const roster = ({ me, csrf, org, roster, total = null, canRegister = fals
   ${done ? `<div class="good">${esc(done)}</div>` : ''}
   ${error ? `<div class="bad">${esc(error)}</div>` : ''}
   ${rebuild ? `<div class="note">${esc(rebuild)}</div>` : ''}
+  ${waitingDocs.length ? `<div class="note"><strong>${waitingDocs.length} document${waitingDocs.length === 1 ? ' is' : 's are'} waiting to be checked.</strong>
+    ${waitingDocs.slice(0, 6).map((d) => `<a href="/p/${esc(d.person_id)}">${esc(d.first_name)} ${esc(d.last_name)}</a> (${esc(d.title)})`).join(', ')}${waitingDocs.length > 6 ? ' …' : ''}</div>` : ''}
   ${unlinked.length ? `<div class="note"><strong>${unlinked.length} ${unlinked.length === 1 ? 'child has' : 'children have'} no parent or guardian linked.</strong>
     A child should always sit under a parent. They are marked below; open each one and link a parent.
     <a href="${here}?band=junior">Show the children</a></div>` : ''}
@@ -517,7 +521,7 @@ export const roster = ({ me, csrf, org, roster, total = null, canRegister = fals
 
 export const person = ({ me, csrf, person, history, affiliations, eligibility,
                         titles = [], changes = [], guardians = null, training = null,
-                        canEdit = false, access = null, link = null, isInstructor = false, mayInstruct = false, canManage = false, done = null, photoError = null, recognisable = [], instructorSite = null,
+                        canEdit = false, access = null, link = null, isInstructor = false, mayInstruct = false, documents = [], canManage = false, done = null, photoError = null, recognisable = [], instructorSite = null,
                         linkExpires = 15, error = null }) => page({
   title: `${person.first_name} ${person.last_name}`, me, csrf, body: `<style>${identityCss}
   .idphoto{background:#ddd}.idphoto.none{color:#666}.idchip{color:#9a2a1f}</style>
@@ -568,13 +572,14 @@ export const person = ({ me, csrf, person, history, affiliations, eligibility,
   ${canEdit ? `<form method="post" action="/p/${esc(person.id)}/photo" enctype="multipart/form-data" class="card" style="margin:12px 0">
     <input type="hidden" name="_csrf" value="${esc(csrf ?? '')}">
     <h3 style="margin-top:0">Photograph</h3>
-    <p><input type="file" name="photo" accept="image/png,image/jpeg,image/webp"></p>
-    <p class="hint">${esc(slotHint('portrait'))} The same photograph is used on their membership card and, if they are shown on the website, on their instructor card.</p>
-    <label class="check"><input type="checkbox" name="consent">
-      They (or their parent or guardian) agree to this photograph being kept on their record.</label>
+    <p><input type="file" name="photo" data-photo accept="image/png,image/jpeg,image/webp"></p>
+    <p class="hint">${esc(slotHint('portrait'))} The same photograph is used on their membership card and, if they are shown on the website, on their instructor card. You can also tap the picture at the top.</p>
+    ${photoNeedsConsent(person.age) ? `<label class="check"><input type="checkbox" name="consent">
+      Their parent or guardian agrees to this photograph being kept on their record.</label>
+    <p class="hint" id="photo-wait" hidden>Tick the box above and the photograph will be sent.</p>` : ''}
     <p><button class="btn" type="submit">Save photograph</button>
       ${person.photo_asset_id ? '<button class="btn quiet" type="submit" name="remove" value="1">Remove photograph</button>' : ''}</p>
-  </form>` : ''}
+  </form><script src="/vendor/photo-pick.js" defer></script>` : ''}
 
   ${!eligibility?.next && history.length
     ? `<div class="note"><strong>Top of the ladder.</strong>
@@ -703,6 +708,16 @@ export const person = ({ me, csrf, person, history, affiliations, eligibility,
     </div>
     <div class="actions"><button class="btn" type="submit">Link them</button></div>
   </form>` : ''}
+
+  ${documents.length ? `<h2>Documents sent in</h2><table><tbody>${documents.map((d) => `<tr>
+    <td><a href="/p/${esc(person.id)}/document/${esc(d.id)}">${esc(d.title)}</a>
+      <div class="muted">${esc(when(d.created_at))}${d.awarded_on ? ` · issued ${esc(d.awarded_on)}` : ''}${d.expires_on ? ` · runs out ${esc(d.expires_on)}` : ''}${d.note ? ` · ${esc(d.note)}` : ''}</div></td>
+    <td>${d.status === 'pending' && canEdit ? `<form method="post" action="/p/${esc(person.id)}/document/${esc(d.id)}/review">
+      <input type="hidden" name="_csrf" value="${esc(csrf ?? '')}">
+      <input name="note" maxlength="300" placeholder="Note (optional)" aria-label="Note">
+      <button class="btn" type="submit" name="decision" value="accept">${d.qualification ? 'Accept and record' : 'Accept'}</button>
+      <button class="btn quiet" type="submit" name="decision" value="decline">Decline</button></form>`
+      : `<span class="tag ${DOC_STATUS[d.status][0]}">${DOC_STATUS[d.status][1]}</span>`}</td></tr>`).join('')}</tbody></table>` : ''}
 
   <h2>Affiliation</h2>
   <ul class="plain">${affiliations.map((a) => `<li>
@@ -3152,13 +3167,19 @@ export const myPerson = ({ me, csrf, how, person, private: priv = {}, grade, mem
     <input type="hidden" name="_csrf" value="${esc(csrf ?? '')}">
     <input type="hidden" name="return" value="me">
     ${person.photo_asset_id ? `<p><img src="/p/${esc(person.id)}/photo" alt="Photograph of ${esc(person.first_name)}" style="width:120px;height:120px;object-fit:cover;border-radius:2px"></p>` : '<p class="hint">No photograph yet.</p>'}
-    <p><input type="file" name="photo" accept="image/png,image/jpeg,image/webp"></p>
-    <p class="hint">${esc(slotHint('portrait'))} It is used on ${mine ? 'your' : 'their'} membership card and, if ${mine ? 'you are' : 'they are'} shown on the website, on the instructor card.</p>
-    <label class="check"><input type="checkbox" name="consent">
-      ${mine ? 'I agree' : 'I agree, as their parent or guardian,'} to this photograph being kept on the record.</label>
+    <p><input type="file" name="photo" data-photo accept="image/png,image/jpeg,image/webp"></p>
+    <p class="hint">${esc(slotHint('portrait'))} It is used on ${mine ? 'your' : 'their'} membership card and, if ${mine ? 'you are' : 'they are'} shown on the website, on the instructor card. You can also tap the picture at the top.</p>
+    ${photoNeedsConsent(personAgeOn(person.date_of_birth, null)) ? `<label class="check"><input type="checkbox" name="consent">
+      ${mine ? 'My parent or guardian agrees' : 'I agree, as their parent or guardian,'} to this photograph being kept on the record.</label>
+    <p class="hint" id="photo-wait" hidden>Tick the box above and the photograph will be sent.</p>` : ''}
     <p><button class="btn" type="submit">Save photograph</button>
       ${person.photo_asset_id ? '<button class="btn quiet" type="submit" name="remove" value="1">Remove photograph</button>' : ''}</p>
   </form>
+  <script src="/vendor/photo-pick.js" defer></script>
+
+  <h2>Documents</h2>
+  <p>Certificates, first aid, declarations and receipts are all in one place.
+    <a class="btn" href="/me/${esc(person.id)}/documents">Open ${mine ? 'my' : 'their'} documents</a></p>
 
   <h2>Contact and safety details</h2>
   <form method="post" action="/me/${esc(person.id)}">
@@ -4262,10 +4283,45 @@ const eventRows = (rows) => `<table><thead><tr><th>When</th><th>Event</th><th>St
   <td><span class="tag ${['entered', 'confirmed'].includes(e.status) ? 'ok' : 'no'}">${esc(ENTRY_WORDS[e.status] ?? e.status)}</span>${
     e.pay_status && e.pay_status !== 'succeeded' ? ' <span class="tag wait">Not paid</span>' : ''}</td></tr>`).join('')}</tbody></table>`;
 
-export const myDocuments = ({ me, csrf, how, person, certificates = [], consents = [], qualifications = [], receipts = [] }) => page({
+const DOC_STATUS = { pending: ['wait', 'Waiting for your club'], accepted: ['ok', 'Accepted'], declined: ['no', 'Declined'] };
+
+export const myDocuments = ({ me, csrf, how, person, certificates = [], consents = [], qualifications = [], receipts = [],
+                             sent = [], choices = [], done = null, error = null }) => page({
   title: `${person.first_name} — documents`, me, csrf, body: `
-  <h1>${esc(person.first_name)} ${esc(person.last_name)}</h1>
-  <p class="sub"><a href="/me">Back</a> · <a href="/me/${esc(person.id)}/record">Record</a></p>
+  <h1>${esc(person.first_name)} ${esc(person.last_name)} — documents</h1>
+  <p class="sub"><a href="/me">Back</a> · <a href="/me/${esc(person.id)}/record">Record</a> ·
+    <a href="/me/${esc(person.id)}">Photograph and details</a></p>
+  ${done ? `<div class="good">${esc(done)}</div>` : ''}
+  ${error ? `<div class="bad">${esc(error)}</div>` : ''}
+
+  <h2>Send a document to the club</h2>
+  <form method="post" action="/me/${esc(person.id)}/documents" enctype="multipart/form-data" class="card">
+    <input type="hidden" name="_csrf" value="${esc(csrf ?? '')}">
+    <p class="hint">A first aid certificate, police vet, or anything else the club needs. Take a photograph of it or send a PDF.
+      The club checks it and records it for ${how === 'self' ? 'you' : esc(person.first_name)}.</p>
+    <label for="doc-kind">What is it?</label>
+    <select id="doc-kind" name="qualificationId">
+      ${choices.map((c) => `<option value="${esc(c.id)}">${esc(c.label)}</option>`).join('')}
+      <option value="">Something else</option>
+    </select>
+    <label for="doc-title">If something else, what? <span class="muted">(optional otherwise)</span></label>
+    <input id="doc-title" name="title" maxlength="120">
+    <div class="row">
+      <div><label for="doc-on">Date it was issued</label><input id="doc-on" type="date" name="awardedOn"></div>
+      <div><label for="doc-exp">Runs out <span class="muted">(if it says)</span></label><input id="doc-exp" type="date" name="expiresOn"></div>
+    </div>
+    <label for="doc-file">The file</label>
+    <input id="doc-file" type="file" name="document" accept="image/png,image/jpeg,image/webp,application/pdf" required>
+    <label for="doc-note">Anything the club should know <span class="muted">(optional)</span></label>
+    <input id="doc-note" name="note" maxlength="300">
+    <p><button class="btn" type="submit">Send</button></p>
+  </form>
+
+  ${sent.length ? `<h2>Sent to the club</h2><table><tbody>${sent.map((d) => `<tr>
+    <td><a href="/p/${esc(person.id)}/document/${esc(d.id)}">${esc(d.title)}</a>
+      <div class="muted">${esc(when(d.created_at))}${d.awarded_on ? ` · issued ${esc(d.awarded_on)}` : ''}</div></td>
+    <td><span class="tag ${DOC_STATUS[d.status][0]}">${DOC_STATUS[d.status][1]}</span>
+      ${d.review_note ? `<div class="muted">${esc(d.review_note)}</div>` : ''}</td></tr>`).join('')}</tbody></table>` : ''}
 
   <h2>Certificates</h2>
   ${certificates.length ? `<ul class="plain">${certificates.map((c) => `<li><a href="/p/${esc(person.id)}/certificate/${esc(c.id)}">${esc(c.label)}</a>
@@ -4274,7 +4330,7 @@ export const myDocuments = ({ me, csrf, how, person, certificates = [], consents
   <h2>Qualifications</h2>
   ${qualifications.length ? `<table><tbody>${qualifications.map((a) => `<tr><td>${esc(a.label)}</td>
     <td>${esc(QUAL_WORDS[a.state] ?? a.state)}${a.expires_on ? ` · until ${esc(a.expires_on)}` : ''}</td></tr>`).join('')}</tbody></table>
-    <p class="muted">To add a new certificate, send it to your club to be recorded.</p>` : '<p class="muted">None recorded.</p>'}
+    ` : '<p class="muted">None recorded yet. Send a certificate above and the club will record it.</p>'}
 
   <h2>Declarations signed</h2>
   ${consents.length ? consents.map((c) => `<details><summary><strong>${esc(c.title)}</strong>

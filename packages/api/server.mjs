@@ -34,7 +34,7 @@ import crypto from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { URL } from 'node:url';
 import { photos, instructorRole, eventDetails, gallery, MAX_GALLERY, pool, orgs, people, rank, events, competition, pages, assets, news,
-         instructors, navigation, audit, cards, checkin, search, clubPages, appearance, clubs, registerImport, clubProfile, family, myself, memberEvents, messages, emailPreferences, payments, fees, renewals, reminders, attendance, newcomers, reports, gradings, qualifications, forms, autoRenew, booking, shop, push, apiTokens, api, webhooks, platform, portal, enquiries, scheduledPublishing, TooMany, outsiders, trials, referrals, growth, clubMailer, terms,
+         instructors, memberDocuments, navigation, audit, cards, checkin, search, clubPages, appearance, clubs, registerImport, clubProfile, family, myself, memberEvents, messages, emailPreferences, payments, fees, renewals, reminders, attendance, newcomers, reports, gradings, qualifications, forms, autoRenew, booking, shop, push, apiTokens, api, webhooks, platform, portal, enquiries, scheduledPublishing, TooMany, outsiders, trials, referrals, growth, clubMailer, terms,
          Forbidden, NotFound, Invalid } from './data.mjs';
 import * as auth from './auth.mjs';
 import * as V from './views.mjs';
@@ -76,6 +76,7 @@ import { documentFromText, textFromDocument }
   from '../content/document-text.mjs';
 import { typeFor, readType, defaultTitle } from '../core/domain/event-types.mjs';
 import { fitFor } from '../content/image-slots.mjs';
+import { isPdf, MAX_DOCUMENT_BYTES } from '../core/domain/documents.mjs';
 import { identify, NotAnImage, ACCEPTED, MAX_BYTES }
   from '../content/images.mjs';
 import { parseTable, planImport } from '../core/domain/roll-import.mjs';
@@ -362,9 +363,10 @@ get('/o/:slug/roster', async (ctx) => {
   }).map((r) => ({ ...r, instructor: states.get(r.id) ?? null }));
   const unlinked = await family.withoutGuardian(all.filter((r) => r.age != null && r.age < 18).map((r) => r.id));
   for (const r of shown) r.noGuardian = unlinked.has(r.id);
+  const waitingDocs = await memberDocuments.waiting(ctx.me.accountId, org.id).catch(() => []);
   const ladderOwner = await orgs.ladderOwnerOf(org.id);
   return ctx.send(200, V.roster({
-    me: ctx.me, org, roster: shown, total: all.length, unlinked: all.filter((r) => unlinked.has(r.id)), csrf: ctx.csrf,
+    me: ctx.me, org, roster: shown, total: all.length, unlinked: all.filter((r) => unlinked.has(r.id)), waitingDocs, csrf: ctx.csrf,
     canRegister: await mayRegisterAt(ctx, org.id), canManage, filter,
     ladder: ladderOwner ? await rank.ladder(ladderOwner.id) : [],
     done: q.get('done'), error: q.get('error'), rebuild: q.get('rebuild'),
@@ -396,6 +398,7 @@ get('/p/:id', async (ctx) => {
   return ctx.send(200, V.person({
     me: ctx.me, ...record, eligibility, csrf: ctx.csrf, canEdit,
     isInstructor: await instructorRole.is(record.person.id), canManage: mayManage,
+    documents: await memberDocuments.list(ctx.me.accountId, record.person.id).then((d) => d.rows).catch(() => []),
     mayInstruct: !!(await pool.query('select 1 from person_current_grade where person_id = $1 and is_dan', [record.person.id])).rows.length,
     done: ctx.url.searchParams.get('done'), photoError: ctx.url.searchParams.get('error'),
     titles: await people.titlesOf(ctx.me.accountId, ctx.params.id),
@@ -797,10 +800,60 @@ get('/me/:personId/record', async (ctx) => {
   return ctx.send(200, V.myRecord({ me: ctx.me, csrf: ctx.csrf, ...(await portal.record(ctx.me.accountId, ctx.params.personId)) }));
 });
 
-get('/me/:personId/documents', async (ctx) => {
+async function documentsPage(ctx, extra = {}) {
+  const id = ctx.params.personId;
+  if (!UUID_RE.test(id)) throw new NotFound('Person');
+  return ctx.send(extra.status ?? 200, V.myDocuments({ me: ctx.me, csrf: ctx.csrf, ...(await portal.documents(ctx.me.accountId, id)),
+    sent: (await memberDocuments.list(ctx.me.accountId, id)).rows, choices: await memberDocuments.choices(id),
+    done: ctx.url.searchParams.get('done'), error: ctx.url.searchParams.get('error'), ...extra }));
+}
+get('/me/:personId/documents', async (ctx) => { ctx.requireActor(); return documentsPage(ctx); });
+
+// Anybody linked to the person, at any age, may send a document to their club.
+post('/me/:personId/documents', async (ctx) => {
   ctx.requireActor();
-  if (!UUID_RE.test(ctx.params.personId)) throw new NotFound('Person');
-  return ctx.send(200, V.myDocuments({ me: ctx.me, csrf: ctx.csrf, ...(await portal.documents(ctx.me.accountId, ctx.params.personId)) }));
+  const id = ctx.params.personId;
+  if (!UUID_RE.test(id)) throw new NotFound('Person');
+  await family.assertMayActFor(ctx.me.accountId, id);
+  const back = `/me/${id}/documents`;
+  try {
+    const { fields, files } = await ctx.upload({ maxBytes: MAX_DOCUMENT_BYTES + 256 * 1024 });
+    const f = files.find((x) => x.field === 'document' && x.bytes.length);
+    if (!f) return ctx.redirect(`${back}?error=${encodeURIComponent('Choose the file to send.')}`);
+    // What it is comes from its bytes, never from the name or type it arrived with.
+    let mime;
+    if (isPdf(f.bytes)) mime = 'application/pdf';
+    else {
+      try { mime = identify(f.bytes, { filename: f.filename }).mime; }
+      catch (e) { if (e instanceof NotAnImage) throw new Invalid('Send a photograph (PNG, JPEG or WebP) or a PDF.'); throw e; }
+    }
+    await memberDocuments.add(ctx.me.accountId, id, { file: { bytes: f.bytes, mime, filename: f.filename },
+      qualificationId: fields.qualificationId || null, title: fields.title, awardedOn: fields.awardedOn, expiresOn: fields.expiresOn, note: fields.note });
+    return ctx.redirect(`${back}?done=${encodeURIComponent('Sent. Your club will look at it and record it.')}`);
+  } catch (e) {
+    if (e instanceof BadUpload || e instanceof Invalid) return ctx.redirect(`${back}?error=${encodeURIComponent(e.message)}`);
+    throw e;
+  }
+});
+
+get('/p/:id/document/:docId', async (ctx) => {
+  ctx.requireActor();
+  if (!UUID_RE.test(ctx.params.id) || !UUID_RE.test(ctx.params.docId)) throw new NotFound('Document');
+  const d = await memberDocuments.file(ctx.me.accountId, ctx.params.id, ctx.params.docId);
+  return ctx.sendBytes(200, d.bytes, { type: d.mime, filename: d.filename ?? 'document', cacheControl: 'private, no-store' });
+});
+
+post('/p/:id/document/:docId/review', async (ctx) => {
+  ctx.requireActor();
+  if (!UUID_RE.test(ctx.params.id) || !UUID_RE.test(ctx.params.docId)) throw new NotFound('Document');
+  const form = await ctx.form();
+  try {
+    await memberDocuments.review(ctx.me.accountId, ctx.params.id, ctx.params.docId, { accept: form.decision === 'accept', note: form.note, awardedOn: form.awardedOn });
+  } catch (e) {
+    if (e instanceof Invalid) return ctx.redirect(`/p/${ctx.params.id}?error=${encodeURIComponent(e.message)}`);
+    throw e;
+  }
+  return ctx.redirect(`/p/${ctx.params.id}?done=${encodeURIComponent(form.decision === 'accept' ? 'Accepted.' : 'Declined.')}`);
 });
 
 // ---- entering events as a member or a parent ------------------------------

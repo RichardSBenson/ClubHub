@@ -120,12 +120,11 @@ console.log('\nTHE PHOTOGRAPH');
 await signIn('doug@example.nz');
 {
   let r = await multi(`/p/${sensei.id}/photo`, {}, { field: 'photo', bytes: PNG, name: 'hana.png' });
-  if (!/error=/.test(r.location ?? '')) console.log('   said', r.status, r.location);
-  ok('a photograph needs the person\'s agreement', /error=/.test(r.location) && /agrees/.test(decodeURIComponent(r.location)));
+  ok('an adult needs nobody\'s agreement for their photograph', r.status === 302 && /done=Photograph/.test(r.location), r.location);
   r = await multi(`/p/${sensei.id}/photo`, { consent: 'on' }, { field: 'photo', bytes: PNG, name: 'hana.png' });
-  ok('with it, it is saved', r.status === 302 && /done=Photograph/.test(r.location));
+  ok('and ticking it does no harm, it is saved', r.status === 302 && /done=Photograph/.test(r.location));
   const p = await one(`select p.photo_asset_id, a.consent_ref from person p join asset a on a.id = p.photo_asset_id where p.id=$1`, [sensei.id]);
-  ok('on the person\'s record, with the consent noted', !!p && /Agreed/.test(p.consent_ref));
+  ok('on the person\'s record, with the consent noted', !!p && /agreement/.test(p.consent_ref));
   r = await req(`/p/${sensei.id}/photo`);
   ok('an official can see it', r.status === 200 && /image\/png/.test(r.headers.get('content-type')));
   ok('the profile shows it', /class="idphoto"/.test((await req(`/p/${sensei.id}`)).html));
