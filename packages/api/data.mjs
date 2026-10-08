@@ -1161,7 +1161,9 @@ export const competition = {
              p.gender as person_gender, o.name as entered_for,
              cg.label as grade, cg.rank_order,
              (select count(*)::int from entry_consent c where c.entry_id = e.id)
-               as consents
+               as consents,
+             (select c.guardian from entry_consent c where c.entry_id = e.id
+               order by c.accepted_at desc limit 1) as consent_guardian
       from event_entry e
       left join person p on p.id = e.person_id
       left join organisation o on o.id = e.entered_for_org

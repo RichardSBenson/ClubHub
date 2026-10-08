@@ -392,6 +392,23 @@ console.log('\nTHE ENTRY LIST');
     r.html.includes('calculated'), 'placement source not shown');
 }
 
+console.log('\nTHE ENTRIES AS A SPREADSHEET');
+{
+  const r = await req('/o/whanganui/events/2026-kokoro-cup/entries.csv');
+  ok('it downloads', r.status === 200, String(r.status));
+  const lines = r.html.replace(/^\uFEFF/, '').trim().split('\r\n');
+  const head = lines[0].split(',');
+  for (const col of ['Last name', 'First name', 'Age on the day', 'Weight (kg)', 'Height (cm)', 'Grade', 'Years training', 'Dojo'])
+    ok(`column: ${col}`, head.includes(col), lines[0]);
+  const n = (await q('select count(*)::int n from event_entry e join event ev on ev.id = e.event_id where ev.slug = $1', ['2026-kokoro-cup']))[0].n;
+  ok('one row for every entry', lines.length - 1 === n, `${lines.length - 1} rows, ${n} entries`);
+  const saved = { ...jar };
+  for (const k of Object.keys(jar)) delete jar[k];
+  const anon = await req('/o/whanganui/events/2026-kokoro-cup/entries.csv');
+  ok('and a stranger cannot have it', anon.status !== 200, String(anon.status));
+  Object.assign(jar, saved);
+}
+
 console.log('\nTHE ORGANISER CAN MOVE SOMEBODY THE RULES COULD NOT PLACE');
 {
   // Put somebody in with no weight so they land unplaced, then place them.

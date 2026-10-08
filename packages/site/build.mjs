@@ -470,12 +470,18 @@ for (const target of SITES) {
       written.push(`vendor/${f}`);
     }
     await fs.copyFile(new URL('../../vendor/honbu/sw.js', import.meta.url).pathname, path.join(OUT, 'sw.js'));
-    await write('manifest.webmanifest', JSON.stringify(PWA.manifest({ name: federation.name }), null, 2));
+    await write('manifest.webmanifest', JSON.stringify(PWA.manifest({ name: federation.name, shortName: orgWords.shortName ?? rootSettings.organisation?.shortName ?? null, background: tokens.ink ?? '#161617' }), null, 2));
     await write('offline.html', PWA.offlinePage(federation.name));
     await fs.mkdir(path.join(OUT, 'icons'), { recursive: true });
-    for (const [file, size, maskable] of [['icon-192.png', 192, false], ['icon-512.png', 512, false], ['icon-maskable-512.png', 512, true]])
-      await fs.writeFile(path.join(OUT, 'icons', file), PWA.iconPng(size, { maskable }));
-    written.push('sw.js', 'icons/icon-192.png', 'icons/icon-512.png', 'icons/icon-maskable-512.png');
+    // The federation's own crest when there is one this build can read; otherwise the plain H on the app colour.
+    let crest = null;
+    if (/^\/media\/[A-Za-z0-9._-]+\.png$/i.test(orgWords.logo ?? ''))
+      crest = await fs.readFile(new URL(`../../data${orgWords.logo}`, import.meta.url)).catch(() => null);
+    for (const [file, size, maskable] of [['icon-192.png', 192, false], ['icon-512.png', 512, false], ['icon-maskable-192.png', 192, true], ['icon-maskable-512.png', 512, true]]) {
+      const drawn = crest ? PWA.crestIconPng(crest, size, { colour: tokens.ink ?? '#161617', maskable }) : null;
+      await fs.writeFile(path.join(OUT, 'icons', file), drawn ?? PWA.iconPng(size, { maskable }));
+    }
+    written.push('sw.js', 'icons/icon-192.png', 'icons/icon-512.png', 'icons/icon-maskable-192.png', 'icons/icon-maskable-512.png');
   }
 
   // Only those the organisation has published. An empty page is the right

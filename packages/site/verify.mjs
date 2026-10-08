@@ -192,8 +192,16 @@ console.log('\nTHE INSTALLABLE APP');
   const m = JSON.parse(read('manifest.webmanifest'));
   ok('a manifest starts the app at /me', m.start_url === '/me' && m.display === 'standalone' && m.name.length > 0);
   ok('every icon it names was built, as a PNG', m.icons.every((i) => fs.readFileSync(path.join(OUT, i.src)).subarray(1, 4).toString() === 'PNG'));
+  ok('the manifest can be installed properly: id, scope, maskable icons, shortcuts',
+    m.id === '/me' && m.scope === '/' && m.icons.some((i) => i.purpose === 'maskable' && i.sizes === '192x192')
+    && m.icons.some((i) => i.purpose === 'maskable' && i.sizes === '512x512') && m.shortcuts.length >= 3
+    && m.shortcuts.every((x) => x.url.startsWith('/')));
   const sw = read('sw.js');
-  ok('the service worker caches only the offline shell', !/cache\.put|cache\.add\(/.test(sw) && /addAll\(\['\/offline\.html', '\/icons\/icon-192\.png'\]\)/.test(sw));
+  ok('the service worker keeps public pages and the shell', /honbu-shell-/.test(sw) && /honbu-pages-/.test(sw) && /offline\.html/.test(sw));
+  ok('the only signed-in pages it keeps are the card and the class roll, and sign-out empties them',
+    /\/card\$\//.test(sw) && /attendance/.test(sw) && /e\.data === 'purge'/.test(sw) && /caches\.delete\(DEVICE\)/.test(sw)
+    && !/\/me\/payments|\/me\/shop|dashboard/.test(sw.split('var KEEP')[1]?.split('\n')[0] ?? ''));
+  ok('it never stores a page the server marked private', /isPrivate\(res\)/.test(sw));
   ok('and answers pushes and clicks', /addEventListener\('push'/.test(sw) && /addEventListener\('notificationclick'/.test(sw));
   ok('the offline page and both scripts are there', /offline/i.test(read('offline.html')) && fs.existsSync(path.join(OUT, 'vendor/pwa.js')) && fs.existsSync(path.join(OUT, 'vendor/push.js')));
 }

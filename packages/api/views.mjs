@@ -1755,6 +1755,7 @@ export const entryList = ({ me, csrf, org, event, entries = [],
   <h1>Entries</h1>
   <p class="sub">${esc(event.title)} · ${esc(org.name)} ·
     <a href="/o/${esc(org.slug)}/events/${esc(event.slug)}/setup">Divisions and fees</a></p>
+  <p><a class="btn" href="/o/${esc(org.slug)}/events/${esc(event.slug)}/entries.csv">Download entries (CSV)</a></p>
 
   ${done ? `<div class="good">${esc(done)}</div>` : ''}
   ${error ? `<div class="bad">${esc(error)}</div>` : ''}

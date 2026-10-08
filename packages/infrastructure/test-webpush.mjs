@@ -65,7 +65,7 @@ console.log('\nTHE APP FILES');
   ok('and decodes to the right amount of pixels', raw.length === 192 * (192 * 3 + 1));
   ok('the corner is the app colour, the middle of the H is white', raw[1] === 0x34 && raw[2] === 0x51 && raw[3] === 0xD1 && raw[(96) * (192 * 3 + 1) + 1 + 96 * 3] === 255);
   const m = manifest({ name: 'MOKNZ' });
-  ok('the manifest starts the app at My details and has all three icons', m.start_url === '/me' && m.display === 'standalone' && m.icons.length === 3 && m.icons.some((i) => i.purpose === 'maskable'));
+  ok('the manifest starts the app at My details and has its four icons', m.start_url === '/me' && m.display === 'standalone' && m.icons.length === 4 && m.icons.some((i) => i.purpose === 'maskable'));
   ok('names are kept short for the home screen', manifest({ name: 'A very long federation name indeed' }).short_name.length <= 12);
   ok('the offline page is plain and safe', !/<script/i.test(offlinePage('X<script>')) && !offlinePage('X<script>').includes('X<script>'));
 }

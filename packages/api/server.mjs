@@ -55,6 +55,7 @@ import { readFee, readExemption, reminderText } from '../core/domain/membership.
 import { readVisitors, isDate } from '../core/domain/attendance.mjs';
 import { readNewcomer } from '../core/domain/newcomer.mjs';
 import { toCsv, fileName } from '../core/domain/csv.mjs';
+import { ENTRY_COLUMNS, entryRows } from '../core/domain/entry-export.mjs';
 import { readScopes, readEvents } from '../core/domain/integrations.mjs';
 import { readPanel, readResults } from '../core/domain/grading.mjs';
 import { readQualification, readAward } from '../core/domain/qualification.mjs';
@@ -3811,6 +3812,20 @@ get('/o/:slug/events/:eventSlug/entries', async (ctx) => {
   }));
 });
 
+// Every entry as a spreadsheet: who, how heavy, how old on the day, what grade, which dojo.
+// The same people who may see the list may download it (entriesFor checks the role).
+get('/o/:slug/events/:eventSlug/entries.csv', async (ctx) => {
+  const { host, event } = await entryContextFor(ctx);
+  const entries = await competition.entriesFor(ctx.me.accountId, event.id);
+  const start = event.startsAt ?? event.starts_at;
+  const zone = host.timezone || 'Pacific/Auckland';
+  const eventDay = start
+    ? new Intl.DateTimeFormat('en-CA', { timeZone: zone, year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date(start))
+    : null;
+  return ctx.download(fileName(event.slug, 'entries', eventDay ?? new Date().toISOString().slice(0, 10)),
+    'text/csv', toCsv(ENTRY_COLUMNS, entryRows(entries, eventDay)));
+});
+
 post('/o/:slug/events/:eventSlug/entries/assign', async (ctx) => {
   const { org, event } = await eventFor(ctx, { toSchedule: true });
   const form = await ctx.form();
@@ -4505,6 +4520,9 @@ export async function handler(req, res) {
         html = html.replace(V.MENU_BUTTON_MARKER, () => this.rail ? V.menuButton() : '');
       res.writeHead(status, {
         'content-type': 'text/html; charset=utf-8',
+        // Pages answered here are about the person looking at them. No shared cache keeps one, and the
+        // service worker reads this to know what it may and may not store (vendor/honbu/sw.js).
+        'cache-control': 'private, no-store',
         ...SECURITY_HEADERS,
         ...(setCookies.length ? { 'set-cookie': setCookies } : {}),
       });
