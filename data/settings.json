@@ -85,8 +85,16 @@
     ],
     "sections": [
       "hero",
+      "proof",
+      "firstNight",
+      "pathway",
+      "quotes",
+      "photoBand",
       "dojoGrid",
+      "lineage",
       "events",
+      "spotlight",
+      "memberBand",
       "news"
     ],
     "heroHeading": "Everyone starts as a white belt.",
@@ -257,8 +265,13 @@
       "startAnyWeek",
       "times",
       "about",
+      "instructors",
+      "firstNight",
       "events",
-      "findUs"
+      "gallery",
+      "findUs",
+      "enquire",
+      "federationBand"
     ],
     "startAnyWeekText": "You can start any week — there is no term to wait for.",
     "showFirstClassFree": true,
@@ -312,5 +325,6 @@
   "seo": {
     "siteDescription": "Full-contact Kyokushin karate since 1965. Seventeen dojo nationwide, all welcoming beginners. Your first class is free.",
     "origin": "https://www.kyokushinkarate.co.nz"
-  }
+  },
+  "layout": "showcase"
 }
