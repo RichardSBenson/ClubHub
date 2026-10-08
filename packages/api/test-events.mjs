@@ -86,6 +86,23 @@ console.log('\nSIGNED IN AS SOMEONE WHO RUNS A DOJO');
   ok('with a way to add one', list.html.includes('/o/whanganui/events/new'));
 }
 
+console.log('\nPUBLISHED DOES NOT MEAN ON THE PUBLIC WEBSITE');
+{
+  await pool.query(`insert into event (organisation_id, kind, title, slug, starts_at, visibility, status)
+    select o.id, 'seminar', 'Members seminar', 'members-seminar', now() + interval '30 days', 'members', 'published'
+    from organisation o where o.slug = 'whanganui'`);
+  await pool.query(`insert into event (organisation_id, kind, title, slug, starts_at, visibility, status)
+    select o.id, 'seminar', 'Open seminar', 'open-seminar', now() + interval '31 days', 'public', 'published'
+    from organisation o where o.slug = 'whanganui'`);
+  const list = await req('/o/whanganui/events');
+  const row = (t) => list.html.split('<tr').find((r) => r.includes(t)) ?? '';
+  ok('a members-only event says it is not on the public website',
+    row('Members seminar').includes('Members only') && row('Members seminar').includes('Not on the public website'));
+  ok('a public event says it is', row('Open seminar').includes('On the public website')
+    && !row('Open seminar').includes('Not on the public website'));
+  await pool.query(`delete from event where slug in ('members-seminar', 'open-seminar')`);
+}
+
 console.log('\nTHE FORM OFFERS THIS FEDERATION\'S OWN GRADES');
 {
   const f = await req('/o/whanganui/events/new');

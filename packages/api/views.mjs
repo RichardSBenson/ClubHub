@@ -1060,7 +1060,7 @@ export const events = ({ me, csrf, org, own = [], inherited = [], zone,
       <td><strong>${esc(e.title)}</strong>
         ${e.venueName ? `<div class="muted">${esc(e.venueName)}</div>` : ''}</td>
       <td class="hide-sm">${esc(kindLabel(e.kind))}</td>
-      <td>${statusTag(e.status)}${reachTag(e.publishUpState, canAsk)}</td>
+      <td>${statusTag(e.status)}${seenTag(e)}${reachTag(e.publishUpState, canAsk)}</td>
       <td>${canAsk && e.status === 'published' && e.visibility !== 'own_org'
           && ['none', 'declined'].includes(e.publishUpState ?? 'none')
         ? `<form method="post" style="display:inline"
@@ -1110,6 +1110,18 @@ const reachTag = (state, show) => !show ? '' : ({
   approved: ' <span class="tag ok">On the federation\'s calendar</span>',
   declined: ' <span class="tag no">Federation declined</span>',
 }[state] ?? '');
+
+/**
+ * Who can actually see a published event. "Published" alone reads as "on the website", and for an event
+ * limited to members, a grade range or invited people it is not: the public site shows public events only.
+ */
+const SEEN_BY = {
+  members: 'Members only', own_org: 'This organisation only', by_grade: 'A grade range only', invite: 'Invited only',
+};
+const seenTag = (e) => e.status !== 'published' ? ''
+  : e.visibility === 'public'
+    ? '<div class="muted">On the public website</div>'
+    : `<div class="muted"><span class="tag">${esc(SEEN_BY[e.visibility] ?? e.visibility)}</span> Not on the public website</div>`;
 
 const VISIBILITY_LABELS = {
   public: 'Anyone, including the public website',
