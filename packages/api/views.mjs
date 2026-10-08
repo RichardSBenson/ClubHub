@@ -683,13 +683,14 @@ export const person = ({ me, csrf, person, history, affiliations, eligibility,
     <td><form method="post" action="/p/${esc(person.id)}/guardians/${esc(g.id)}/contact">
       <input type="hidden" name="_csrf" value="${esc(csrf ?? '')}">
       <label><input type="checkbox" name="main"${g.is_main_contact ? ' checked' : ''}> Main contact</label>
+      <label><input type="checkbox" name="fees"${g.pays_fees ? ' checked' : ''}> Looks after the fees</label>
       ${g.is_main_contact ? '' : `<label><input type="checkbox" name="copy"${g.also_copy ? ' checked' : ''}> Also copy</label>`}
       <button class="btn quiet" type="submit">Save</button></form></td>
     <td><form method="post" action="/p/${esc(person.id)}/guardians/${esc(g.id)}/end">
       <input type="hidden" name="_csrf" value="${esc(csrf ?? '')}">
       <button class="btn quiet" type="submit">Remove</button></form></td></tr>`).join('')}</tbody></table>`
     : '<p class="muted">Nobody is linked yet. A parent or guardian can then sign in and enter this child in events.</p>'}
-  ${guardians.length > 1 ? '<p class="hint">Club emails go to every parent, unless one is the main contact: then to them alone, plus anyone marked "Also copy".</p>' : ''}
+  ${guardians.length > 1 ? '<p class="hint">Club emails go to every adult, unless one is the main contact: then to them alone, plus anyone marked "Also copy". Fees and renewal reminders go to whoever "Looks after the fees"; the others no longer see them.</p>' : ''}
   <form method="post" action="/p/${esc(person.id)}/guardians">
     <input type="hidden" name="_csrf" value="${esc(csrf ?? '')}">
     <div class="row">
@@ -1111,7 +1112,7 @@ const KIND_LABELS = {
   social: 'Social', other: 'Other',
 };
 const FAMILY_LABELS = { parent: 'Parent', step_parent: 'Step-parent',
-  guardian: 'Legal guardian', grandparent: 'Grandparent', carer: 'Carer' };
+  guardian: 'Legal guardian', grandparent: 'Grandparent', aunt_uncle: 'Aunt or uncle', other_family: 'Other family', carer: 'Carer' };
 const kindLabel = (k) => KIND_LABELS[k] ?? k;
 
 const reachTag = (state, show) => !show ? '' : ({

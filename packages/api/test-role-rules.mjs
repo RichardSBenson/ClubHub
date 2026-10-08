@@ -83,6 +83,29 @@ console.log('\nMAIN CONTACT');
   ok('"also copy" is stored', (await one('select also_copy from guardian_link where id=$1', [l1.id])).also_copy === true);
 }
 
+console.log('\nWHO LOOKS AFTER THE FEES');
+{
+  const gp = { personId: 'g', email: 'gran@x.nz', optedOut: false };
+  const mum = { personId: 'm', email: 'mum@x.nz', optedOut: false };
+  const kid = { personId: 'k', email: null, isMinor: true, optedOut: false };
+  const to = (gs, o) => chooseRecipients([{ ...kid, guardians: gs }], o).recipients.map((r) => r.email).sort().join();
+  ok('renewals go to the adult who looks after the fees', to([{ ...gp, pays: true }, mum], { preferFees: true }) === 'gran@x.nz');
+  ok('ordinary news still goes to both', to([{ ...gp, pays: true }, mum]) === 'gran@x.nz,mum@x.nz');
+  const kidP = await enrol('Fee', 'Child', new Date(Date.now() - 7 * 365.25 * 864e5).toISOString().slice(0, 10));
+  const gran = await enrol('Gran', 'Fee', '1955-01-01'), auntie = await enrol('Auntie', 'Fee', '1980-01-01');
+  const acc = async (p, email) => (await pool.query(`insert into account (email, person_id) values ($1,$2) returning id`, [email, p.id])).rows[0].id;
+  const ga = await acc(gran, 'gran.fee@example.nz'), aa = await acc(auntie, 'auntie.fee@example.nz');
+  const lg = await family.link(doug.id, { guardianId: gran.id, childId: kidP.id, relationship: 'grandparent' });
+  const la = await family.link(doug.id, { guardianId: auntie.id, childId: kidP.id, relationship: 'aunt_uncle' });
+  ok('with nobody marked, both may pay', await family.mayPayFor(ga, kidP.id) && await family.mayPayFor(aa, kidP.id));
+  await family.setContact(doug.id, lg.id, { main: true, fees: true });
+  ok('the marked grandparent may pay', await family.mayPayFor(ga, kidP.id));
+  ok('the auntie no longer may', !(await family.mayPayFor(aa, kidP.id)));
+  ok('but still acts for the child otherwise', (await family.mayActFor(aa, kidP.id)) === 'guardian');
+  await family.setContact(doug.id, la.id, { fees: true });
+  ok('only one adult looks after the fees', !(await family.mayPayFor(ga, kidP.id)) && await family.mayPayFor(aa, kidP.id));
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 await pool.end();
 process.exit(fail ? 1 : 0);

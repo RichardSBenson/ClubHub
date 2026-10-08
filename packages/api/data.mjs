@@ -2378,6 +2378,19 @@ export const family = {
     return dependants.some((d) => d.id === personId) ? 'guardian' : null;
   },
 
+  /**
+   * Whether this person may see and pay what the child owes. Yourself, always. A linked adult, unless the
+   * child has somebody marked as looking after the fees and it is not them.
+   */
+  async mayPayFor(actor, personId) {
+    const how = await this.mayActFor(actor, personId);
+    if (how !== 'guardian') return how === 'self';
+    const self = await one('select person_id from account where id=$1', [actor]);
+    const row = await one(`select bool_or(pays_fees) as any_set, bool_or(pays_fees and guardian_id = $2) as mine
+      from guardian_link where child_id=$1 and ended_on is null`, [personId, self.person_id]);
+    return !row?.any_set || !!row.mine;
+  },
+
   async assertMayActFor(actor, personId) {
     const how = await this.mayActFor(actor, personId);
     if (!how) throw new Forbidden();
@@ -2422,7 +2435,7 @@ export const family = {
    * mark from the child's other links); `copy` marks a non-main parent as also copied in. Unticking main
    * returns the child to "every parent".
    */
-  async setContact(actor, linkId, { main = false, copy = false }) {
+  async setContact(actor, linkId, { main = false, copy = false, fees = false }) {
     const link = await one('select * from guardian_link where id=$1 and ended_on is null', [linkId]);
     if (!link) throw new NotFound('Link');
     let home = null;
@@ -2435,9 +2448,10 @@ export const family = {
     try {
       await client.query('begin');
       if (main) await client.query('update guardian_link set is_main_contact=false where child_id=$1 and ended_on is null', [link.child_id]);
-      await client.query('update guardian_link set is_main_contact=$2, also_copy=$3 where id=$1', [linkId, !!main, !main && !!copy]);
+      if (fees) await client.query('update guardian_link set pays_fees=false where child_id=$1 and ended_on is null', [link.child_id]);
+      await client.query('update guardian_link set is_main_contact=$2, also_copy=$3, pays_fees=$4 where id=$1', [linkId, !!main, !main && !!copy, !!fees]);
       await client.query(`insert into audit_log (account_id, organisation_id, action, entity, entity_id, after)
-        values ($1,$2,'guardian_contact','person',$3,$4)`, [actor, home, link.child_id, JSON.stringify({ linkId, main: !!main, copy: !main && !!copy })]);
+        values ($1,$2,'guardian_contact','person',$3,$4)`, [actor, home, link.child_id, JSON.stringify({ linkId, main: !!main, copy: !main && !!copy, fees: !!fees })]);
       await client.query('commit');
     } catch (e) { await client.query('rollback'); throw e; } finally { client.release(); }
   },
@@ -2473,7 +2487,7 @@ export const family = {
     }
     if (!allowed) throw new Forbidden();
     const { rows } = await pool.query(`
-      select gl.id, gl.relationship, gl.is_main_contact, gl.also_copy, g.id as person_id, g.first_name, g.last_name,
+      select gl.id, gl.relationship, gl.is_main_contact, gl.also_copy, gl.pays_fees, g.id as person_id, g.first_name, g.last_name,
              g.email, exists(select 1 from account a where a.person_id = g.id) as can_sign_in
       from guardian_link gl join person g on g.id = gl.guardian_id
       where gl.child_id=$1 and gl.ended_on is null order by gl.created_at`, [childId]);
@@ -3491,7 +3505,7 @@ export const messages = {
         coalesce(ep.opted_out, false) as "optedOut",
         coalesce((select json_agg(json_build_object('personId', g.id, 'email', g.email,
                                                     'optedOut', coalesce(gp.opted_out, false),
-                                                    'main', gl.is_main_contact, 'alsoCopy', gl.also_copy))
+                                                    'main', gl.is_main_contact, 'alsoCopy', gl.also_copy, 'pays', gl.pays_fees))
                   from guardian_link gl join person g on g.id = gl.guardian_id
                   left join email_preference gp on gp.person_id = g.id
                   where gl.child_id = p.id and gl.ended_on is null), '[]'::json) as guardians
@@ -3499,7 +3513,7 @@ export const messages = {
       where p.id = any($1::uuid[])`, [ids])) : [];
 
     const { recipients, skipped } = chooseRecipients(candidates,
-      { honourOptOut: input.kind === 'announcement' });
+      { honourOptOut: input.kind === 'announcement', preferFees: input.kind === 'renewal' });
     if (!recipients.length)
       throw new Invalid(ids.length
         ? 'Nobody here can be emailed — they have no address on file, or have opted out.'
@@ -3718,7 +3732,7 @@ async function settle(paymentId, ok, detail, { actor = null, ref = undefined, ma
 export const payments = {
   /** What one person owes and has paid. Authority is theirs or their guardian's. */
   async forPerson(actor, personId) {
-    await family.assertMayActFor(actor, personId);
+    if (!(await family.mayPayFor(actor, personId))) throw new Forbidden();
     return q(`${PAYMENT_SELECT} where py.person_id = $1 and py.status <> 'void'
       order by (py.status in ('pending','failed','awaiting')) desc, py.created_at desc`, [personId]);
   },
@@ -3726,7 +3740,8 @@ export const payments = {
   /** Everything the signed-in person and their children owe, for the home screen. */
   async owedBy(actor) {
     const { self, dependants } = await family.mine(actor);
-    const ids = [self, ...dependants].filter(Boolean).map((x) => x.id);
+    const ids = [];
+    for (const x of [self, ...dependants].filter(Boolean)) if (await family.mayPayFor(actor, x.id)) ids.push(x.id);
     if (!ids.length) return [];
     return q(`${PAYMENT_SELECT} where py.person_id = any($1::uuid[])
       and py.status in ('pending','failed','awaiting') order by py.created_at`, [ids]);
@@ -3735,7 +3750,7 @@ export const payments = {
   async get(actor, paymentId) {
     const row = await one(`${PAYMENT_SELECT} where py.id = $1`, [paymentId]);
     if (!row || !row.person_id) throw new NotFound('Payment');
-    await family.assertMayActFor(actor, row.person_id);
+    if (!(await family.mayPayFor(actor, row.person_id))) throw new Forbidden();
     return row;
   },
 

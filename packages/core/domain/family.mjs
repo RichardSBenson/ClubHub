@@ -17,6 +17,8 @@ export const RELATIONSHIPS = Object.freeze({
   step_parent: 'Step-parent',
   guardian: 'Legal guardian',
   grandparent: 'Grandparent',
+  aunt_uncle: 'Aunt or uncle',
+  other_family: 'Other family',
   carer: 'Carer',
 });
 

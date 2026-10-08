@@ -101,7 +101,7 @@ export function renderBody({ text, club, unsubscribeUrl = null, optOutHonoured =
  * eight-year-old — and a child with nobody linked is written to directly. One
  * address gets one copy however many children it covers.
  */
-export function chooseRecipients(candidates, { honourOptOut = true } = {}) {
+export function chooseRecipients(candidates, { honourOptOut = true, preferFees = false } = {}) {
   const sendTo = new Map();
   const skipped = [];
   for (const c of candidates) {
@@ -110,6 +110,8 @@ export function chooseRecipients(candidates, { honourOptOut = true } = {}) {
     // A child's main contact gets the mail; other parents only if marked "also copy".
     // With no main contact set, every linked parent is written to, as always.
     if (guardians.some((g) => g.main)) guardians = guardians.filter((g) => g.main || g.alsoCopy);
+    // Money messages (renewals) go to whoever looks after the fees, when somebody does.
+    if (preferFees && guardians.some((g) => g.pays)) guardians = guardians.filter((g) => g.pays);
     const targets = minor && guardians.length
       ? guardians.map((g) => ({ personId: g.personId, email: g.email,
                                 optedOut: g.optedOut, via: c.personId }))

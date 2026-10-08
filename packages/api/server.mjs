@@ -507,7 +507,7 @@ post('/p/:id/guardians', async (ctx) => {
 post('/p/:id/guardians/:linkId/contact', async (ctx) => {
   ctx.requireActor();
   const form = await ctx.form();
-  await family.setContact(ctx.me.accountId, ctx.params.linkId, { main: form.main === 'on', copy: form.copy === 'on' });
+  await family.setContact(ctx.me.accountId, ctx.params.linkId, { main: form.main === 'on', copy: form.copy === 'on', fees: form.fees === 'on' });
   return ctx.redirect(`/p/${ctx.params.id}`);
 });
 
@@ -1031,7 +1031,8 @@ get('/me/payments', async (ctx) => {
   const { self, dependants } = await family.mine(ctx.me.accountId);
   const groups = [];
   for (const person of [self, ...dependants].filter(Boolean))
-    groups.push({ person, rows: await payments.forPerson(ctx.me.accountId, person.id) });
+    if (await family.mayPayFor(ctx.me.accountId, person.id))
+      groups.push({ person, rows: await payments.forPerson(ctx.me.accountId, person.id) });
   return ctx.send(200, V.myPayments({ me: ctx.me, csrf: ctx.csrf, groups,
     test: isTestProvider(providerNow()), done: ctx.url.searchParams.get('done') }));
 });
