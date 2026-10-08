@@ -12,6 +12,15 @@
     el.setAttribute('tabindex', '0');
     el.setAttribute('aria-label', 'Change the photograph');
     el.addEventListener('click', function () { input.click(); });
+    el.removeAttribute('aria-hidden');
+    var who = el.parentNode && el.parentNode.querySelector('.idwho');
+    if (who && !who.querySelector('.photo-cue')) {
+      var cue = document.createElement('small');
+      cue.className = 'photo-cue';
+      cue.textContent = 'Tap the photo to change it';
+      cue.style.cssText = 'display:block;font-size:.8rem;color:#666';
+      who.appendChild(cue);
+    }
     el.addEventListener('keydown', function (e) { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); input.click(); } });
   });
   input.addEventListener('change', function () {

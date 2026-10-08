@@ -572,13 +572,14 @@ export const person = ({ me, csrf, person, history, affiliations, eligibility,
   ${canEdit ? `<form method="post" action="/p/${esc(person.id)}/photo" enctype="multipart/form-data" class="card" style="margin:12px 0">
     <input type="hidden" name="_csrf" value="${esc(csrf ?? '')}">
     <h3 style="margin-top:0">Photograph</h3>
-    <p><input type="file" name="photo" data-photo accept="image/png,image/jpeg,image/webp"></p>
-    <p class="hint">${esc(slotHint('portrait'))} The same photograph is used on their membership card and, if they are shown on the website, on their instructor card. You can also tap the picture at the top.</p>
+    <input type="file" name="photo" data-photo accept="image/png,image/jpeg,image/webp" hidden>
+    <p>Tap the photograph at the top to ${person.photo_asset_id ? 'change it' : 'add one'}.</p>
+    <p class="hint">${esc(slotHint('portrait'))} The same photograph is used on their membership card and, if they are shown on the website, on their instructor card.</p>
     ${photoNeedsConsent(person.age) ? `<label class="check"><input type="checkbox" name="consent">
       Their parent or guardian agrees to this photograph being kept on their record.</label>
     <p class="hint" id="photo-wait" hidden>Tick the box above and the photograph will be sent.</p>` : ''}
-    <p><button class="btn" type="submit">Save photograph</button>
-      ${person.photo_asset_id ? '<button class="btn quiet" type="submit" name="remove" value="1">Remove photograph</button>' : ''}</p>
+    <noscript><p><input type="file" name="photo" accept="image/png,image/jpeg,image/webp"></p><p><button class="btn" type="submit">Save photograph</button></p></noscript>
+    ${person.photo_asset_id ? '<p><button class="btn quiet" type="submit" name="remove" value="1">Remove photograph</button></p>' : ''}
   </form><script src="/vendor/photo-pick.js" defer></script>` : ''}
 
   ${!eligibility?.next && history.length
@@ -3166,14 +3167,14 @@ export const myPerson = ({ me, csrf, how, person, private: priv = {}, grade, mem
   <form method="post" action="/p/${esc(person.id)}/photo" enctype="multipart/form-data" class="card" style="margin:12px 0">
     <input type="hidden" name="_csrf" value="${esc(csrf ?? '')}">
     <input type="hidden" name="return" value="me">
-    ${person.photo_asset_id ? `<p><img src="/p/${esc(person.id)}/photo" alt="Photograph of ${esc(person.first_name)}" style="width:120px;height:120px;object-fit:cover;border-radius:2px"></p>` : '<p class="hint">No photograph yet.</p>'}
-    <p><input type="file" name="photo" data-photo accept="image/png,image/jpeg,image/webp"></p>
-    <p class="hint">${esc(slotHint('portrait'))} It is used on ${mine ? 'your' : 'their'} membership card and, if ${mine ? 'you are' : 'they are'} shown on the website, on the instructor card. You can also tap the picture at the top.</p>
+    <input type="file" name="photo" data-photo accept="image/png,image/jpeg,image/webp" hidden>
+    <p>Tap ${mine ? 'your' : 'their'} photograph at the top to ${person.photo_asset_id ? 'change it' : 'add one'}.</p>
+    <p class="hint">${esc(slotHint('portrait'))} It is used on ${mine ? 'your' : 'their'} membership card and, if ${mine ? 'you are' : 'they are'} shown on the website, on the instructor card.</p>
     ${photoNeedsConsent(personAgeOn(person.date_of_birth, null)) ? `<label class="check"><input type="checkbox" name="consent">
       ${mine ? 'My parent or guardian agrees' : 'I agree, as their parent or guardian,'} to this photograph being kept on the record.</label>
     <p class="hint" id="photo-wait" hidden>Tick the box above and the photograph will be sent.</p>` : ''}
-    <p><button class="btn" type="submit">Save photograph</button>
-      ${person.photo_asset_id ? '<button class="btn quiet" type="submit" name="remove" value="1">Remove photograph</button>' : ''}</p>
+    <noscript><p><input type="file" name="photo" accept="image/png,image/jpeg,image/webp"></p><p><button class="btn" type="submit">Save photograph</button></p></noscript>
+    ${person.photo_asset_id ? '<p><button class="btn quiet" type="submit" name="remove" value="1">Remove photograph</button></p>' : ''}
   </form>
   <script src="/vendor/photo-pick.js" defer></script>
 
