@@ -24,6 +24,8 @@ const HEX = /^#[0-9a-fA-F]{6}$/;
 const SAFE_PATH = /^\/[A-Za-z0-9._~\-/]*$/;
 const MEDIA_PATH = /^\/media\/[A-Za-z0-9._-]+$/;
 
+import { titledName, gradeMarkup } from './honorifics.mjs';
+
 /**
  * Where a link may point: this site, or an https address. Never javascript:, data: or a
  * protocol-relative //host — copy comes from a settings file somebody edits on a phone.
@@ -530,7 +532,7 @@ export function makeShowcase(h) {
     <small>${esc([dojo.venue_name ? dojo.address_line : null, dojo.suburb, dojo.city, dojo.postcode].filter(Boolean).join(', ') || 'Address to confirm')}</small></p></div>
   <div><b>WHEN</b><p>${esc(daysLine)}<small>${
     groups.map((g) => `${esc(g.label)} ${h.time(g.starts)}`).slice(0, 2).join(' · ') || 'Times to confirm'}</small></p></div>
-  <div><b>WHO TO ASK</b><p>${esc(lead ? lead.name ?? lead.displayName ?? 'The dojo' : 'The dojo')}<small>${esc(dojo.email ?? (phone ? '' : 'Contact details to confirm'))}</small>
+  <div><b>WHO TO ASK</b><p>${esc(lead ? titledName(lead) || 'The dojo' : 'The dojo')}<small>${esc(dojo.email ?? (phone ? '' : 'Contact details to confirm'))}</small>
     ${phone ? `<span class="callrow"><a class="callbtn" href="tel:${esc(phone.replace(/[^\d+]/g, ''))}">Call ${esc(phone)}</a></span>` : ''}</p></div>
 </div></div>`,
 
@@ -551,10 +553,10 @@ export function makeShowcase(h) {
         return `<section style="background:var(--canvas-2)"><div class="wrap">
     <div class="split">
       <div><h2>${instructors.length === 1 ? 'Who teaches here' : 'Who teaches here'}</h2>
-        <p style="font-family:var(--display);font-size:24px;font-weight:800;margin:0 2px 2px 0">${esc(first.name ?? first.displayName ?? '')}</p>
-        ${first.rank || first.grade ? `<p style="color:var(--red-dark);font-weight:700;margin:0 0 18px">${esc(first.rank ?? first.grade)}</p>` : ''}
+        <p style="font-family:var(--display);font-size:24px;font-weight:800;margin:0 2px 2px 0">${esc(titledName(first))}</p>
+        ${first.grade ? `<p style="color:var(--red-dark);font-weight:700;margin:0 0 18px">${gradeMarkup(first.grade, esc)}</p>` : ''}
         ${paras.slice(0, 2).map((p) => `<p>${esc(p)}</p>`).join('')}</div>
-      ${first.photoUrl ? `<div class="portrait"><img src="${esc(first.photoUrl)}" alt="${esc(first.name ?? '')}"></div>` : ''}
+      ${first.photoUrl ? `<div class="portrait"><img src="${esc(first.photoUrl)}" alt="${esc(titledName(first))}"></div>` : ''}
     </div>
     ${others.length ? `<div class="icards" style="margin-top:40px;grid-template-columns:repeat(auto-fill,minmax(220px,1fr))">${others.map((i) => h.instructorCard(i, { at })).join('')}</div>` : ''}
   </div></section>`;

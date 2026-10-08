@@ -13,6 +13,7 @@
  * way to turn a date into 'YYYY-MM-DD' is what put a wrong founding date — in
  * fact no founding date — into the structured data on every page.
  */
+import { titledName, gradeMarkup } from './honorifics.mjs';
 import { calendarLinks } from '../core/domain/calendar-file.mjs';
 import { bannerLines, typeFor, mapLinks } from '../core/domain/event-types.mjs';
 import { CalendarDay } from '../core/domain/values.mjs';
@@ -702,11 +703,12 @@ function excerpt(text, max = 280) {
 }
 export function instructorCard(i, { at = (x) => x, federationSlug = null, full = false, showClub = false, assets = {} } = {}) {
   const name = `${i.firstName} ${i.lastName}`;
+  const shownName = titledName(i);
   const photo = i.photoUrl ?? (i.photoAssetId ? assets[i.photoAssetId] : null);
   const paras = i.about ? [i.about] : (i.paragraphs ?? bioText(i.bio));
   const about = full ? paras.map((t) => `<p>${esc(t)}</p>`).join('')
     : paras.length ? `<p>${esc(excerpt(paras.join(' ')))}</p>` : '';
-  const rank = [...new Set([i.title, i.grade].filter(Boolean))].map(esc).join(' · ');
+  const rank = gradeMarkup(i.grade, esc);
   const facts = [
     i.teaches ? `<li><b>Teaches</b> ${esc(i.teaches)}</li>` : '',
     i.startedYear ? `<li><b>Training since</b> ${esc(i.startedYear)}</li>` : '',
@@ -715,7 +717,7 @@ export function instructorCard(i, { at = (x) => x, federationSlug = null, full =
   return `<article class="icard">
     ${photo ? `<img class="iphoto" src="${esc(photo)}" alt="${esc(name)}" loading="lazy">`
             : `<div class="iphoto none" aria-hidden="true">${esc(`${i.firstName[0] ?? ''}${i.lastName[0] ?? ''}`)}</div>`}
-    <h3>${esc(name)}</h3>
+    <h3>${esc(shownName)}</h3>
     ${rank ? `<p class="irank">${rank}</p>` : ''}
     ${showClub && i.organisationName && i.organisationSlug !== federationSlug
       ? `<p class="iclub"><a href="${at(`/${esc(i.organisationSlug)}`)}">${esc(i.organisationName)}</a></p>` : ''}
