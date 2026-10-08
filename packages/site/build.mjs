@@ -413,7 +413,7 @@ for (const target of SITES) {
       eventsIntro: orgWords.eventsIntro ?? null,
       footerLinks, homeCopy, dojoCopy, clubCount: dojos.length,
       // Every path this site will have a page for, so a layout never draws a button that leads to a 404.
-      knownPaths: new Set(['/', '/find-a-dojo', '/events', '/news', '/instructors', '/signin',
+      knownPaths: new Set(['/', '/find-a-dojo', '/events', '/news', '/instructors', '/signin', '/shop',
         ...authored.map((p) => `/${p.slug}`)]),
     },
     fonts, nav, base, vocabulary, origin: ORIGIN,

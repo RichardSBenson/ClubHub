@@ -7357,3 +7357,145 @@ export const platform = {
     return { root, orgs, members, stats, recent, health, store: env.HONBU_STORE ?? 'postgres' };
   },
 };
+
+// ---------------------------------------------------------------------------
+// the shop: gear ordered from your own dojo
+// ---------------------------------------------------------------------------
+
+import { readBasket, readNote, mayMoveOrder, ORDER_STATUSES } from '../core/domain/shop.mjs';
+
+/**
+ * The range a dojo offers: its own products, plus those of every organisation above it (the national range),
+ * less what the dojo has hidden, at the dojo's own price where it set one. This is the ONLY query that decides what
+ * a member sees, so a tee shirt owned by one dojo can never reach another dojo's members.
+ */
+const RANGE = `
+  select p.id, p.organisation_id, p.category, p.name, p.description, p.sizes, p.currency,
+         p.price_cents as national_price_cents, coalesce(l.price_cents, p.price_cents) as price_cents,
+         (p.organisation_id = club.id) as own
+    from organisation club
+    join organisation owner on club.path <@ owner.path
+    join product p on p.organisation_id = owner.id
+    left join product_listing l on l.product_id = p.id and l.organisation_id = club.id
+   where club.id = $1 and p.active and not coalesce(l.hidden, false)
+   order by (p.organisation_id = club.id), p.category, p.sort_order, p.name`;
+
+const ORDERS = `
+  select o.id, o.status, o.note, o.total_cents, o.currency, o.created_at, o.person_id,
+         p.first_name, p.last_name,
+         coalesce((select json_agg(json_build_object('name', l.name, 'size', l.size, 'quantity', l.quantity, 'unit_cents', l.unit_cents) order by l.name)
+                     from shop_order_line l where l.order_id = o.id), '[]'::json) as lines
+    from shop_order o join person p on p.id = o.person_id`;
+
+const mayShopFor = (personId, clubId) => one(
+  `select 1 x from affiliation where person_id=$1 and organisation_id=$2 and ends is null
+     and role in ('member','instructor','assistant') and status in ('active','trial')`, [personId, clubId]);
+
+export const shop = {
+  ORDER_STATUSES,
+
+  /** The member's side: for each dojo they belong to, what they may order and what they have ordered. */
+  async forPerson(actor, personId) {
+    await family.assertMayActFor(actor, personId);
+    const person = await one('select id, first_name, last_name from person where id=$1', [personId]);
+    if (!person) throw new NotFound('Person');
+    const clubs = await q(`select o.id, o.name from affiliation a join organisation o on o.id = a.organisation_id
+      where a.person_id=$1 and a.ends is null and a.role in ('member','instructor','assistant') and a.status in ('active','trial') and o.type='club' order by o.name`, [personId]);
+    const out = [];
+    for (const club of clubs) {
+      out.push({ club, range: await q(RANGE, [club.id]),
+        orders: await q(`${ORDERS} where o.person_id=$1 and o.organisation_id=$2 order by o.created_at desc limit 20`, [personId, club.id]) });
+    }
+    return { person, clubs: out };
+  },
+
+  /** Place an order. Prices, sizes and what is on offer are all decided here, from the dojo's range, never from the form. */
+  async place(actor, personId, clubId, form) {
+    await family.assertMayActFor(actor, personId);
+    if (!await mayShopFor(personId, clubId)) throw new NotFound('Dojo');
+    const range = await q(RANGE, [clubId]);
+    const basket = readBasket(form ?? {}, range);
+    if (basket.problem) throw new Invalid(basket.problem);
+    const currency = range[0]?.currency ?? 'NZD';
+    const client = await pool.connect();
+    try {
+      await client.query('begin');
+      const o = (await client.query(
+        `insert into shop_order (organisation_id, person_id, ordered_by, note, total_cents, currency) values ($1,$2,$3,$4,$5,$6) returning id`,
+        [clubId, personId, actor, readNote(form?.note), basket.total_cents, currency])).rows[0];
+      for (const l of basket.value)
+        await client.query(`insert into shop_order_line (order_id, product_id, name, size, quantity, unit_cents) values ($1,$2,$3,$4,$5,$6)`,
+          [o.id, l.product_id, l.name, l.size, l.quantity, l.unit_cents]);
+      await client.query('commit');
+      return { id: o.id, total_cents: basket.total_cents };
+    } catch (e) { await client.query('rollback'); throw e; } finally { client.release(); }
+  },
+
+  /** A member can take back an order the dojo has not yet touched. */
+  async cancelMine(actor, personId, orderId) {
+    await family.assertMayActFor(actor, personId);
+    const r = await one(`update shop_order set status='cancelled', updated_at=now() where id=$1 and person_id=$2 and status='placed' returning id`, [orderId, personId]);
+    if (!r) throw new Invalid('That order can no longer be cancelled here. Please ask the dojo.');
+  },
+
+  /** The dojo's (or the federation's) side. A dojo: orders, its own products, and the national range to hide or reprice. */
+  async forOrg(actor, orgId) {
+    const org = await one('select * from organisation where id=$1', [orgId]);
+    if (!org) throw new NotFound('Organisation');
+    const isClub = org.type === 'club';
+    await assertRole(actor, orgId, isClub ? REGISTER : MANAGE);
+    const own = await q(`select id, category, name, description, sizes, price_cents, currency, active from product where organisation_id=$1 order by active desc, category, sort_order, name`, [orgId]);
+    if (!isClub) return { org, isClub, own, national: [], orders: [] };
+    const national = await q(`select p.id, p.category, p.name, p.sizes, p.price_cents, p.currency, p.organisation_id,
+        coalesce(l.hidden, false) as hidden, l.price_cents as own_price_cents
+      from organisation club join organisation owner on club.path <@ owner.path and owner.id <> club.id
+      join product p on p.organisation_id = owner.id and p.active
+      left join product_listing l on l.product_id = p.id and l.organisation_id = club.id
+      where club.id=$1 order by p.category, p.sort_order, p.name`, [orgId]);
+    const orders = await q(`${ORDERS} where o.organisation_id=$1 order by (o.status in ('placed','paid','ready')) desc, o.created_at desc limit 200`, [orgId]);
+    return { org, isClub, own, national, orders };
+  },
+
+  async saveProduct(actor, orgId, productId, v) {
+    const org = await one('select type from organisation where id=$1', [orgId]);
+    if (!org) throw new NotFound('Organisation');
+    await assertRole(actor, orgId, org.type === 'club' ? REGISTER : MANAGE);
+    if (productId) {
+      const r = await one(`update product set name=$3, category=$4, description=$5, sizes=$6, price_cents=$7, updated_at=now()
+        where id=$1 and organisation_id=$2 returning id`, [productId, orgId, v.name, v.category, v.description, v.sizes, v.price_cents]);
+      if (!r) throw new NotFound('Item');
+      return r.id;
+    }
+    return (await one(`insert into product (organisation_id, name, category, description, sizes, price_cents) values ($1,$2,$3,$4,$5,$6) returning id`,
+      [orgId, v.name, v.category, v.description, v.sizes, v.price_cents])).id;
+  },
+
+  async setActive(actor, orgId, productId, active) {
+    const org = await one('select type from organisation where id=$1', [orgId]);
+    if (!org) throw new NotFound('Organisation');
+    await assertRole(actor, orgId, org.type === 'club' ? REGISTER : MANAGE);
+    const r = await one(`update product set active=$3, updated_at=now() where id=$1 and organisation_id=$2 returning id`, [productId, orgId, !!active]);
+    if (!r) throw new NotFound('Item');
+  },
+
+  /** A dojo's say over a national item: hide it, or set its own price. Only for items owned above it. */
+  async setListing(actor, clubId, productId, v) {
+    await clubOnly(clubId);
+    await assertRole(actor, clubId, REGISTER);
+    const p = await one(`select p.id from product p join organisation owner on owner.id = p.organisation_id
+      join organisation club on club.path <@ owner.path and club.id <> owner.id where p.id=$1 and club.id=$2`, [productId, clubId]);
+    if (!p) throw new NotFound('Item');
+    await pool.query(`insert into product_listing (product_id, organisation_id, hidden, price_cents) values ($1,$2,$3,$4)
+      on conflict (product_id, organisation_id) do update set hidden=excluded.hidden, price_cents=excluded.price_cents`,
+      [productId, clubId, !!v.hidden, v.price_cents]);
+  },
+
+  async setOrderStatus(actor, clubId, orderId, status) {
+    await clubOnly(clubId);
+    await assertRole(actor, clubId, REGISTER);
+    const o = await one('select id, status from shop_order where id=$1 and organisation_id=$2', [orderId, clubId]);
+    if (!o) throw new NotFound('Order');
+    if (!Object.hasOwn(ORDER_STATUSES, status) || !mayMoveOrder(o.status, status)) throw new Invalid('That order cannot be moved there.');
+    await pool.query(`update shop_order set status=$2, updated_at=now() where id=$1`, [orderId, status]);
+  },
+};

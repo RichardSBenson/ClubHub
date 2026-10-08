@@ -34,6 +34,8 @@ export const BUILT_IN = [
   { href: '/events', label: 'Events' },
   { href: '/news', label: 'News' },
   { href: '/instructors', label: 'Instructors' },
+  // Not a static page: the server answers it (sign in, and the shop shows your own dojo's range).
+  { href: '/shop', label: 'Shop' },
 ];
 
 const trim = (s) => String(s ?? '').trim();

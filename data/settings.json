@@ -306,6 +306,10 @@
       {
         "href": "/about",
         "label": "About us"
+      },
+      {
+        "href": "/shop",
+        "label": "Shop"
       }
     ]
   },

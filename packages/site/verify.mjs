@@ -160,6 +160,8 @@ console.log('\nEVERY INTERNAL LINK GOES SOMEWHERE');
       if (clean.startsWith('/enquire/')) continue;
       // /me is the member app, answered by the application: the offline page and the manifest point there.
       if (clean === '/me') continue;
+      // /shop is answered by the application too: it sends a signed-in member to their own dojo's shop.
+      if (clean === '/shop') continue;
       if (served.has(clean) || served.has(`${clean}/index.html`)) continue;
       broken.push(`${href}  <-  ${at(f)}`);
     }
