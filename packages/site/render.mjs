@@ -327,6 +327,15 @@ a.evcard:hover{transform:translateY(-2px);box-shadow:0 10px 24px rgba(0,0,0,.25)
 @media (max-width:600px){.icards{grid-template-columns:1fr}.evbanner{flex-direction:column;text-align:center}.evbanner .crest{max-width:70%}
   .evbanner.small{flex-direction:row;text-align:left}.evbanner.small .crest{max-width:30%}}
 
+ul.shopgrid{list-style:none;padding:0;margin:24px 0;display:grid;gap:16px;grid-template-columns:repeat(auto-fit,minmax(min(100%,260px),1fr))}
+ul.shopgrid li{display:flex;flex-direction:column;gap:8px;padding:20px;background:var(--canvas-alt,transparent);border-top:4px solid var(--primary)}
+ul.shopgrid h2{font-family:var(--display);font-size:20px;margin:0}
+ul.shopgrid p{margin:0;color:var(--muted)}
+.shopprice{margin-top:auto;display:flex;justify-content:space-between;align-items:baseline;gap:12px;font-size:22px}
+.shopprice span{font-size:14px;color:var(--muted)}
+.shoplead{font-size:20px}
+.shopcta{margin:36px 0 0;padding:24px;border:2px solid var(--ink)}
+.shopcta h2{font-family:var(--display);margin:0 0 8px}
 table.roll{width:100%;border-collapse:collapse;margin:28px 0;font-size:18px;
   border-top:5px solid var(--primary);background:var(--canvas-alt,transparent)}
 table.roll th{text-align:left;font-family:var(--display);font-size:13px;letter-spacing:.16em;
@@ -861,6 +870,29 @@ export function findADojoPage({ dojos, federation, origin, fonts, nav,
     }],
     federation, fonts, nav, base, vocabulary, body,
   });
+}
+
+/**
+ * The public shop: the federation's own range, for anybody to look at. Ordering is for signed-in members, because the
+ * order goes to the member's own dojo, which collects the money and may add its own items (a tournament tee).
+ */
+export function shopPage({ products = [], federation, origin, fonts, nav, base = '', vocabulary = {} }) {
+  const money = (c, cur = 'NZD') => `$${(c / 100) % 1 ? (c / 100).toFixed(2) : String(c / 100)}${cur === 'NZD' ? '' : ` ${esc(cur)}`}`;
+  const html = `
+<p class="shoplead">Gear for training and grading, ordered through your dojo. You pay your dojo when you collect it.</p>
+${products.length ? `<ul class="shopgrid">${products.map((p) => `<li>
+  <h2>${esc(p.name)}</h2>
+  ${p.description ? `<p>${esc(p.description)}</p>` : ''}
+  <div class="shopprice"><strong>${money(p.price_cents, p.currency)}</strong>${p.sizes?.length ? `<span>Sizes ${esc(p.sizes[0])}–${esc(p.sizes[p.sizes.length - 1])}</span>` : ''}</div>
+</li>`).join('')}</ul>`
+  : '<p>Nothing is listed yet. Your dojo can tell you what is available.</p>'}
+<div class="shopcta">
+  <h2>Ready to order?</h2>
+  <p>Sign in with your email. There is no password: we send you a link. You will see this range and anything your own dojo adds, such as the tournament tee, and parents can order for their children from the same place.</p>
+  <p><a class="btn" href="/me/shop">Order from your dojo</a></p>
+</div>`;
+  return authoredPage({ page: { title: 'Shop', slug: 'shop' }, html, description: `Gear for ${federation.name} members, ordered through your dojo.`,
+    federation, origin, fonts, nav, base, vocabulary });
 }
 
 /** Who may enter an event, in words. Anybody can SEE a public event; this is the part that is limited. */

@@ -1166,10 +1166,7 @@ get('/me/shop', async (ctx) => {
   if (!self) return ctx.send(200, V.shopPublic({ me: ctx.me, csrf: ctx.csrf }));
   return ctx.redirect(`/me/${self.id}/shop`);
 });
-get('/shop', async (ctx) => {
-  if (ctx.me) return ctx.redirect('/me/shop');
-  return ctx.send(200, V.shopPublic({ me: null, csrf: ctx.csrf }));
-});
+// /shop is a built page (the federation's range, for anybody to look at); ordering starts here, once signed in.
 get('/me/:personId/shop', async (ctx) => { ctx.requireActor(); return shopScreenFor(ctx); });
 post('/me/:personId/shop', async (ctx) => {
   ctx.requireActor();

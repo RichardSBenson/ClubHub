@@ -304,6 +304,16 @@ export class PostgresSiteContent {
    * The pictures each club under this federation has put in its gallery, in
    * order. A database that has not had db/038 yet has none, and the build says nothing.
    */
+  /** What the federation sells to everyone: its own active products. A dojo's extras show only to its members. */
+  async shopRange(orgSlug) {
+    const { rows } = await this.pool.query(`
+      select p.id, p.category, p.name, p.description, p.sizes, p.price_cents, p.currency
+      from product p join organisation o on o.id = p.organisation_id
+      where o.slug = $1 and p.active and p.price_cents > 0
+      order by p.sort_order, p.name`, [orgSlug]);
+    return rows;
+  }
+
   async galleryFor(rootSlug) {
     try {
       const { rows } = await this.pool.query(`

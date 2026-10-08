@@ -514,6 +514,8 @@ for (const target of SITES) {
         showFirstClassFree: dojoCopy.showFirstClassFree !== false }));
   }
 
+  await write('shop/index.html', R.shopPage({ products: site.shopRange ? await site.shopRange(target.slug) : [], ...shared }));
+
   await write('find-a-dojo/index.html', R.findADojoPage({ dojos, ...shared }));
 
   await write('instructors/index.html',

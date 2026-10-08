@@ -318,6 +318,9 @@ export class JsonSiteContent {
   /** The files store has no galleries; a federation that wants them runs a database. */
   async galleryFor() { return []; }
 
+  /** The files store has no shop; a federation that sells gear runs a database. */
+  async shopRange() { return []; }
+
   async eventsFor(orgSlug) {
     const orgs = this.data.read('organisations');
     const target = orgs.find((o) => o.slug === orgSlug);

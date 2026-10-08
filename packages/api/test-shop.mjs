@@ -189,6 +189,20 @@ await signIn('ann@example.nz');
   ok('a collected order cannot be cancelled by the member', /error=/.test(r.location) && (await one('select status from shop_order where id=$1', [o.id])).status === 'collected');
 }
 
+console.log('\nTHE PUBLIC SHOP PAGE');
+{
+  await run(`HONBU_STORE=postgres OUT=${OUT} node packages/site/build.mjs`, { cwd: path.join(import.meta.dirname, '../..') });
+  const html = fs.readFileSync(path.join(OUT, 'shop/index.html'), 'utf8');
+  ok('it is a built page', html.includes('<h1') && html.includes('Shop'));
+  ok('it lists the federation\'s range with prices', html.includes('National gi') && html.includes('$120') && html.includes('National gloves') && html.includes('$45'));
+  ok('but no dojo\'s own items, which are for its members', !html.includes('Whanganui tournament tee') && !html.includes('Other dojo tournament tee'));
+  ok('and a way to order, which needs signing in', html.includes('href="/me/shop"'));
+  await pool.query(`update product set active = false where name = 'National gloves'`);
+  await run(`HONBU_STORE=postgres OUT=${OUT} node packages/site/build.mjs`, { cwd: path.join(import.meta.dirname, '../..') });
+  ok('an item switched off is not shown', !fs.readFileSync(path.join(OUT, 'shop/index.html'), 'utf8').includes('National gloves'));
+  await pool.query(`update product set active = true where name = 'National gloves'`);
+}
+
 console.log('\nTHE NATIONAL RANGE');
 await signIn('doug@example.nz');
 {
@@ -197,14 +211,10 @@ await signIn('doug@example.nz');
   r = await req(`/o/${root.slug}/shop/products`, { method: 'POST', form: { name: 'National tee', category: 'tournament_tee', price: '30', sizes: 'S, M' } });
   ok('and adds to it', (await one(`select 1 x from product where organisation_id=$1 and name='National tee'`, [root.id])));
 }
-{
-  const a = await req('/shop');
-  ok('/shop sends a signed-in person to their shop', a.status === 302);
-}
 delete jar.honbu_session;
 {
-  const r = await req('/shop');
-  ok('/shop for a visitor explains and invites a sign-in', r.status === 200 && /Sign in to the shop/.test(r.html) && !/National gi/.test(r.html));
+  const r = await req('/me/shop');
+  ok('ordering asks a visitor to sign in first', r.status === 302 && /signin/.test(r.location ?? ''), `${r.status} ${r.location}`);
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

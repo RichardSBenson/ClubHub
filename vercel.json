@@ -78,10 +78,6 @@
       "destination": "/api/index"
     },
     {
-      "source": "/shop",
-      "destination": "/api/index"
-    },
-    {
       "source": "/me",
       "destination": "/api/index"
     },

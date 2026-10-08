@@ -34,7 +34,7 @@ export const BUILT_IN = [
   { href: '/events', label: 'Events' },
   { href: '/news', label: 'News' },
   { href: '/instructors', label: 'Instructors' },
-  // Not a static page: the server answers it (sign in, and the shop shows your own dojo's range).
+  // A static page showing the federation's range; ordering is at /me/shop, once signed in.
   { href: '/shop', label: 'Shop' },
 ];
 
