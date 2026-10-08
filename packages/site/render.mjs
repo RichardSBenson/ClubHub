@@ -327,6 +327,15 @@ a.evcard:hover{transform:translateY(-2px);box-shadow:0 10px 24px rgba(0,0,0,.25)
 @media (max-width:600px){.icards{grid-template-columns:1fr}.evbanner{flex-direction:column;text-align:center}.evbanner .crest{max-width:70%}
   .evbanner.small{flex-direction:row;text-align:left}.evbanner.small .crest{max-width:30%}}
 
+table.roll{width:100%;border-collapse:collapse;margin:28px 0;font-size:18px;
+  border-top:5px solid var(--primary);background:var(--canvas-alt,transparent)}
+table.roll th{text-align:left;font-family:var(--display);font-size:13px;letter-spacing:.16em;
+  text-transform:uppercase;color:var(--muted);padding:14px 20px 10px;font-weight:700}
+table.roll td{padding:15px 20px;border-top:1px solid var(--neutral);font-family:var(--display);
+  font-weight:700}
+table.roll th:last-child,table.roll td:last-child{text-align:right;width:6.5em;
+  font-variant-numeric:tabular-nums;color:var(--primary)}
+table.roll tbody tr:hover{background:rgba(0,0,0,.035)}
 ul.events{list-style:none;padding:0;margin:0}
 ul.events li{display:grid;grid-template-columns:96px 1fr;gap:20px;padding:18px 0;
   border-bottom:1px solid var(--neutral)}

@@ -118,7 +118,7 @@ console.log('\nDERIVED TEXT');
     { name: 'Graeme Gavegan', year: 1993 }, { name: ' ', year: 2000 }, { name: 'Mike <b>Kenworthy', year: '2001' }] }] });
   const html = renderBlocks(doc);
   ok('blank names are dropped', doc.blocks[0].entries.length === 2);
-  ok('rendered as an even grid of cards', html.includes('class="roll"') && html.split('<li>').length === 3);
+  ok('rendered as a two-column board', html.includes('class="roll"') && html.split('<tr><td>').length === 3);
   ok('names are escaped', !html.includes('<b>Kenworthy'));
   ok('an empty roll is dropped', validate({ blocks: [{ type: 'roll', entries: [] }] }).doc.blocks.length === 0);
   const back = validate(documentFromText(textFromDocument(doc))).doc;

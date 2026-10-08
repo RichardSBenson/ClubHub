@@ -259,8 +259,9 @@ export function renderBlocks(doc, data = {}, { origin = '' } = {}) {
       case 'roll': {
         const rows = b.entries ?? [];
         return (b.heading ? `<h2>${esc(b.heading)}</h2>` : '') +
-          `<ul class="roll">${rows.map((r) => `<li><strong>${esc(r.name)}</strong>` +
-            (r.year ? `<span>${esc(r.year)}</span>` : '') + `</li>`).join('')}</ul>`;
+          `<table class="roll"><thead><tr><th scope="col">Name</th>` +
+          `<th scope="col">Year</th></tr></thead><tbody>${rows.map((r) =>
+            `<tr><td>${esc(r.name)}</td><td>${esc(r.year)}</td></tr>`).join('')}</tbody></table>`;
       }
 
       case 'faq': {
