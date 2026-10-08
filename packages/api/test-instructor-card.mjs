@@ -95,6 +95,8 @@ await signIn('doug@example.nz');
   let r = await req(`/p/${sensei.id}`);
   ok('the profile opens with a name and no badge', r.status === 200 && /Hana Sensei/.test(r.html) && !/class="idchip">Instructor/.test(r.html));
   ok('the owner sees the tick', /name="instructor"/.test(r.html));
+  r = await req(`/p/${plain.id}`);
+  ok('somebody who is not a black belt is not offered the tick at all', !/name="instructor"/.test(r.html));
   r = await req(`/p/${sensei.id}/instructor`, { method: 'POST', form: { instructor: 'on' } });
   ok('ticking records the role', r.status === 302 && await instructorRows() === 1);
   r = await req(`/p/${sensei.id}`);

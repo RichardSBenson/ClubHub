@@ -494,7 +494,7 @@ export const roster = ({ me, csrf, org, roster, total = null, canRegister = fals
     <thead><tr>${canManage ? '<th></th>' : ''}<th>Name</th><th>Grade</th><th class="hide-sm">Age</th>
       ${withDojo ? '<th class="hide-sm">Dojo</th>' : ''}<th>${canManage ? 'Instructor' : 'Role'}</th><th>Paid until</th></tr></thead>
     <tbody>${roster.map((p) => `<tr>
-      ${canManage ? `<td><input class="pick" type="checkbox" name="pick_${esc(p.id)}" aria-label="Choose ${esc(p.first_name)} ${esc(p.last_name)}"${filter.all ? ' checked' : ''}></td>` : ''}
+      ${canManage ? `<td>${p.is_dan || p.isInstructor ? `<input class="pick" type="checkbox" name="pick_${esc(p.id)}" aria-label="Choose ${esc(p.first_name)} ${esc(p.last_name)}"${filter.all ? ' checked' : ''}>` : ''}</td>` : ''}
       <td><a href="/p/${p.id}">${esc(p.first_name)} ${esc(p.last_name)}</a>
         <span class="muted">${esc(p.display_number ?? '')}</span>${p.age != null && p.age < 18 ? ' <span class="tag">junior</span>' : ''}</td>
       <td>${p.grade ? `<span class="tag ${p.is_dan ? 'dan' : 'ok'}">${esc(p.grade)}</span>`
@@ -517,7 +517,7 @@ export const roster = ({ me, csrf, org, roster, total = null, canRegister = fals
 
 export const person = ({ me, csrf, person, history, affiliations, eligibility,
                         titles = [], changes = [], guardians = null, training = null,
-                        canEdit = false, access = null, link = null, isInstructor = false, canManage = false, done = null, photoError = null, recognisable = [], instructorSite = null,
+                        canEdit = false, access = null, link = null, isInstructor = false, mayInstruct = false, canManage = false, done = null, photoError = null, recognisable = [], instructorSite = null,
                         linkExpires = 15, error = null }) => page({
   title: `${person.first_name} ${person.last_name}`, me, csrf, body: `<style>${identityCss}
   .idphoto{background:#ddd}.idphoto.none{color:#666}.idchip{color:#9a2a1f}</style>
@@ -535,7 +535,7 @@ export const person = ({ me, csrf, person, history, affiliations, eligibility,
   ${done ? `<div class="good">${esc(done)}</div>` : ''}
   ${photoError ? `<div class="bad">${esc(photoError)}</div>` : ''}
 
-  ${canManage ? `<form method="post" action="/p/${esc(person.id)}/instructor" class="card" style="margin:12px 0">
+  ${canManage && (mayInstruct || isInstructor) ? `<form method="post" action="/p/${esc(person.id)}/instructor" class="card" style="margin:12px 0">
     <input type="hidden" name="_csrf" value="${esc(csrf ?? '')}">
     <label style="display:flex;gap:10px;align-items:center;font-weight:700">
       <input type="checkbox" name="instructor"${isInstructor ? ' checked' : ''} style="width:22px;height:22px">

@@ -396,6 +396,7 @@ get('/p/:id', async (ctx) => {
   return ctx.send(200, V.person({
     me: ctx.me, ...record, eligibility, csrf: ctx.csrf, canEdit,
     isInstructor: await instructorRole.is(record.person.id), canManage: mayManage,
+    mayInstruct: !!(await pool.query('select 1 from person_current_grade where person_id = $1 and is_dan', [record.person.id])).rows.length,
     done: ctx.url.searchParams.get('done'), photoError: ctx.url.searchParams.get('error'),
     titles: await people.titlesOf(ctx.me.accountId, ctx.params.id),
     recognisable: (await rank.recognisable(ctx.me.accountId, ctx.params.id)).grades,

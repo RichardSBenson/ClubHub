@@ -105,7 +105,7 @@ console.log('\nTHE ROLL: FILTER IT, TICK FROM IT');
 await signIn('doug@example.nz');
 {
   let r = await req('/o/whanganui/roster');
-  ok('there is no separate picker to maintain: the roll has the tickboxes', r.status === 200 && (r.html.match(/class="pick"/g) ?? []).length >= 5 && /Make instructors and show on the website/.test(r.html));
+  ok('the roll has the tickboxes, and only for black belts', r.status === 200 && (r.html.match(/class="pick"/g) ?? []).length >= 3 && !new RegExp(`pick_${kyuC.id}`).test(r.html) && !new RegExp(`pick_${nobelt.id}`).test(r.html) && /Make instructors and show on the website/.test(r.html));
   ok('the whole roll is there by default, highest grade first', r.html.indexOf('Aroha 3rd dan') < r.html.indexOf('Cal Kyu') && /Nan Newbie/.test(r.html));
   ok('another dojo\'s black belt is not on it', !/Wendy Away/.test(r.html));
   r = await req('/o/whanganui/roster?grade=dan');
