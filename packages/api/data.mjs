@@ -2534,6 +2534,9 @@ async function memberEventsQuery(personId, eventId = null) {
              or (e.visibility = 'own_org' and e.organisation_id = club.id)
              or (e.visibility = 'by_grade'
                  and coalesce(g.rank_order, -1) >= coalesce(e.min_rank_order, 0)))
+        -- Anybody may SEE a public event; the grade limits decide who may ENTER it (a black belt seminar).
+        and (e.min_rank_order is null or coalesce(g.rank_order, 0) >= e.min_rank_order)
+        and (e.max_rank_order is null or coalesce(g.rank_order, 0) <= e.max_rank_order)
         and ($2::uuid is null or e.id = $2)
       order by e.starts_at`, [personId, eventId, ENTERABLE_KINDS]);
 

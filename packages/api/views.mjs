@@ -1127,7 +1127,7 @@ const VISIBILITY_LABELS = {
   public: 'Anyone, including the public website',
   members: 'Members anywhere in the federation',
   own_org: 'This organisation only',
-  by_grade: 'Only within a grade range',
+  by_grade: 'Hidden from everyone outside the grade range below',
   invite: 'Invited people only',
 };
 
@@ -1297,8 +1297,8 @@ export const eventForm = ({ me, csrf, org, values = {}, zone, error,
 
       <div class="row">
         <div>
-          <label for="minRankOrder">Lowest grade
-            <span class="hint">Leave blank for no limit.</span></label>
+          <label for="minRankOrder">Lowest grade who can enter
+            <span class="hint">Leave blank for no limit. Anyone can still SEE a public event; these limits decide who can enter it. For a black belt event choose 1st dan.</span></label>
           <select id="minRankOrder" name="minRankOrder">
             ${option('', 'No limit', v('minRankOrder'))}
             ${grades.map((g) => option(String(g.rankOrder), g.label,
@@ -1306,7 +1306,7 @@ export const eventForm = ({ me, csrf, org, values = {}, zone, error,
           </select>
         </div>
         <div>
-          <label for="maxRankOrder">Highest grade</label>
+          <label for="maxRankOrder">Highest grade who can enter</label>
           <select id="maxRankOrder" name="maxRankOrder">
             ${option('', 'No limit', v('maxRankOrder'))}
             ${grades.map((g) => option(String(g.rankOrder), g.label,

@@ -93,6 +93,10 @@ const theirsOwn = await addEvent(wellington, { title: 'Wellington Club Only', sl
 const tournament = await addEvent(wh, { title: 'Whanganui Open', slug: 'wh-open',
   kind: 'tournament', guardianUnder: 18 });
 
+// Anybody may SEE this one; only a 1st dan and above may enter it.
+const blackBelt = await addEvent(wh, { title: 'Whanganui Black Belt Day', slug: 'wh-black-belt', kind: 'seminar' });
+await pool.query('update event set min_rank_order = 11 where id = $1', [blackBelt.id]);
+
 const disc = await competition.addDiscipline(doug.id, tournament.id, { name: 'Kumite' });
 await competition.addDivision(doug.id, disc.id, { label: 'Juniors under 40kg',
   minAge: 6, maxAge: 17, maxWeightKg: 40 });
@@ -126,6 +130,7 @@ console.log('\nWHAT A MEMBER IS OFFERED');
   ok('not a training session', !/Weekly Training/.test(r.html));
   ok('not another club\'s', !/Wellington Grading/.test(r.html));
   ok('nor another club\'s club-only event', !/Wellington Club Only/.test(r.html));
+  ok('and not a black belt event to people who are not black belts, though it is public', !/Black Belt Day/.test(r.html));
 }
 
 console.log('\nA PARENT ENTERS A CHILD IN A GRADING');

@@ -863,6 +863,18 @@ export function findADojoPage({ dojos, federation, origin, fonts, nav,
   });
 }
 
+/** Who may enter an event, in words. Anybody can SEE a public event; this is the part that is limited. */
+export function entryRule(ev) {
+  const parts = [];
+  if (ev.min_grade && ev.max_grade) parts.push(`${ev.min_grade} to ${ev.max_grade}`);
+  else if (ev.min_grade) parts.push(`${ev.min_grade} and above`);
+  else if (ev.max_grade) parts.push(`${ev.max_grade} and below`);
+  if (ev.min_age && ev.max_age) parts.push(`ages ${ev.min_age} to ${ev.max_age}`);
+  else if (ev.min_age) parts.push(`age ${ev.min_age} and over`);
+  else if (ev.max_age) parts.push(`age ${ev.max_age} and under`);
+  return parts.length ? parts[0].charAt(0).toUpperCase() + parts.join(', ').slice(1) : '';
+}
+
 export function eventPage({ ev, federation, origin, fonts, nav,
                             base = '', vocabulary = {}, logoUrl = null, path = null }) {
   logoUrl = logoUrl ?? federation.logoUrl ?? null;
@@ -879,6 +891,7 @@ export function eventPage({ ev, federation, origin, fonts, nav,
     ['When', esc(when)],
     ev.venue_name || ev.address_line ? ['Where', `${ev.venue_name ? `<strong>${esc(ev.venue_name)}</strong><br>` : ''}${esc(ev.address_line ?? '')}`] : null,
     ev.cost_note ? ['Cost', esc(ev.cost_note)] : null,
+    entryRule(ev) ? ['Who can enter', esc(entryRule(ev))] : null,
     ev.entries_close ? ['Entries close', esc(date(ev.entries_close, ev.host_timezone ?? undefined))] : null,
     ev.contact_name || ev.contact_phone || ev.contact_email ? ['Contact',
       [ev.contact_name ? esc(ev.contact_name) : '',
