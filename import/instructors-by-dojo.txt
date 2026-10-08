@@ -84,3 +84,20 @@ Craig,Rowe,member,1st dan
 first name,last name,role,grade
 Craig,Rowe,member,1st dan
 Elaine,Rowe,member,1st dan
+
+=== hawera  ->  /o/hawera/members/import ===
+first name,last name,role,grade
+Nick,Potaka,member,1st dan
+Natasha,Potaka,member,1st dan
+Matthew,Levings,member,1st dan
+
+=== napier  ->  /o/napier/members/import ===
+first name,last name,role,grade
+Angela,Marshall,member,2nd dan
+Kerry,Winter,member,2nd dan
+
+=== carterton  ->  /o/carterton/members/import ===
+first name,last name,role,grade
+Alex,Terris,member,7th dan
+
+=== kohukohu  ->  /o/kohukohu/members/import (Richard and Tracey Hood are on the Rawene roll; they instruct here too) ===
