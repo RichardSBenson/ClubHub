@@ -102,7 +102,9 @@ console.log('\nNORMAL SIGN-IN IS UNAFFECTED');
 {
   delete jar.honbu_session;
   const { token } = await auth.requestLink('doug@example.nz');
-  const r = await get('/signin/' + token);
+  await get('/signin');
+  const rr = await fetch(base + '/signin/' + token, { method: 'POST', redirect: 'manual', headers: { cookie: ch(), 'content-type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams({ _csrf: jar.honbu_csrf ?? '' }).toString() }); take(rr);
+  const r = { location: rr.headers.get('location') };
   ok('magic links still work', r.location === '/dashboard' && !!jar.honbu_session);
 }
 

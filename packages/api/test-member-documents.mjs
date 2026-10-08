@@ -79,7 +79,7 @@ console.log('\nTHROUGH THE SCREENS');
   await pool.query(`insert into account (email, person_id) values ('web.adult@example.nz',$1)`, [me.id]);
   await get('/signin');
   const { token } = await auth.requestLink('web.adult@example.nz');
-  await get(`/signin/${token}`);
+  const so = await fetch(base + `/signin/${token}`, { method: 'POST', redirect: 'manual', headers: { cookie: ck(), 'content-type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams({ _csrf: jar.honbu_csrf ?? '' }).toString() }); keep(so);
   const fa = (await memberDocuments.choices(me.id)).find((c) => /first aid/i.test(c.label));
   let html = await (await get(`/me/${me.id}`)).text();
   ok('an adult is not asked for anybody\'s agreement to the photograph', !/name="consent"/.test(html) && /photo-pick\.js/.test(html));

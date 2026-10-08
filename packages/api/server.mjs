@@ -223,7 +223,19 @@ post('/signin', async (ctx) => {
   return ctx.redirect('/signin?sent=1');
 });
 
+// Opening the link only shows a button. Mail scanners open every link; only a person presses a button.
 get('/signin/:token', async (ctx) => {
+  try {
+    await auth.peekLink(ctx.params.token);
+    return ctx.send(200, V.signInConfirm({ csrf: ctx.csrf, token: ctx.params.token }));
+  } catch (e) {
+    return ctx.send(403, V.signIn({ error: e.message, csrf: ctx.csrf }));
+  }
+});
+
+// security-ok: public by design: the link is the credential, and it is single use; the form is CSRF-checked
+post('/signin/:token', async (ctx) => {
+  await ctx.form();
   try {
     const { token, redirectTo } = await auth.redeemLink(ctx.params.token, {
       userAgent: ctx.req.headers['user-agent'], ip: ctx.ip,

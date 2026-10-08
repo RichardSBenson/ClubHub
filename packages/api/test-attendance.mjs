@@ -35,7 +35,7 @@ async function req(p, { method = 'GET', form } = {}) {
 const q = async (sql, a = []) => (await pool.query(sql, a)).rows;
 const one = async (sql, a = []) => (await q(sql, a))[0] ?? null;
 const signIn = async (email) => { for (const k of Object.keys(jar)) delete jar[k];
-  await req('/signin'); const { token } = await auth.requestLink(email); await req(`/signin/${token}`); };
+  await req('/signin'); const { token } = await auth.requestLink(email); await req(`/signin/${token}`, { method: 'POST', form: {} }); };
 const rejects = (p, cls, re = /./) => p.then(() => false, (e) => e instanceof cls && re.test(e.message));
 
 const whanganui = await one(`select * from organisation where slug='whanganui'`);

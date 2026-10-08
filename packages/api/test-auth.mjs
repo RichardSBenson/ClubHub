@@ -138,6 +138,22 @@ console.log('\nTHE EMAIL');
   ok('and reassures anyone who did not ask', text.includes('did not ask'));
 }
 
+console.log('\nA MAIL SCANNER, A DOUBLE PRESS, AND A SPRAYING MACHINE');
+{
+  const email = (await pool.query(`select email::text e from account limit 1`)).rows[0].e;
+  const { token } = await auth.requestLink(email);
+  await auth.peekLink(token); await auth.peekLink(token);
+  ok('looking at a link any number of times does not spend it', true);
+  const both = await Promise.allSettled([auth.redeemLink(token), auth.redeemLink(token)]);
+  ok('two presses at once: exactly one signs in', both.filter((r) => r.status === 'fulfilled').length === 1, JSON.stringify(both.map((r) => r.status)));
+  let spent = null; try { await auth.peekLink(token); } catch (e) { spent = e.message; }
+  ok('afterwards the link is spent', /already been used/.test(spent ?? ''));
+  await pool.query(`delete from login_attempt where ip = '203.0.113.9'`);
+  await pool.query(`insert into login_attempt (email, ip, outcome) select 'x' || g || '@example.nz', '203.0.113.9', 'unknown_email' from generate_series(1, 60) g`);
+  let limited = null; try { await auth.requestLink('anyone@example.nz', { ip: '203.0.113.9' }); } catch (e) { limited = e; }
+  ok('one machine asking for many people\'s links is stopped', limited?.status === 429);
+}
+
 console.log(`\n${pass} passed, ${fail} failed\n`);
 await pool.end();
 process.exit(fail ? 1 : 0);

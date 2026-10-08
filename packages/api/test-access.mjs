@@ -51,7 +51,7 @@ console.log('\nSIGNED IN AS THE OWNER');
 {
   await req('/signin');
   const { token } = await auth.requestLink('doug@example.nz');
-  ok('session is live', (await req(`/signin/${token}`)).status === 302);
+  ok('session is live', (await req(`/signin/${token}`, { method: 'POST', form: {} })).status === 302);
 }
 
 const member = await one(`
@@ -96,11 +96,12 @@ console.log('\nGIVING THEM ACCESS');
 console.log('\nTHE LINK IS A REAL SIGN-IN LINK, NOT A WEAKER ONE');
 {
   const theirs = {};
-  const asThem = async (path) => {
+  const asThem = async (path, post = false) => {
     const headers = {};
     const c = Object.entries(theirs).map(([k, v]) => `${k}=${v}`).join('; ');
     if (c) headers.cookie = c;
-    const res = await fetch(base + path, { headers, redirect: 'manual' });
+    if (post) headers['content-type'] = 'application/x-www-form-urlencoded';
+    const res = await fetch(base + path, { headers, redirect: 'manual', ...(post ? { method: 'POST', body: new URLSearchParams({ _csrf: theirs.honbu_csrf ?? '' }).toString() } : {}) });
     for (const sc of res.headers.getSetCookie?.() ?? []) {
       const [k, v] = sc.split(';')[0].split('=');
       if (v === '') delete theirs[k]; else theirs[k] = v;
@@ -109,7 +110,9 @@ console.log('\nTHE LINK IS A REAL SIGN-IN LINK, NOT A WEAKER ONE');
              html: await res.text() };
   };
 
-  const used = await asThem(`/signin/${globalThis.__link}`);
+  const prefetched = await asThem(`/signin/${globalThis.__link}`);
+  ok('opening the link only shows a button: a mail scanner cannot spend it', prefetched.status === 200 && /<button/.test(prefetched.html) && !theirs.honbu_session);
+  const used = await asThem(`/signin/${globalThis.__link}`, true);
   ok('following it signs them in',
     used.status === 302 && !!theirs.honbu_session, String(used.status));
   ok('and lands on the dashboard', used.location === '/dashboard');
@@ -117,7 +120,7 @@ console.log('\nTHE LINK IS A REAL SIGN-IN LINK, NOT A WEAKER ONE');
   const dash = await asThem('/dashboard');
   ok('they can see their club', dash.status === 200 && dash.html.includes('Whanganui'));
 
-  const again = await asThem(`/signin/${globalThis.__link}`);
+  const again = await asThem(`/signin/${globalThis.__link}`, true);
   ok('it works ONCE — a second use is refused',
     again.status !== 302 || again.location !== '/dashboard',
     `${again.status} ${again.location}`);
@@ -174,7 +177,7 @@ console.log('\nONLY PEOPLE YOU ALREADY ADMINISTER');
   for (const k of Object.keys(jar)) delete jar[k];
   await req('/signin');
   const { token } = await auth.requestLink('tane@example.nz');
-  await req(`/signin/${token}`);
+  await req(`/signin/${token}`, { method: 'POST', form: {} });
 
   const r = await req(`/p/${member.id}/access`,
     { method: 'POST', form: { role: 'owner' } });

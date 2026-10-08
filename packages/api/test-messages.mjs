@@ -50,7 +50,7 @@ const signIn = async (email) => {
   for (const k of Object.keys(jar)) delete jar[k];
   await req('/signin');
   const { token } = await auth.requestLink(email);
-  await req(`/signin/${token}`);
+  await req(`/signin/${token}`, { method: 'POST', form: {} });
 };
 
 const whanganui = await one(`select * from organisation where slug='whanganui'`);

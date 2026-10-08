@@ -54,7 +54,7 @@ const signIn = async (email) => {
   delete jar.honbu_session;
   await req('/signin');
   const { token } = await auth.requestLink(email);
-  await req(`/signin/${token}`);
+  await req(`/signin/${token}`, { method: 'POST', form: {} });
 };
 const build = async () => {
   fs.rmSync(OUT, { recursive: true, force: true });

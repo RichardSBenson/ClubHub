@@ -78,7 +78,8 @@ const PUBLIC = new Map([
   ['GET /admin', 'the same'],
   ['GET /signin', 'the way in'],
   ['POST /signin', 'asking for a link; reveals nothing about who is registered'],
-  ['GET /signin/:token', 'redeeming a link; the token is the authorisation'],
+  ['GET /signin/:token', 'showing the sign-in button; the token is the authorisation'],
+  ['POST /signin/:token', 'redeeming a link; the token is the authorisation'],
   ['GET /bootstrap/:secret', 'the temporary way in before email works'],
   ['GET /try/:slug', 'the demonstration; refuses any federation not marked demo'],
   ['GET /enquire/:slug', 'the website contact form; shows only the club name'],
@@ -182,7 +183,7 @@ ok('and an event on their calendar', !!theirEvent, 'no event at whanganui');
 {
   await req('/signin');
   const { token } = await auth.requestLink('tane@example.nz');
-  const r = await req(`/signin/${token}`);
+  const r = await req(`/signin/${token}`, { method: 'POST', form: {} });
   ok('they are signed in', r.status === 302 && !!jar.honbu_session);
 
   const dash = await req('/dashboard');

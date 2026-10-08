@@ -76,7 +76,7 @@ console.log('\nSIGNED IN');
 {
   await req('/signin');
   const { token } = await auth.requestLink('doug@example.nz');
-  ok('the session is live', (await req(`/signin/${token}`)).status === 302);
+  ok('the session is live', (await req(`/signin/${token}`, { method: 'POST', form: {} })).status === 302);
 
   const list = await req('/o/whanganui/pages');
   ok('the website page opens', list.status === 200);
@@ -393,7 +393,7 @@ console.log('\nWRITING SOMEBODY ELSE\'S WEBSITE');
   for (const k of Object.keys(jar)) delete jar[k];
   await req('/signin');
   const { token } = await auth.requestLink('tane@example.nz');
-  await req(`/signin/${token}`);
+  await req(`/signin/${token}`, { method: 'POST', form: {} });
 
   ok('another club\'s website is refused',
     (await req('/o/whanganui/pages')).status === 403);

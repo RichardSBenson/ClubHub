@@ -217,7 +217,7 @@ console.log('\nTHE SCREEN');
     keep(res); return { status: res.status, location: res.headers.get('location'), html: await res.text() };
   };
   const auth = await import('./auth.mjs');
-  await req('/signin'); const { token } = await auth.requestLink('doug@example.nz'); await req(`/signin/${token}`);
+  await req('/signin'); const { token } = await auth.requestLink('doug@example.nz'); await req(`/signin/${token}`, { method: 'POST', form: {} });
 
   const s = await req('/o/whanganui/renewals');
   ok('the renewals screen offers a reminder', s.status === 200 && /Remind the ticked/.test(s.html) && /Last reminded/.test(s.html));

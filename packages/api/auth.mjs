@@ -26,6 +26,7 @@ const token = (bytes = 32) => crypto.randomBytes(bytes).toString('base64url');
 export const LINK_TTL_MINUTES = 15;
 export const SESSION_TTL_DAYS = 30;
 const MAX_LINKS_PER_HOUR = 5;
+const MAX_LINKS_PER_IP_PER_HOUR = 60;
 
 export class RateLimited extends Error {
   constructor(msg = 'Too many sign-in attempts. Try again shortly.') {
@@ -57,6 +58,15 @@ export async function requestLink(email, { ip = null, redirectTo = null } = {}) 
     throw new RateLimited();
   }
 
+  // And per address of origin, so one machine cannot spray links at many people.
+  if (ip) {
+    const fromHere = await one(`select count(*)::int as n from login_attempt where ip = $1 and at > now() - interval '1 hour'`, [ip]);
+    if (fromHere.n >= MAX_LINKS_PER_IP_PER_HOUR) {
+      await pool.query(`insert into login_attempt (email, ip, outcome) values ($1,$2,'rate_limited')`, [email, ip]);
+      throw new RateLimited();
+    }
+  }
+
   const account = await one('select id from account where email = $1', [email]);
 
   if (!account) {
@@ -79,6 +89,19 @@ export async function requestLink(email, { ip = null, redirectTo = null } = {}) 
   return { sent: true, token: raw, expiresInMinutes: LINK_TTL_MINUTES };
 }
 
+/**
+ * Looks at a link without using it. Email programs and security scanners open every link in a message before
+ * the person does, and a link that signed in on first sight would be spent by the scanner. So opening the link
+ * only shows a button; pressing it is what redeems.
+ */
+export async function peekLink(raw) {
+  const link = await one(`select used_at, expires_at from login_link where token_hash = $1`, [hash(String(raw))]);
+  if (!link) throw new Forbidden('That sign-in link is not valid');
+  if (link.used_at) throw new Forbidden('That sign-in link has already been used');
+  if (new Date(link.expires_at) < new Date()) throw new Forbidden('That sign-in link has expired. Request another.');
+  return true;
+}
+
 /** Exchanges a link for a session. Single use. */
 export async function redeemLink(raw, { userAgent = null, ip = null } = {}) {
   const link = await one(`
@@ -92,7 +115,9 @@ export async function redeemLink(raw, { userAgent = null, ip = null } = {}) {
   const client = await pool.connect();
   try {
     await client.query('begin');
-    await client.query('update login_link set used_at = now() where id = $1', [link.id]);
+    // Claimed in the same statement that checks it is unused, so two presses at once cannot both win.
+    const { rowCount } = await client.query('update login_link set used_at = now() where id = $1 and used_at is null', [link.id]);
+    if (!rowCount) throw new Forbidden('That sign-in link has already been used');
 
     const raw2 = token(48);
     const { rows: [session] } = await client.query(`

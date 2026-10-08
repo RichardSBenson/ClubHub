@@ -53,7 +53,7 @@ const signIn = async (email) => {
   delete jar.honbu_session;
   await req('/signin');
   const { token } = await auth.requestLink(email);
-  await req(`/signin/${token}`);
+  await req(`/signin/${token}`, { method: 'POST', form: {} });
 };
 const build = async () => {
   fs.rmSync(OUT, { recursive: true, force: true });
@@ -110,7 +110,7 @@ for (const who of [parent, teen]) {
     form: { role: 'member', email: who.email ?? `${who.first_name.toLowerCase()}@example.nz` } });
   who.link = access.html.match(/\/signin\/[A-Za-z0-9_-]+/)?.[0];
 }
-const asLink = async (url) => { delete jar.honbu_session; await req('/signin'); await req(url); };
+const asLink = async (url) => { delete jar.honbu_session; await req('/signin'); await req(url, { method: 'POST', form: {} }); };
 
 const entries = (personId) => pool.query(`select * from event_entry where person_id=$1`, [personId])
   .then((r) => r.rows);

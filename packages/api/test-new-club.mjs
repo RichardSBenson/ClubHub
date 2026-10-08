@@ -52,7 +52,7 @@ const signIn = async (email) => {
   delete jar.honbu_session;
   await req('/signin');
   const { token } = await auth.requestLink(email);
-  await req(`/signin/${token}`);
+  await req(`/signin/${token}`, { method: 'POST', form: {} });
 };
 const build = async () => {
   fs.rmSync(OUT, { recursive: true, force: true });
@@ -97,7 +97,7 @@ console.log('\nTHE FEDERATION ADDS A CLUB');
   const cookieBefore = { ...jar };
   delete jar.honbu_session;
   await req('/signin');
-  await req(link);
+  await req(link, { method: 'POST', form: {} });
   const own = await req('/o/taupo-karate/roster');
   ok('can sign in and open their own club', own.status === 200, String(own.status));
   const other = await req('/o/whanganui/roster');

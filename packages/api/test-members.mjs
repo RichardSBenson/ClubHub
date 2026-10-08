@@ -75,7 +75,7 @@ console.log('\nSIGNED IN AS THE REGISTRAR');
 {
   await req('/signin');
   const { token } = await auth.requestLink('doug@example.nz');
-  ok('the session is live', (await req(`/signin/${token}`)).status === 302);
+  ok('the session is live', (await req(`/signin/${token}`, { method: 'POST', form: {} })).status === 302);
 
   const roll = await req('/o/whanganui/roster');
   ok('the roll opens', roll.status === 200);
@@ -317,7 +317,7 @@ console.log('\nSEEING THE ROLL IS NOT PERMISSION TO CHANGE IT');
   for (const k of Object.keys(jar)) delete jar[k];
   await req('/signin');
   const { token } = await auth.requestLink('tane@example.nz');
-  await req(`/signin/${token}`);
+  await req(`/signin/${token}`, { method: 'POST', form: {} });
 
   ok('another club\'s roll is refused',
     (await req('/o/whanganui/roster')).status === 403);

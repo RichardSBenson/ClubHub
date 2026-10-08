@@ -96,7 +96,7 @@ console.log('\nSIGNING IN');
 
   // redeem via the real route, using a fresh token
   const { token } = await auth.requestLink('doug@example.nz');
-  const red = await req(`/signin/${token}`);
+  const red = await req(`/signin/${token}`, { method: 'POST', form: {} });
   ok('following the link sets a session cookie',
     red.status === 302 && !!jar.honbu_session);
   ok('the cookie is HttpOnly and SameSite', true);  // asserted below on the header
@@ -189,7 +189,7 @@ console.log('\nPERMISSION IS ENFORCED AT THE ROUTE');
   // sign in as Tane, who administers Wellington only
   delete jar.honbu_session;
   const { token } = await auth.requestLink('tane@example.nz');
-  await req(`/signin/${token}`);
+  await req(`/signin/${token}`, { method: 'POST', form: {} });
 
   const mine = await req('/o/wellington/roster');
   ok('Tane can see Wellington', mine.status === 200);
@@ -208,7 +208,7 @@ console.log('\nRUNNING A GRADING');
 {
   delete jar.honbu_session;
   const { token } = await auth.requestLink('doug@example.nz');
-  await req(`/signin/${token}`);
+  await req(`/signin/${token}`, { method: 'POST', form: {} });
 
   const g = await req('/o/moknz/grading');
   ok('the grading screen renders', g.status === 200);

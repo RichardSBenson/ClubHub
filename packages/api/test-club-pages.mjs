@@ -83,7 +83,7 @@ const signIn = async (email) => {
   delete jar.honbu_session;
   await req('/signin');
   const { token } = await auth.requestLink(email);
-  await req(`/signin/${token}`);
+  await req(`/signin/${token}`, { method: 'POST', form: {} });
 };
 // Asynchronous on purpose. A synchronous child process blocks this process's
 // event loop for the length of the build, the server's idle sockets time out

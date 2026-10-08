@@ -78,7 +78,7 @@ console.log('\nTHE CALENDAR IS BEHIND SIGN-IN');
 console.log('\nSIGNED IN AS SOMEONE WHO RUNS A DOJO');
 {
   const { token } = await auth.requestLink('doug@example.nz');
-  const r = await req(`/signin/${token}`);
+  const r = await req(`/signin/${token}`, { method: 'POST', form: {} });
   ok('the session is live', r.status === 302 && !!jar.honbu_session);
 
   const list = await req('/o/whanganui/events');
@@ -288,7 +288,7 @@ console.log('\nSOMEBODY ELSE\'S CLUB IS NOT');
   for (const k of Object.keys(jar)) delete jar[k];
   await req('/signin');
   const { token } = await auth.requestLink('tane@example.nz');
-  await req(`/signin/${token}`);
+  await req(`/signin/${token}`, { method: 'POST', form: {} });
 
   const own = await req('/o/wellington/events');
   ok('he can open his own calendar', own.status === 200, String(own.status));

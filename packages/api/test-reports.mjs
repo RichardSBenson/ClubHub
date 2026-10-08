@@ -25,7 +25,7 @@ const get = async (p) => { const res = await fetch(base + p, { redirect: 'manual
   headers: { cookie: Object.entries(jar).map(([k, v]) => `${k}=${v}`).join('; ') } });
   keep(res); return { status: res.status, type: res.headers.get('content-type'), disp: res.headers.get('content-disposition'), text: await res.text() }; };
 const signIn = async (email) => { for (const k of Object.keys(jar)) delete jar[k];
-  await get('/signin'); const { token } = await auth.requestLink(email); await get(`/signin/${token}`); };
+  await get('/signin'); const { token } = await auth.requestLink(email); await fetch(base + `/signin/${token}`, { method: 'POST', redirect: 'manual', headers: { cookie: Object.entries(jar).map(([k, v]) => `${k}=${v}`).join('; '), 'content-type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams({ _csrf: jar.honbu_csrf ?? '' }).toString() }).then(keep); };
 const q = async (sql, a = []) => (await pool.query(sql, a)).rows;
 const one = async (sql, a = []) => (await q(sql, a))[0] ?? null;
 const rejects = (p, cls) => p.then(() => false, (e) => e instanceof cls);

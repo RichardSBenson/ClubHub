@@ -56,7 +56,7 @@ const signIn = async (email) => {
   delete jar.honbu_session;
   await req('/signin');
   const { token } = await auth.requestLink(email);
-  await req(`/signin/${token}`);
+  await req(`/signin/${token}`, { method: 'POST', form: {} });
 };
 const build = async () => {
   fs.rmSync(OUT, { recursive: true, force: true });
@@ -139,7 +139,7 @@ console.log('\nA MOBILE FINDS THE SAME PERSON');
 console.log('\nA KNOWN PERSON COMES BACK THROUGH THE LINK');
 {
   const link = linkFor('hone.known@example.nz');
-  const r = await req(link);
+  const r = await req(link, { method: 'POST', form: {} });
   ok('the link signs them in and sends them to the entry', r.status === 302 && /\/enter\/whanganui\/open-door-1\/go/.test(r.location ?? ''), r.location);
   const go = await req(r.location);
   ok('and on to their own screen', go.status === 302 && new RegExp(`/me/events/${open1.id}/${known.id}`).test(go.location ?? ''), go.location);
@@ -212,7 +212,7 @@ const open2 = await tourney('Open Door Two', 'open-door-2');
   await req(`/enter/whanganui/${open2.slug}`, { method: 'POST', form: { contact: 'nia.newbie@example.nz' } });
   const link = linkFor('nia.newbie@example.nz');
   ok('she is sent a sign-in link, not a registration', /\/signin\//.test(link ?? ''));
-  const r = await req(link);
+  const r = await req(link, { method: 'POST', form: {} });
   const go = await req(r.location);
   const screen = await req(go.location);
   ok('the one-click screen, nothing to retype', screen.status === 200 && /Open 60-80/.test(screen.html) && /70(\.\d+)? kg/.test(screen.html) && !/name="club"/.test(screen.html), screen.html.slice(0, 300));

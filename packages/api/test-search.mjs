@@ -45,8 +45,8 @@ const signIn = async (email) => {
   delete jar.honbu_session;
   await req('/signin');
   const { token } = await auth.requestLink(email);
-  await fetch(base + `/signin/${token}`, { redirect: 'manual',
-    headers: { cookie: Object.entries(jar).map(([k, v]) => `${k}=${v}`).join('; ') } })
+  await fetch(base + `/signin/${token}`, { method: 'POST', redirect: 'manual',
+    headers: { cookie: Object.entries(jar).map(([k, v]) => `${k}=${v}`).join('; '), 'content-type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams({ _csrf: jar.honbu_csrf ?? '' }).toString() })
     .then((res) => {
       for (const sc of res.headers.getSetCookie?.() ?? []) {
         const [k, v] = sc.split(';')[0].split('=');

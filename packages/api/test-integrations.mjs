@@ -24,7 +24,7 @@ async function req(p, { method = 'GET', form } = {}) {
   keep(res); return { status: res.status, location: res.headers.get('location'), headers: res.headers, html: await res.text() };
 }
 const one = async (sql, a = []) => (await pool.query(sql, a)).rows[0] ?? null;
-const signIn = async (email) => { delete jar.honbu_session; await req('/signin'); const { token } = await auth.requestLink(email); await req(`/signin/${token}`); };
+const signIn = async (email) => { delete jar.honbu_session; await req('/signin'); const { token } = await auth.requestLink(email); await req(`/signin/${token}`, { method: 'POST', form: {} }); };
 
 
 const wh = await one(`select * from organisation where slug='whanganui'`);

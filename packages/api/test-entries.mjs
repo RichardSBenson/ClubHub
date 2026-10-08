@@ -60,7 +60,7 @@ console.log('\nSIGNING IN AS THE FEDERATION');
 {
   await req('/signin');
   const { token } = await auth.requestLink('doug@example.nz');
-  ok('the session is live', (await req(`/signin/${token}`)).status === 302);
+  ok('the session is live', (await req(`/signin/${token}`, { method: 'POST', form: {} })).status === 302);
 }
 
 console.log('\nCREATING THE TOURNAMENT');
@@ -468,7 +468,7 @@ console.log('\nA CLUB CANNOT SET UP SOMEBODY ELSE\'S TOURNAMENT');
   for (const k of Object.keys(jar)) delete jar[k];
   await req('/signin');
   const { token } = await auth.requestLink('tane@example.nz');
-  await req(`/signin/${token}`);
+  await req(`/signin/${token}`, { method: 'POST', form: {} });
 
   ok('the setup page is refused', (await req(SETUP)).status === 403);
   const before = (await q('select * from event_division')).length;

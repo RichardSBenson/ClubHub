@@ -35,7 +35,7 @@ async function req(p, { method = 'GET', form } = {}) {
   return { status: res.status, html: await res.text() };
 }
 const one = async (sql, a = []) => (await pool.query(sql, a)).rows[0] ?? null;
-const signIn = async (email) => { delete jar.honbu_session; await req('/signin'); const { token } = await auth.requestLink(email); await req(`/signin/${token}`); };
+const signIn = async (email) => { delete jar.honbu_session; await req('/signin'); const { token } = await auth.requestLink(email); await req(`/signin/${token}`, { method: 'POST', form: {} }); };
 const federation = await one('select * from organisation where parent_id is null');
 
 const DOJOS = `slug,name,venue_name,address_line,suburb,city,postcode,latitude,longitude,phone,email,directions,blurb,who_trains,instructor_name,instructor_grade,publish

@@ -48,7 +48,7 @@ await (async () => {
   delete jar.honbu_session;
   await req('/signin');
   const { token } = await auth.requestLink('doug@example.nz');
-  await req(`/signin/${token}`);
+  await req(`/signin/${token}`, { method: 'POST', form: {} });
 })();
 
 const wh = await one(`select id, slug from organisation where slug='whanganui'`);

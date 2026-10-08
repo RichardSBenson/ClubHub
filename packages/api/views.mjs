@@ -379,6 +379,18 @@ export const signIn = ({ sent, error, csrf, next = '' } = {}) => page({
   </form>`}`,
 });
 
+/** What opening an emailed link shows: one button, because only a person presses it. */
+export const signInConfirm = ({ csrf, token }) => page({
+  title: 'Sign in', me: null,
+  body: `
+  <h1>Sign in</h1>
+  <p class="sub">Press the button to finish signing in on this device.</p>
+  <form method="post" action="/signin/${esc(token)}">
+    <input type="hidden" name="_csrf" value="${esc(csrf ?? '')}">
+    <p><button class="btn" type="submit">Sign in</button></p>
+  </form>`,
+});
+
 /**
  * The one screen that can show several federations at once, so the one screen
  * where a single vocabulary is wrong. Each group carries its own words.
