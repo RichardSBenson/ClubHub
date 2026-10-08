@@ -14,6 +14,7 @@ import { parseCsv } from '../core/domain/register-csv.mjs';
 import { pool } from '../infrastructure/postgres/pool.mjs';
 import { problemsWithPerson, problemsWithMembership, normaliseGender, ageOn }
   from '../core/domain/people.mjs';
+import { seal, open as unseal, sealBytes, openBytes } from '../infrastructure/crypto/vault.mjs';
 import { problemsWithDocument, photoNeedsConsent } from '../core/domain/documents.mjs';
 import { whyNotInstructor, SUPPORTER_NO_RANK, problemsWithRoleAndGrade } from '../core/domain/roles.mjs';
 import { payeeFor, groupByPayee, problemsWithPaymentRequest, problemsWithPayment, KINDS as PAY_KINDS }
@@ -2504,6 +2505,7 @@ export const myself = {
     if (!person) throw new NotFound('Person');
     const priv = await one(`select address_line, suburb, city, postcode, emergency_name,
       emergency_phone, medical_notes from person_private where person_id=$1`, [personId]) ?? {};
+    priv.medical_notes = unseal(priv.medical_notes);
     const grade = await one(`select label, rank_order, awarded_on::text as awarded_on
       from person_current_grade where person_id=$1`, [personId]);
     const { rows: memberships } = await pool.query(`
@@ -2542,7 +2544,7 @@ export const myself = {
           emergency_name=excluded.emergency_name, emergency_phone=excluded.emergency_phone,
           medical_notes=excluded.medical_notes, updated_at=now()`,
         [personId, input.address_line, input.suburb, input.city, input.postcode,
-         input.emergency_name, input.emergency_phone, input.medical_notes]);
+         input.emergency_name, input.emergency_phone, seal(input.medical_notes)]);
 
       // Which fields, never what they said: medical notes are the most
       // sensitive thing on the register and the history is read by more people
@@ -4490,7 +4492,7 @@ export const newcomers = {
       from newcomer n where n.organisation_id = $1
         and (n.status = 'trialling' or n.updated_at > now() - interval '30 days')
       order by (n.status = 'trialling') desc, n.created_at desc`, [orgId, org.timezone]);
-    return { org, today, newcomers: rows.map((r) => ({ ...r,
+    return { org, today, newcomers: rows.map((r) => ({ ...r, medical_notes: unseal(r.medical_notes),
       child: isChild(r.date_of_birth, today), readyToTalk: r.status === 'trialling' && timeToTalk(r.visits) })) };
   },
 
@@ -4523,7 +4525,7 @@ export const newcomers = {
         values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) returning id`,
         [orgId, input.firstName, input.lastName, input.email || null, input.phone || null, input.dateOfBirth,
          input.guardianName || null, input.guardianPhone || null, input.emergencyName || null,
-         input.emergencyPhone || null, input.medicalNotes || null, input.consentName, actor]);
+         input.emergencyPhone || null, seal(input.medicalNotes || null), input.consentName, actor]);
       if (sheet) await client.query(`insert into newcomer_attendance (newcomer_id, organisation_id, session_id, session_date)
         values ($1,$2,$3,$4::date)`, [n.id, orgId, sessionId, date]);
       await client.query(`insert into audit_log (account_id, organisation_id, action, entity, entity_id, after)
@@ -5915,7 +5917,7 @@ export const trials = {
       ({ rows: [person] } = await client.query(`insert into person (first_name, last_name, date_of_birth, email, phone)
         values ($1,$2,$3,$4,$5) returning id`, [input.firstName, input.lastName, input.dateOfBirth, input.email, input.phone]));
       await client.query(`insert into person_private (person_id, emergency_name, emergency_phone, medical_notes) values ($1,$2,$3,$4)`,
-        [person.id, input.emergencyName, input.emergencyPhone, input.medical || null]);
+        [person.id, input.emergencyName, input.emergencyPhone, seal(input.medical || null)]);
       await client.query(`insert into affiliation (person_id, organisation_id, role, starts, status, paid_until)
         values ($1,$2,'member',$3::date,'trial',$4::date)`, [person.id, org.id, today, ends]);
       await client.query(`insert into account (email, person_id) values ($1,$2) on conflict (email) do nothing`, [input.email, person.id]);
@@ -6688,7 +6690,7 @@ export const memberDocuments = {
         filename, mime, bytes, size_bytes, uploaded_by)
       values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) returning id`,
       [personId, home, qual?.id ?? null, (qual?.label ?? String(title).trim()).slice(0, 120), awardedOn || null, expiresOn || null,
-       String(note ?? '').trim().slice(0, 300) || null, file.filename ?? null, file.mime, file.bytes, file.bytes.length, actor]);
+       String(note ?? '').trim().slice(0, 300) || null, file.filename ?? null, file.mime, sealBytes(file.bytes), file.bytes.length, actor]);
     await pool.query(`insert into audit_log (account_id, organisation_id, action, entity, entity_id, after)
       values ($1,$2,'document_sent','person',$3,$4)`, [actor, home, personId, JSON.stringify({ documentId: row.id, title: qual?.label ?? title })]);
     return row;
@@ -6699,7 +6701,7 @@ export const memberDocuments = {
     if (!official && !(await family.mayActFor(actor, personId))) throw new Forbidden();
     const d = await one('select mime, bytes, filename from member_document where id = $1 and person_id = $2', [docId, personId]);
     if (!d) throw new NotFound('Document');
-    return d;
+    return { ...d, bytes: openBytes(d.bytes) };
   },
 
   /** A registrar accepts or declines. Accepting a qualification records it, with this file as the proof. */

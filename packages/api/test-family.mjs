@@ -9,6 +9,7 @@
  *   4. The authority ends on the child's eighteenth birthday without anybody ending it.
  *   5. A member can reach no administrator screen.
  */
+import { open as unseal } from '../infrastructure/crypto/vault.mjs';
 import './reset.mjs';
 import http from 'node:http';
 import fs from 'node:fs';
@@ -150,7 +151,7 @@ console.log('\nSHE SEES AND CHANGES HER CHILD\'S SAFETY DETAILS');
     pp.emergency_name, pp.medical_notes from person p
     join person_private pp on pp.person_id=p.id where p.id=$1`, [kid.id]);
   ok('what she changed is saved', row.phone === '021 000 000' && row.emergency_name === 'Nana Rose'
-    && /Asthma/.test(row.medical_notes));
+    && /Asthma/.test(unseal(row.medical_notes)));
   ok('what the register owns is not', row.first_name === 'Kahu' && row.dob === '2015-05-05');
   const log = await one(`select after from audit_log where action='self_update' and entity_id=$1
     order by id desc limit 1`, [kid.id]);

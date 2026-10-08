@@ -23,6 +23,8 @@ import { spawnSync } from 'node:child_process';
 import { join, dirname, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import { randomBytes } from 'node:crypto';
+const TEST_KEY = randomBytes(32).toString('base64');
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 
 /**
@@ -67,6 +69,8 @@ function run(file) {
     cwd: join(ROOT, dirname(file)),
     encoding: 'utf8',
     timeout: 5 * 60_000,
+    // A throwaway key, so the whole suite runs with sealing on: that is how the real thing runs.
+    env: { ...process.env, HONBU_DATA_KEY: process.env.HONBU_DATA_KEY ?? TEST_KEY },
   });
   const output = `${result.stdout ?? ''}${result.stderr ?? ''}`;
   const tally = output.match(/^(\d+) passed, (\d+) failed$/m);

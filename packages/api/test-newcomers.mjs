@@ -8,6 +8,7 @@
  *   5. Not continuing wipes their details; stale ones are purged.
  *   6. Nobody else can see or touch them.
  */
+import { open as unseal } from '../infrastructure/crypto/vault.mjs';
 import './reset.mjs';
 import { pool, newcomers, attendance, Forbidden, Invalid, NotFound } from './data.mjs';
 import { readNewcomer } from '../core/domain/newcomer.mjs';
@@ -78,7 +79,7 @@ ok('an instructor cannot make a member', await rejects(newcomers.join(sensei, wh
 const { person } = await newcomers.join(reg, whanganui.id, sam.id);
 ok('a registrar can; they get a member number', /-\d+$/.test(person.display_number), person.display_number);
 ok('their class counts as the member\'s', (await one('select count(*)::int as n from attendance where person_id=$1', [person.id])).n === 1);
-ok('their medical note moved to the member', (await one('select medical_notes from person_private where person_id=$1', [person.id])).medical_notes === 'Asthma');
+ok('their medical note moved to the member', unseal((await one('select medical_notes from person_private where person_id=$1', [person.id])).medical_notes) === 'Asthma');
 const joined = await one('select * from newcomer where id=$1', [sam.id]);
 ok('the trial record keeps only the consent', joined.status === 'joined' && !joined.email && !joined.medical_notes && joined.consent_by === 'Sam Walker');
 ok('joining twice is refused', await rejects(newcomers.join(reg, whanganui.id, sam.id), Invalid, /already/));

@@ -12,7 +12,7 @@
     "db": "psql -f db/install/schema.sql",
     "found": "node tools/found.mjs",
     "test": "node tools/run-tests.mjs",
-    "build": "node tools/check-dependencies.mjs && node tools/check-wiring.mjs && node tools/migrate.mjs && node packages/site/build.mjs",
+    "build": "node tools/check-dependencies.mjs && node tools/check-wiring.mjs && node tools/migrate.mjs && node tools/seal-existing.mjs && node packages/site/build.mjs",
     "export": "node tools/export-to-json.mjs",
     "check": "node tools/check-dependencies.mjs && node tools/check-wiring.mjs && node tools/check-schema-coverage.mjs && node tools/check-security.mjs",
     "dev": "node packages/api/dev.mjs",
