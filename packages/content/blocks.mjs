@@ -35,6 +35,8 @@ export const BLOCKS = {
   dojoList:  { fields: { heading: 'string' } },
   eventList: { fields: { heading: 'string', kind: 'string', limit: 'number' } },
   honours:   { fields: { heading: 'string', award: 'string' } },
+  // A written-out roll of honour (name and year), shown as an even grid of cards.
+  roll:      { fields: { heading: 'string', entries: 'roll[]' } },
   // Questions and answers, as a no-JavaScript accordion and as FAQPage data.
   faq:       { fields: { heading: 'string', items: 'faq[]' } },
   // A form that writes to the organisation's enquiries inbox.
@@ -131,6 +133,13 @@ export function validate(doc) {
           return q && a.some((r) => r.text.trim()) ? [{ q, a }] : [];
         });
       }
+      else if (kind === 'roll[]') {
+        block[field] = (Array.isArray(v) ? v : []).slice(0, 200).flatMap((it) => {
+          const name = String(it?.name ?? '').replace(/\s+/g, ' ').trim().slice(0, 120);
+          const year = String(it?.year ?? '').replace(/\s+/g, ' ').trim().slice(0, 40);
+          return name ? [{ name, year }] : [];
+        });
+      }
       else if (kind === 'string') block[field] = String(v).slice(0, 2000);
       else if (kind === 'number') block[field] = Number(v) || 0;
       else if (kind === 'boolean') block[field] = !!v;
@@ -150,6 +159,9 @@ export function validate(doc) {
       block.level = Math.min(4, Math.max(2, block.level ?? 2));   // never h1
     if (block.type === 'faq' && !block.items?.length) {
       dropped.push(`block ${i}: a FAQ with no complete question and answer`); continue;
+    }
+    if (block.type === 'roll' && !block.entries?.length) {
+      dropped.push(`block ${i}: a roll of honour with no names`); continue;
     }
     if (block.type === 'paragraph' && !block.text?.length) {
       dropped.push(`block ${i}: empty paragraph`); continue;
@@ -244,6 +256,13 @@ export function renderBlocks(doc, data = {}, { origin = '' } = {}) {
             `<td>${esc(String(r.year))}</td></tr>`).join('')}</tbody></table>`;
       }
 
+      case 'roll': {
+        const rows = b.entries ?? [];
+        return (b.heading ? `<h2>${esc(b.heading)}</h2>` : '') +
+          `<ul class="roll">${rows.map((r) => `<li><strong>${esc(r.name)}</strong>` +
+            (r.year ? `<span>${esc(r.year)}</span>` : '') + `</li>`).join('')}</ul>`;
+      }
+
       case 'faq': {
         const items = (Array.isArray(b.items) ? b.items : []).filter((it) => it?.q);
         if (!items.length) return '';
@@ -335,6 +354,8 @@ export function toText(doc) {
       return wordsOf(b.text);
     if (b.type === 'list')
       return (b.items ?? []).map(wordsOf).join(' ');
+    if (b.type === 'roll')
+      return (b.entries ?? []).map((e) => `${e.name} ${e.year}`).join('\n');
     if (b.type === 'faq')
       return (b.items ?? []).map((it) => `${it.q ?? ''} ${wordsOf(it.a)}`).join('\n');
     return '';

@@ -1,4 +1,5 @@
 import { validate, renderBlocks, excerpt, toText } from './blocks.mjs';
+import { textFromDocument, documentFromText } from './document-text.mjs';
 
 let pass = 0, fail = 0;
 const ok = (n, c, d='') => c ? (pass++, console.log(`  ✓ ${n}`))
@@ -109,6 +110,19 @@ console.log('\nDERIVED TEXT');
   ok('and starts with the real first sentence', ex.startsWith('Hanshi Doug Holloway'));
   ok('plain text includes the heading', toText(doc).startsWith('Our lineage'));
   console.log(`      → "${ex}"`);
+}
+
+{
+  console.log('A roll of honour');
+  const { doc, dropped } = validate({ blocks: [{ type: 'roll', heading: 'Board', entries: [
+    { name: 'Graeme Gavegan', year: 1993 }, { name: ' ', year: 2000 }, { name: 'Mike <b>Kenworthy', year: '2001' }] }] });
+  const html = renderBlocks(doc);
+  ok('blank names are dropped', doc.blocks[0].entries.length === 2);
+  ok('rendered as an even grid of cards', html.includes('class="roll"') && html.split('<li>').length === 3);
+  ok('names are escaped', !html.includes('<b>Kenworthy'));
+  ok('an empty roll is dropped', validate({ blocks: [{ type: 'roll', entries: [] }] }).doc.blocks.length === 0);
+  const back = validate(documentFromText(textFromDocument(doc))).doc;
+  ok('survives the text editor round trip', JSON.stringify(back.blocks[0].entries) === JSON.stringify(doc.blocks[0].entries));
 }
 
 console.log(`\n${pass} passed, ${fail} failed\n`);

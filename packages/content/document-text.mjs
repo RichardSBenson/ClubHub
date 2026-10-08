@@ -119,6 +119,11 @@ function blockToText(block, names) {
     case 'honours':
       return `{{honours${attrs({ heading: block.heading, award: block.award })}}}`;
 
+    case 'roll':
+      return `{{roll${attrs({ heading: block.heading })}}}\n`
+        + (block.entries ?? []).map((e) => `${e.name} | ${e.year}`).join('\n')
+        + '\n{{/roll}}';
+
     case 'faq':
       return `{{faq${attrs({ heading: block.heading })}}}\n`
         + (block.items ?? []).map((it) => `? ${it.q}\n${textFromRich(it.a ?? [])}`).join('\n\n')
@@ -233,6 +238,22 @@ export function documentFromText(text = '', { images = [] } = {}) {
     const line = lines[i];
 
     if (BLANK.test(line)) { i += 1; continue; }
+
+    // {{roll}} … {{/roll}}: one "Name | year" per line.
+    if (/^\s*\{\{roll\b/.test(line)) {
+      const opener = line.trim().replace(/^\{\{/, '').replace(/\}\}$/, '');
+      const a = readAttrs(opener.replace(/^roll\s*/, ''));
+      const entries = [];
+      i += 1;
+      while (i < lines.length && !/^\s*\{\{\/roll\}\}\s*$/.test(lines[i])) {
+        const [name, ...rest] = lines[i].split('|');
+        if (name.trim()) entries.push({ name: name.trim(), year: rest.join('|').trim() });
+        i += 1;
+      }
+      i += 1;
+      push({ type: 'roll', heading: a.heading ?? '', entries });
+      continue;
+    }
 
     // {{faq}} … {{/faq}}: questions start with "? ", answers follow.
     if (/^\s*\{\{faq\b/.test(line)) {
@@ -369,5 +390,5 @@ export const WRITING_HELP = [
   ['![description](image reference)', 'a picture'],
   ['!> Note', 'a note box'],
   ['---', 'a dividing line'],
-  ['{{clubs}} {{events}} {{faq}} {{contact}}', 'live lists, questions and answers, a contact form'],
+  ['{{clubs}} {{events}} {{faq}} {{roll}} {{contact}}', 'live lists, questions and answers, a roll of honour, a contact form'],
 ];

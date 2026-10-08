@@ -258,6 +258,14 @@ blockquote cite{font-style:normal;font-size:15px;color:var(--muted)}
   background:var(--canvas-alt)}
 .callout.warning{border-left-color:var(--accent)}
 .callout.success{border-left-color:var(--primary-hover)}
+.roll{list-style:none;padding:0;margin:24px 0;display:grid;gap:12px;
+  grid-template-columns:repeat(2,1fr)}
+.roll li{display:flex;flex-direction:column;align-items:center;justify-content:center;
+  text-align:center;gap:6px;min-height:92px;padding:16px 12px;background:var(--canvas-alt);
+  border-top:4px solid var(--primary)}
+.roll li strong{font-family:var(--display);font-size:18px;line-height:1.2}
+.roll li span{color:var(--muted);font-size:15px}
+@media(min-width:720px){.roll{grid-template-columns:repeat(4,1fr)}}
 .faq{margin:20px 0}
 .faq details{border-bottom:1px solid var(--line,#ddd);padding:14px 0}
 .faq summary{cursor:pointer;font-weight:600;list-style:none;padding-right:28px;position:relative}

@@ -1196,98 +1196,41 @@
      "level": 2
     },
     {
-     "type": "list",
-     "items": [
-      [
-       {
-        "text": "Graeme Gavegan",
-        "marks": [
-         "strong"
-        ]
-       },
-       {
-        "text": " — 1993"
-       }
-      ],
-      [
-       {
-        "text": "Mike Kenworthy",
-        "marks": [
-         "strong"
-        ]
-       },
-       {
-        "text": " — 2001"
-       }
-      ],
-      [
-       {
-        "text": "Graeme Gavegan",
-        "marks": [
-         "strong"
-        ]
-       },
-       {
-        "text": " — 2001"
-       }
-      ],
-      [
-       {
-        "text": "Chris Smith",
-        "marks": [
-         "strong"
-        ]
-       },
-       {
-        "text": " — 2008"
-       }
-      ],
-      [
-       {
-        "text": "Alex Terris",
-        "marks": [
-         "strong"
-        ]
-       },
-       {
-        "text": " — 2009"
-       }
-      ],
-      [
-       {
-        "text": "Sean O'Connell",
-        "marks": [
-         "strong"
-        ]
-       },
-       {
-        "text": " — 2016"
-       }
-      ],
-      [
-       {
-        "text": "Kelvin McSkimming",
-        "marks": [
-         "strong"
-        ]
-       },
-       {
-        "text": " — 2021"
-       }
-      ],
-      [
-       {
-        "text": "Russell Dilloway",
-        "marks": [
-         "strong"
-        ]
-       },
-       {
-        "text": " — 2023"
-       }
-      ]
-     ],
-     "ordered": false
+     "type": "roll",
+     "entries": [
+      {
+       "name": "Graeme Gavegan",
+       "year": "1993"
+      },
+      {
+       "name": "Mike Kenworthy",
+       "year": "2001"
+      },
+      {
+       "name": "Graeme Gavegan",
+       "year": "2001"
+      },
+      {
+       "name": "Chris Smith",
+       "year": "2008"
+      },
+      {
+       "name": "Alex Terris",
+       "year": "2009"
+      },
+      {
+       "name": "Sean O'Connell",
+       "year": "2016"
+      },
+      {
+       "name": "Kelvin McSkimming",
+       "year": "2021"
+      },
+      {
+       "name": "Russell Dilloway",
+       "year": "2023"
+      }
+     ]
     },
     {
      "type": "paragraph",
