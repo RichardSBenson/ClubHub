@@ -5,6 +5,7 @@
 import './reset.mjs';
 import { pool, people, rank, instructorRole as instructors, family } from './data.mjs';
 import { planImport } from '../core/domain/roll-import.mjs';
+import { chooseRecipients } from '../core/domain/messaging.mjs';
 import { whyNotInstructor, problemsWithRoleAndGrade } from '../core/domain/roles.mjs';
 
 process.env.HONBU_STORE = 'postgres';
@@ -59,6 +60,27 @@ console.log('\nCHILDREN');
   const mum = await enrol('Mum', 'Alone', '1985-02-02');
   await family.link(doug.id, { guardianId: mum.id, childId: kid.id, relationship: 'parent' });
   ok('once linked, the child is no longer flagged', !(await family.withoutGuardian([kid.id])).has(kid.id));
+}
+
+console.log('\nMAIN CONTACT');
+{
+  const kid = { personId: 'k', email: null, isMinor: true, optedOut: false };
+  const mum = { personId: 'm', email: 'mum@x.nz', optedOut: false, main: false, alsoCopy: false };
+  const dad = { personId: 'd', email: 'dad@x.nz', optedOut: false, main: false, alsoCopy: false };
+  const to = (gs) => chooseRecipients([{ ...kid, guardians: gs }]).recipients.map((r) => r.email).sort().join();
+  ok('with no main contact, both parents get the mail', to([mum, dad]) === 'dad@x.nz,mum@x.nz');
+  ok('with a main contact, only she does', to([{ ...mum, main: true }, dad]) === 'mum@x.nz');
+  ok('a parent marked "also copy" is added', to([{ ...mum, main: true }, { ...dad, alsoCopy: true }]) === 'dad@x.nz,mum@x.nz');
+  const kidP = await enrol('Kid', 'Contact', new Date(Date.now() - 8 * 365.25 * 864e5).toISOString().slice(0, 10));
+  const m1 = await enrol('Mum', 'Contact', '1985-02-02'), d1 = await enrol('Dad', 'Contact', '1984-02-02');
+  const l1 = await family.link(doug.id, { guardianId: m1.id, childId: kidP.id, relationship: 'parent' });
+  const l2 = await family.link(doug.id, { guardianId: d1.id, childId: kidP.id, relationship: 'parent' });
+  await family.setContact(doug.id, l1.id, { main: true });
+  await family.setContact(doug.id, l2.id, { main: true });
+  const rows = (await pool.query('select id, is_main_contact m from guardian_link where child_id=$1', [kidP.id])).rows;
+  ok('only one parent can be the main contact', rows.filter((r) => r.m).length === 1 && rows.find((r) => r.id === l2.id).m);
+  await family.setContact(doug.id, l1.id, { main: false, copy: true });
+  ok('"also copy" is stored', (await one('select also_copy from guardian_link where id=$1', [l1.id])).also_copy === true);
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

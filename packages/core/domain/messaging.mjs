@@ -106,7 +106,10 @@ export function chooseRecipients(candidates, { honourOptOut = true } = {}) {
   const skipped = [];
   for (const c of candidates) {
     const minor = c.isMinor === true;
-    const guardians = (c.guardians ?? []).filter((g) => isEmail(g.email));
+    let guardians = (c.guardians ?? []).filter((g) => isEmail(g.email));
+    // A child's main contact gets the mail; other parents only if marked "also copy".
+    // With no main contact set, every linked parent is written to, as always.
+    if (guardians.some((g) => g.main)) guardians = guardians.filter((g) => g.main || g.alsoCopy);
     const targets = minor && guardians.length
       ? guardians.map((g) => ({ personId: g.personId, email: g.email,
                                 optedOut: g.optedOut, via: c.personId }))

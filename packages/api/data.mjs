@@ -2417,6 +2417,31 @@ export const family = {
     return row;
   },
 
+  /**
+   * Choose who a child's club mail goes to. `main` makes this parent the main contact (and removes the
+   * mark from the child's other links); `copy` marks a non-main parent as also copied in. Unticking main
+   * returns the child to "every parent".
+   */
+  async setContact(actor, linkId, { main = false, copy = false }) {
+    const link = await one('select * from guardian_link where id=$1 and ended_on is null', [linkId]);
+    if (!link) throw new NotFound('Link');
+    let home = null;
+    for (const h of await homesOf(link.child_id)) {
+      const ok = await one('select has_role_at($1,$2,$3) as ok', [actor, h, REGISTER]);
+      if (ok?.ok) { home = h; break; }
+    }
+    if (!home) throw new Forbidden();
+    const client = await pool.connect();
+    try {
+      await client.query('begin');
+      if (main) await client.query('update guardian_link set is_main_contact=false where child_id=$1 and ended_on is null', [link.child_id]);
+      await client.query('update guardian_link set is_main_contact=$2, also_copy=$3 where id=$1', [linkId, !!main, !main && !!copy]);
+      await client.query(`insert into audit_log (account_id, organisation_id, action, entity, entity_id, after)
+        values ($1,$2,'guardian_contact','person',$3,$4)`, [actor, home, link.child_id, JSON.stringify({ linkId, main: !!main, copy: !main && !!copy })]);
+      await client.query('commit');
+    } catch (e) { await client.query('rollback'); throw e; } finally { client.release(); }
+  },
+
   async unlink(actor, linkId) {
     const link = await one(`
       select gl.*, g.first_name as g_first, g.last_name as g_last,
@@ -2448,7 +2473,7 @@ export const family = {
     }
     if (!allowed) throw new Forbidden();
     const { rows } = await pool.query(`
-      select gl.id, gl.relationship, g.id as person_id, g.first_name, g.last_name,
+      select gl.id, gl.relationship, gl.is_main_contact, gl.also_copy, g.id as person_id, g.first_name, g.last_name,
              g.email, exists(select 1 from account a where a.person_id = g.id) as can_sign_in
       from guardian_link gl join person g on g.id = gl.guardian_id
       where gl.child_id=$1 and gl.ended_on is null order by gl.created_at`, [childId]);
@@ -3465,7 +3490,8 @@ export const messages = {
         (p.date_of_birth is not null and p.date_of_birth > current_date - interval '18 years') as "isMinor",
         coalesce(ep.opted_out, false) as "optedOut",
         coalesce((select json_agg(json_build_object('personId', g.id, 'email', g.email,
-                                                    'optedOut', coalesce(gp.opted_out, false)))
+                                                    'optedOut', coalesce(gp.opted_out, false),
+                                                    'main', gl.is_main_contact, 'alsoCopy', gl.also_copy))
                   from guardian_link gl join person g on g.id = gl.guardian_id
                   left join email_preference gp on gp.person_id = g.id
                   where gl.child_id = p.id and gl.ended_on is null), '[]'::json) as guardians
@@ -6411,7 +6437,7 @@ export const terms = {
       if (!due) continue;
       if (await one('select 1 as x from term_offer where term_id = $1 and organisation_id = $2', [due.next.id, club.id])) continue;
       const kids = await q(`select p.id, p.first_name, p.email::text as email,
-          coalesce((select json_agg(g.email::text) from guardian_link gl join person g on g.id = gl.guardian_id where gl.child_id = p.id and gl.ended_on is null and g.email is not null), '[]'::json) as guardians
+          coalesce((select json_agg(g.email::text) from guardian_link gl join person g on g.id = gl.guardian_id where gl.child_id = p.id and gl.ended_on is null and g.email is not null and (gl.is_main_contact or gl.also_copy or not exists (select 1 from guardian_link m where m.child_id = p.id and m.ended_on is null and m.is_main_contact))), '[]'::json) as guardians
         from term_enrolment e join person p on p.id = e.person_id
         where e.term_id = $1 and e.organisation_id = $2 and e.status = 'enrolled'
           and not exists (select 1 from term_enrolment n where n.term_id = $3 and n.person_id = p.id)

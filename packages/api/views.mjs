@@ -680,10 +680,16 @@ export const person = ({ me, csrf, person, history, affiliations, eligibility,
     <td><a href="/p/${esc(g.person_id)}">${esc(g.first_name)} ${esc(g.last_name)}</a></td>
     <td>${esc(FAMILY_LABELS[g.relationship] ?? g.relationship)}</td>
     <td>${g.can_sign_in ? 'Can sign in' : '<span class="muted">No account yet</span>'}</td>
+    <td><form method="post" action="/p/${esc(person.id)}/guardians/${esc(g.id)}/contact">
+      <input type="hidden" name="_csrf" value="${esc(csrf ?? '')}">
+      <label><input type="checkbox" name="main"${g.is_main_contact ? ' checked' : ''}> Main contact</label>
+      ${g.is_main_contact ? '' : `<label><input type="checkbox" name="copy"${g.also_copy ? ' checked' : ''}> Also copy</label>`}
+      <button class="btn quiet" type="submit">Save</button></form></td>
     <td><form method="post" action="/p/${esc(person.id)}/guardians/${esc(g.id)}/end">
       <input type="hidden" name="_csrf" value="${esc(csrf ?? '')}">
       <button class="btn quiet" type="submit">Remove</button></form></td></tr>`).join('')}</tbody></table>`
     : '<p class="muted">Nobody is linked yet. A parent or guardian can then sign in and enter this child in events.</p>'}
+  ${guardians.length > 1 ? '<p class="hint">Club emails go to every parent, unless one is the main contact: then to them alone, plus anyone marked "Also copy".</p>' : ''}
   <form method="post" action="/p/${esc(person.id)}/guardians">
     <input type="hidden" name="_csrf" value="${esc(csrf ?? '')}">
     <div class="row">
@@ -3117,7 +3123,9 @@ export const myPerson = ({ me, csrf, how, person, private: priv = {}, grade, mem
   return page({ title: `${person.first_name} ${person.last_name}`, me, csrf, body: `<style>${identityCss}</style>
   ${identityHead({ personId: person.id, name: `${person.first_name} ${person.last_name}`, hasPhoto: !!person.photo_asset_id, tag: 'h1' })}
   <p class="sub">${esc(person.display_number ?? '')}${mine ? '' : ' · you look after this person'}
-    · <a href="/me">Back</a></p>
+    · <a href="/me">Back to my family</a></p>
+  ${mine ? '' : `<div class="note" role="status"><strong>You are viewing ${esc(person.first_name)}'s profile.</strong>
+    Anything you change here is changed for ${esc(person.first_name)}, not for you. <a href="/me">Back to my own home</a></div>`}
   ${done ? `<div class="good">${esc(done)}</div>` : ''}
   ${error ? `<div class="bad">${esc(error)}</div>` : ''}
 

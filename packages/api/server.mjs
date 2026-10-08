@@ -504,6 +504,13 @@ post('/p/:id/guardians', async (ctx) => {
   return ctx.redirect(back);
 });
 
+post('/p/:id/guardians/:linkId/contact', async (ctx) => {
+  ctx.requireActor();
+  const form = await ctx.form();
+  await family.setContact(ctx.me.accountId, ctx.params.linkId, { main: form.main === 'on', copy: form.copy === 'on' });
+  return ctx.redirect(`/p/${ctx.params.id}`);
+});
+
 post('/p/:id/guardians/:linkId/end', async (ctx) => {
   ctx.requireActor();
   await ctx.form();
