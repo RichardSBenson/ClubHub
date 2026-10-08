@@ -46,3 +46,10 @@ stored settings), and **a section with nothing written is left out, never filled
 * The prototype's content pages (Karate for kids, Learn, Dojo Kun, Child safety, Affiliate, the 50 Man Kumite,
   Start training, Members) are **pages a federation writes in the page editor**, and appear in the footer and the
   menu once written. They wear this masthead and footer.
+
+## The prototype's content pages
+
+`import/content-pages.json` holds the MOKNZ prototype's content pages as editable block documents (karate-for-kids, learn,
+learn-belts, dojo-kun, safeguarding, affiliate, 50-man-kumite, start-training). They are stored as **drafts**: open
+Pages in the admin, check the words, and publish. Placeholder notes from the prototype (`[EXEC ...]`) were left out
+rather than published, and pictures are added in the editor.
