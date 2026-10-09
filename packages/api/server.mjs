@@ -449,6 +449,7 @@ get('/p/:id', async (ctx) => {
 
   return ctx.send(200, V.person({
     me: ctx.me, ...record, eligibility, csrf: ctx.csrf, canEdit,
+    about: (await pool.query('select about from person where id = $1', [record.person.id])).rows[0]?.about ?? '',
     isInstructor: await instructorRole.is(record.person.id), canManage: mayManage,
     documents: await memberDocuments.list(ctx.me.accountId, record.person.id).then((d) => d.rows).catch(() => []),
     mayInstruct: !!(await pool.query('select 1 from person_current_grade where person_id = $1 and is_dan', [record.person.id])).rows.length,
@@ -503,6 +504,20 @@ post('/p/:id/photo', async (ctx) => {
   } catch (e) {
     if (e instanceof NotAnImage || e instanceof BadUpload || e instanceof Invalid)
       return ctx.redirect(`${back}?error=${encodeURIComponent(e.message)}`);
+    throw e;
+  }
+});
+
+post('/p/:id/about', async (ctx) => {
+  ctx.requireActor();
+  if (!UUID_RE.test(ctx.params.id)) throw new NotFound('Person');
+  const form = await ctx.form();
+  try {
+    await photos.setAbout(ctx.me.accountId, ctx.params.id, form.about);
+    await requestRebuild({ reason: 'write-up' });
+    return ctx.redirect(`/p/${ctx.params.id}?done=${encodeURIComponent('Write-up saved.')}`);
+  } catch (e) {
+    if (e instanceof Invalid) return ctx.redirect(`/p/${ctx.params.id}?error=${encodeURIComponent(e.message)}`);
     throw e;
   }
 });

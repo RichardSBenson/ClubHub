@@ -534,7 +534,7 @@ export const roster = ({ me, csrf, org, roster, total = null, canRegister = fals
       <button class="btn quiet" type="submit" name="action" value="role">Make instructors only</button>
       <button class="btn quiet" type="submit" name="action" value="off">Take off as instructors</button></p>
     <p class="hint">Tick the people who teach. They are shown on their dojo's website once they are 18 or over, their first aid, police vetting and child
-      protection are current, and they have written a few words about themselves (on <em>My details</em>); anyone not ready is made an instructor and
+      protection are current, and they have written a few words about themselves (on their profile, in the <em>Write-up</em> box under the photograph); anyone not ready is made an instructor and
       the screen says what is missing. Showing puts their name, grade and photograph on a page anybody can read, so only do it for people who have agreed.</p>
   </form>
   <script src="/vendor/select-all.js" defer></script>` : ''}`
@@ -543,7 +543,7 @@ export const roster = ({ me, csrf, org, roster, total = null, canRegister = fals
 
 export const person = ({ me, csrf, person, history, affiliations, eligibility,
                         titles = [], changes = [], guardians = null, training = null,
-                        canEdit = false, access = null, link = null, isInstructor = false, mayInstruct = false, documents = [], canManage = false, done = null, photoError = null, recognisable = [], instructorSite = null,
+                        canEdit = false, about = "", access = null, link = null, isInstructor = false, mayInstruct = false, documents = [], canManage = false, done = null, photoError = null, recognisable = [], instructorSite = null,
                         linkExpires = 15, error = null }) => page({
   title: `${person.first_name} ${person.last_name}`, me, csrf, body: `<style>${identityCss}
   .idphoto{background:#ddd}.idphoto.none{color:#666}.idchip{color:#9a2a1f}</style>
@@ -589,6 +589,15 @@ export const person = ({ me, csrf, person, history, affiliations, eligibility,
     <label for="rg-note">Where from <span class="muted">(optional)</span></label>
     <input id="rg-note" name="note" maxlength="300" placeholder="e.g. Awarded by Shihan Smith, Tokyo, 2019">
     <p><button class="btn" type="submit">Record this grade</button></p>
+  </form>` : ''}
+
+  ${canEdit ? `<form method="post" action="/p/${esc(person.id)}/about" class="card" style="margin:12px 0">
+    <input type="hidden" name="_csrf" value="${esc(csrf ?? '')}">
+    <h3 style="margin-top:0">Write-up</h3>
+    <label for="about">A few words about ${esc(person.first_name)} <span class="muted">(up to 280 characters)</span></label>
+    <textarea id="about" name="about" rows="3" maxlength="280">${esc(about ?? '')}</textarea>
+    <p class="hint">Shown on their instructor card on the website, if they are shown there. ${about ? '' : 'An instructor is not shown until there is one.'}</p>
+    <p><button class="btn" type="submit">Save write-up</button></p>
   </form>` : ''}
 
   ${canEdit ? `<form method="post" action="/p/${esc(person.id)}/photo" enctype="multipart/form-data" class="card" style="margin:12px 0">

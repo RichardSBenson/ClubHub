@@ -6882,6 +6882,15 @@ export const photos = {
     await pool.query(`insert into audit_log (account_id, action, entity, entity_id) values ($1,'person_photo_cleared','person',$2)`, [actor, personId]);
   },
 
+  /** The few words about themselves that go beside the photograph. Same people may write it as may change the photograph. */
+  async setAbout(actor, personId, text) {
+    await this.assertMay(actor, personId);
+    const about = String(text ?? '').replace(/\r\n/g, '\n').trim();
+    if (about.length > 280) throw new Invalid('Keep it to 280 characters.');
+    await pool.query('update person set about = $2, updated_at = now() where id = $1', [personId, about || null]);
+    await pool.query(`insert into audit_log (account_id, action, entity, entity_id) values ($1,'person_about_changed','person',$2)`, [actor, personId]);
+  },
+
   async forPerson(personId) {
     return (await one('select photo_asset_id from person where id = $1', [personId]))?.photo_asset_id ?? null;
   },
