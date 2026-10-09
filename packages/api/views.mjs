@@ -1169,12 +1169,12 @@ const SEEN_BY = {
 const seenTag = (e) => e.status !== 'published' ? ''
   : e.visibility === 'public'
     ? '<div class="muted">On the public website</div>'
-    : `<div class="muted"><span class="tag">${esc(SEEN_BY[e.visibility] ?? e.visibility)}</span> Not on the public website</div>`;
+    : `<div class="muted"><span class="tag">${esc(SEEN_BY[e.visibility] ?? e.visibility)}</span> Not on the public website. To show it, edit the event and choose "Anyone".</div>`;
 
 const VISIBILITY_LABELS = {
   public: 'Anyone, including the public website',
   members: 'Members anywhere in the federation',
-  own_org: 'This organisation only',
+  own_org: 'This organisation only (not on the public website)',
   by_grade: 'Hidden from everyone outside the grade range below',
   invite: 'Invited people only',
 };
@@ -1340,7 +1340,8 @@ export const eventForm = ({ me, csrf, org, values = {}, zone, error,
 
     <fieldset>
       <legend>Who it is for</legend>
-      <label for="visibility">Who can see it</label>
+      <label for="visibility">Who can see it
+        <span class="hint">Only "Anyone" puts the event on the public website. Every other choice keeps it off.</span></label>
       <select id="visibility" name="visibility" style="max-width:420px">
         ${Object.keys(VISIBILITY_LABELS).map((k) =>
           option(k, VISIBILITY_LABELS[k], v('visibility', 'public'))).join('')}
