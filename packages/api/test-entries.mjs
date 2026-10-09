@@ -387,6 +387,7 @@ console.log('\nTHE ENTRY LIST');
   const r = await req('/o/whanganui/events/2026-kokoro-cup/entries');
   ok('it opens', r.status === 200, String(r.status));
   ok('with a count of who is entered', /\d+ entered/.test(r.html));
+  ok('it says what kind of event it is', /\(tournament\)/.test(r.html));
   ok('grouped by division', r.html.includes('Kata —'), 'not grouped');
   ok('and says how each person got there',
     r.html.includes('calculated'), 'placement source not shown');

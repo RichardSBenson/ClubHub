@@ -2686,7 +2686,7 @@ export const memberEvents = {
   async entriesOf(personId) {
     const { rows } = await pool.query(`
       select x.id, x.status, x.amount_cents, x.currency, e.title, e.starts_at,
-             e.kind, o.timezone as host_timezone
+             e.kind, e.venue_name, o.name as host_name, o.timezone as host_timezone
       from event_entry x join event e on e.id = x.event_id
       join organisation o on o.id = e.organisation_id
       where x.person_id = $1 and x.status in ('entered','confirmed')
@@ -5530,7 +5530,7 @@ export const portal = {
     const next = nextSession(sessions, now, { ageYears: ageOnDate(person.date_of_birth, now.date), rankOrder: grade?.rank_order ?? null });
 
     const nextEvent = await one(`
-      select e.title, e.starts_at, x.status, o.timezone as host_timezone
+      select e.title, e.kind, e.starts_at, x.status, e.venue_name, o.name as host_name, o.timezone as host_timezone
       from event_entry x join event e on e.id = x.event_id join organisation o on o.id = e.organisation_id
       where x.person_id = $1 and x.status in ('entered','confirmed') and e.starts_at > now()
       order by e.starts_at limit 1`, [person.id]);

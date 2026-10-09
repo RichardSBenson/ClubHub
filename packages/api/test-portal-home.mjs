@@ -123,6 +123,9 @@ console.log('\nWHAT NEEDS ATTENTION');
   await req(`/me/events/${ev.id}/${kid.id}/quick`, { method: 'POST', form: {} });
   const afterEntry = await req('/me');
   ok('once entered, it is the next event and no longer flagged for the child', /Portal Grading/.test(afterEntry.html) && (afterEntry.html.match(/Entries for Portal Grading close soon/g) ?? []).length === 1);
+  ok('the next event says what kind it is and who runs it', /Grading · you are (entered|confirmed)/.test(afterEntry.html) && /Run by Whanganui/.test(afterEntry.html));
+  const list = await req('/me/events');
+  ok('the entered list names the kind and the host too', /Portal Grading<\/strong> <span class="tag">Grading<\/span>/.test(list.html) && /run by Whanganui/.test(list.html));
 }
 
 console.log('\nMESSAGES');

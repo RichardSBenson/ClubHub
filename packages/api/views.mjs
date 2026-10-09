@@ -1796,6 +1796,7 @@ export const entryList = ({ me, csrf, org, event, entries = [],
   // An event with no disciplines (a grading, a seminar) has entries and no
   // selections. They are named here, or the list counts people it never shows.
   const attending = entries.filter((e) => !e.selections.length);
+  const hasDeclaration = !!(event.consentVersion ?? event.consent_version);
 
   const byDivision = {};
   for (const e of entries) {
@@ -1809,7 +1810,7 @@ export const entryList = ({ me, csrf, org, event, entries = [],
   return page({
     title: `Entries — ${event.title}`, me, csrf, body: `
   <h1>Entries</h1>
-  <p class="sub">${esc(event.title)} · ${esc(org.name)} ·
+  <p class="sub">${esc(event.title)} (${esc((EVENT_KIND_WORDS[event.kind] ?? 'Event').toLowerCase())}) · ${esc(org.name)} ·
     <a href="/o/${esc(org.slug)}/events/${esc(event.slug)}/setup">Divisions and fees</a></p>
   <p><a class="btn" href="/o/${esc(org.slug)}/events/${esc(event.slug)}/entries.csv">Download entries (CSV)</a></p>
 
@@ -1825,14 +1826,15 @@ export const entryList = ({ me, csrf, org, event, entries = [],
   <h2>Entered to attend</h2>
   <table>
     <thead><tr><th>Name</th><th class="hide-sm">Club</th><th class="hide-sm">Grade</th>
-      <th>Declaration</th></tr></thead>
+      ${hasDeclaration ? '<th>Declaration signed</th>' : ''}</tr></thead>
     <tbody>${attending.map((e) => `<tr>
       <td><strong>${esc(e.first_name ?? '')} ${esc(e.last_name ?? '')}</strong>
         <div class="muted">${esc(e.display_number ?? '')}${e.status === 'entered' ? '' : ' · ' + esc(e.status)}</div></td>
       <td class="hide-sm">${esc(e.entered_for ?? e.club_name ?? '')}</td>
       <td class="hide-sm">${e.grade ? esc(e.grade) : '<span class="muted">—</span>'}</td>
-      <td>${e.consents ? '<span class="tag ok">Signed</span>' : '<span class="muted">none</span>'}</td>
-    </tr>`).join('')}</tbody></table>` : ''}
+      ${hasDeclaration ? `<td>${e.consents ? '<span class="tag ok">Signed</span>' : '<span class="tag wait">Not signed</span>'}</td>` : ''}
+    </tr>`).join('')}</tbody></table>
+  ${hasDeclaration ? '<p class="muted">A declaration is the waiver or consent wording you attach to this event. Each person agrees to it by typing their name when they enter.</p>' : ''}` : ''}
 
   ${unplaced.length ? `
   <h2>Nobody has a division for these yet</h2>
@@ -3263,7 +3265,8 @@ export const myEvents = ({ me, csrf, groups = [], done }) => page({
         g.how === 'self' ? '' : ` ${esc(g.person.first_name)}`}</a>${e.sameAs ? `<div class="muted">${esc(e.sameAs)}</div>` : ''}`}</td></tr>`).join('')
   }</tbody></table>` : '<p class="muted">Nothing is open for entries right now.</p>'}
   ${g.entries.length ? `<h3>Already entered</h3><ul class="plain">${g.entries.map((x) => `<li>
-    <strong>${esc(x.title)}</strong> — ${esc(when(x.starts_at, x.host_timezone))}${
+    <strong>${esc(x.title)}</strong> <span class="tag">${esc(EVENT_KIND_WORDS[x.kind] ?? 'Event')}</span> — ${esc(when(x.starts_at, x.host_timezone))}${
+      x.venue_name ? ` · ${esc(x.venue_name)}` : ''}${x.host_name ? ` · run by ${esc(x.host_name)}` : ''}${
       x.amount_cents != null ? ` · fee ${esc(cents(x.amount_cents, x.currency))}` : ''}</li>`).join('')}</ul>` : ''}
   `).join('') : '<div class="note">This sign-in is not linked to a member record yet.</div>'}` });
 
@@ -4217,7 +4220,9 @@ const personTiles = (p, csrf) => {
         : '<p class="muted">No class found for you.</p>'}
       <p><a href="/me/classes">Timetable</a> · <a href="/me/shop">Shop</a></p></div>
     <div class="tile"><h3>Next event</h3>
-      ${p.nextEvent ? `<p class="big">${esc(p.nextEvent.title)}</p><p class="muted">${esc(when(p.nextEvent.starts_at, p.nextEvent.host_timezone))}</p>`
+      ${p.nextEvent ? `<p class="muted" style="margin:0">${esc(EVENT_KIND_WORDS[p.nextEvent.kind] ?? 'Event')}${p.nextEvent.status === 'confirmed' ? ' · you are confirmed' : ' · you are entered'}</p>
+        <p class="big">${esc(p.nextEvent.title)}</p>
+        <p class="muted">${esc(when(p.nextEvent.starts_at, p.nextEvent.host_timezone))}${p.nextEvent.venue_name ? `<br>${esc(p.nextEvent.venue_name)}` : ''}<br>Run by ${esc(p.nextEvent.host_name)}</p>`
         : '<p class="muted">You are not entered in anything.</p>'}
       <p><a href="/me/events">${p.openCount ? `${p.openCount} open to enter` : 'Events'}</a></p></div>
     <div class="tile"><h3>Payments</h3>
@@ -4839,6 +4844,7 @@ export const formList = ({ me, csrf, org, rows = [], inherited = [], starters = 
   <form method="post" action="${base}/forms">${tok}<p><label>Or start from blank: <input name="title" maxlength="120" placeholder="Form title"></label>
     <button class="btn" type="submit">Create</button></p></form>` : ''}` });
 };
+const EVENT_KIND_WORDS = { grading: 'Grading', tournament: 'Tournament', camp: 'Training camp', seminar: 'Seminar', fight_night: 'Fight night', training: 'Training', social: 'Social', other: 'Event' };
 const KIND_WORDS = { waiver: 'Waiver', consent: 'Consent', medical: 'Medical', other: 'Other' };
 const TYPE_WORDS = { agree: 'A statement to agree to (a tick)', text: 'Short answer', longtext: 'Long answer', choice: 'Pick one', checkboxes: 'Pick any', date: 'Date' };
 const AUD_WORDS = { all: 'Everyone on the roll', juniors: 'Juniors (under 18)', seniors: 'Seniors (18 and over)' };
