@@ -77,8 +77,8 @@ const plus = async (days) => (await one(`select to_char($1::date + $2::int,'YYYY
 const mere = await enrol('Mere', 'Referrer', '1985-05-05', 'mere.ref@example.nz', '021 555 1111');
 await pool.query(`insert into account (email, person_id) values ($1,$2) on conflict do nothing`, [mere.email, mere.id]);
 await pool.query(`update affiliation set paid_until = current_date + 100, status = 'active' where person_id = $1`, [mere.id]);
-await pool.query(`insert into fee_schedule (organisation_id, label, amount_cents, period, applies_to, effective_from)
-  values ($1,'Adult annual',30000,'annual','adult','2020-01-01'),($1,'Adult monthly',3000,'monthly','adult','2020-01-01')`, [wh.id]);
+await pool.query(`insert into fee_schedule (organisation_id, label, amount_cents, period, applies_to, effective_from, currency)
+  values ($1,'Adult annual',30000,'annual','adult','2020-01-01','NZD'),($1,'Adult monthly',3000,'monthly','adult','2020-01-01','NZD')`, [wh.id]);
 await pool.query(`update person set display_number = 'TEST-REF' where id = $1`, [mere.id]);
 
 const SIGNUP = (over = {}) => ({ firstName: 'Ana', lastName: 'Trial', email: 'ana.trial@example.nz', phone: '021 555 2222', dateOfBirth: '1990-05-05',

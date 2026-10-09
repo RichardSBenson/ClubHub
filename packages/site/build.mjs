@@ -22,7 +22,6 @@ import { eventToIcs } from '../core/domain/calendar-file.mjs';
 // Relative to the repository, not the working directory — so it lands in the
 // same place whether run locally, from a script, or by Vercel at the repo root.
 const OUT = process.env.OUT ?? new URL('../../dist/', import.meta.url).pathname;
-const FED = process.env.FEDERATION ?? 'moknz';
 
 /**
  * Which federations this deployment publishes, and where each one lives.

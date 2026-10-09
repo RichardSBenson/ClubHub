@@ -2251,3 +2251,13 @@ alter table message add constraint message_audience_check
 -- the next grade is offered by invitation rather than simply sat.
 alter table grade add column if not exists usual_months_to_next smallint check (usual_months_to_next is null or usual_months_to_next between 1 and 240);
 alter table grade add column if not exists next_by_invitation boolean not null default false;
+-- A price belongs to the organisation that set it, so the currency is always named when money is recorded. A silent
+-- 'NZD' fallback would mislabel an Australian or British club's money the day somebody forgot to name it.
+alter table event_fee alter column currency drop default;
+alter table fee_schedule alter column currency drop default;
+alter table invoice alter column currency drop default;
+alter table payment alter column currency drop default;
+alter table entry_price alter column currency drop default;
+alter table event_entry alter column currency drop default;
+alter table product alter column currency drop default;
+alter table shop_order alter column currency drop default;

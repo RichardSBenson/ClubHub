@@ -460,8 +460,8 @@ console.log('\nTHE ORGANISER CAN MOVE SOMEBODY THE RULES COULD NOT PLACE');
   // Entered directly, the way the organiser's override path has to cope with:
   // a selection with no division at all.
   const entry = spare && await one(`
-    insert into event_entry (event_id, person_id, entered_for_org, status)
-    select $1, $2, o.id, 'entered' from organisation o where o.slug = 'far-north'
+    insert into event_entry (event_id, person_id, entered_for_org, status, currency)
+    select $1, $2, o.id, 'entered', 'NZD' from organisation o where o.slug = 'far-north'
     returning *`, [ev.id, spare.id]);
 
   if (entry) {

@@ -192,7 +192,7 @@ console.log('\nOTHER AUDIENCES');
 
   const evt = await one(`select * from event where organisation_id=$1 limit 1`, [whanganui.id]);
   if (evt) {
-    await pool.query(`insert into event_entry (event_id, person_id) values ($1,$2),($1,$3)`,
+    await pool.query(`insert into event_entry (event_id, person_id, currency) values ($1,$2,'NZD'),($1,$3,'NZD')`,
       [evt.id, optedOut.id, adult.id]);
     const e1 = await messages.prepare(doug.id, whanganui.id,
       input({ audience: 'event', eventId: evt.id }), { baseFrom: BASE });

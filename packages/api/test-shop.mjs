@@ -65,7 +65,7 @@ const root = await one(`select * from organisation where parent_id is null order
 const doug = await one(`select id from account where email='doug@example.nz'`);
 const enrolAt = (org, first, last, dob, email = null) => people.enrol(doug.id, { organisationId: org.id, firstName: first, lastName: last, dateOfBirth: dob, email });
 const login = (person, email) => pool.query(`insert into account (email, person_id) values ($1,$2) on conflict do nothing`, [email, person.id]);
-const product = async (org, name, cents, sizes = [], category = 'gi') => (await one(`insert into product (organisation_id, name, category, sizes, price_cents) values ($1,$2,$3,$4,$5) returning id`, [org.id, name, category, sizes, cents])).id;
+const product = async (org, name, cents, sizes = [], category = 'gi') => (await one(`insert into product (organisation_id, name, category, sizes, price_cents, currency) values ($1,$2,$3,$4,$5,'NZD') returning id`, [org.id, name, category, sizes, cents])).id;
 
 const gi = await product(root, 'National gi', 12000, ['0', '1', '2']);
 const gloves = await product(root, 'National gloves', 4500, [], 'gloves');

@@ -126,7 +126,7 @@ console.log('\nWHAT NEEDS ATTENTION');
   ok('the next event says what kind it is and who runs it', /Grading · you are (entered|confirmed)/.test(afterEntry.html) && /Run by Whanganui/.test(afterEntry.html));
   const sem = await one(`insert into event (organisation_id, kind, title, slug, starts_at, status, visibility, entries_open, entries_close)
     values ($1,'seminar','Paid Seminar','paid-seminar', now() + interval '40 days','published','public', now() - interval '1 day', now() + interval '30 days') returning id`, [wh.id]);
-  await pool.query(`insert into entry_price (event_id, for_count, amount_cents, label) values ($1,1,2500,'Entry fee')`, [sem.id]);
+  await pool.query(`insert into entry_price (event_id, for_count, amount_cents, label, currency) values ($1,1,2500,'Entry fee','NZD')`, [sem.id]);
   await req(`/me/events/${sem.id}/${kid.id}/quick`, { method: 'POST', form: {} });
   const semEntry = await one(`select id, amount_cents from event_entry where event_id=$1 and person_id=$2`, [sem.id, kid.id]);
   ok('a seminar with a fee charges that fee on entry', semEntry?.amount_cents === 2500, String(semEntry?.amount_cents));

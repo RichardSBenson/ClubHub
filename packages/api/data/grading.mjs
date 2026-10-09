@@ -354,8 +354,8 @@ export const gradings = {
             [entryId, actor, clubId, fee || null]);
           await client.query(`update grading_entry set grade_id=$2, outcome=null, notes=null, record_id=null where entry_id=$1`, [entryId, gradeId]);
         } else {
-          entryId = (await client.query(`insert into event_entry (event_id, person_id, entered_by, entered_for_org, amount_cents, status)
-            values ($1,$2,$3,$4,$5,'entered') returning id`, [eventId, m.id, actor, clubId, fee || null])).rows[0].id;
+          entryId = (await client.query(`insert into event_entry (event_id, person_id, entered_by, entered_for_org, amount_cents, status, currency)
+            values ($1,$2,$3,$4,$5,'entered',$6) returning id`, [eventId, m.id, actor, clubId, fee || null, region().currency])).rows[0].id;
           await client.query(`insert into grading_entry (entry_id, grade_id) values ($1,$2)`, [entryId, gradeId]);
         }
         if (fee > 0) {

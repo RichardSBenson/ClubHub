@@ -79,7 +79,7 @@ await pool.query(`insert into guardian_link (guardian_id, child_id, relationship
 await pool.query(`update affiliation set paid_until = current_date + 200 where person_id = any($1::uuid[])`, [[mere.id, tama.id]]);
 const other = await enrol('Olly', 'Other', '1990-01-01', 'olly.terms@example.nz');
 await pool.query(`insert into account (email, person_id) values ($1,$2)`, [other.email, other.id]);
-await pool.query(`insert into fee_schedule (organisation_id, label, amount_cents, period, applies_to, effective_from) values ($1,'Junior term',12000,'term','junior','2020-01-01')`, [wh.id]);
+await pool.query(`insert into fee_schedule (organisation_id, label, amount_cents, period, applies_to, effective_from, currency) values ($1,'Junior term',12000,'term','junior','2020-01-01','NZD')`, [wh.id]);
 for (let d = 0; d < 7; d++) await pool.query(`insert into training_session (organisation_id, label, weekday, starts, ends) values ($1,'Kids',$2,'16:00','17:00')`, [wh.id, d]);
 
 console.log('\nTHE COUNTRY\'S CALENDAR');
@@ -200,7 +200,7 @@ console.log('\nTHE CLUB\'S RULES');
   r = await req(`/me/terms/${nowTerm.id}/${tama.id}`, { method: 'POST', form: {} });
   ok('with no term price the club has not charged for terms: enrolment is free and recorded', /done=/.test(r.location) && (await one(`select paid from term_enrolment where person_id=$1`, [tama.id])).paid === true);
   await pool.query(`delete from term_enrolment`);
-  await pool.query(`insert into fee_schedule (organisation_id, label, amount_cents, period, applies_to, effective_from) values ($1,'Junior term',12000,'term','junior','2020-01-01')`, [wh.id]);
+  await pool.query(`insert into fee_schedule (organisation_id, label, amount_cents, period, applies_to, effective_from, currency) values ($1,'Junior term',12000,'term','junior','2020-01-01','NZD')`, [wh.id]);
 }
 
 console.log('\nWITHDRAWING BEFORE IT STARTS');

@@ -196,8 +196,8 @@ const theirAffiliation = await one(`select * from affiliation where organisation
 const theirSession = await one(`select * from training_session where organisation_id=$1 limit 1`, [theirs.id])
   ?? await one(`insert into training_session (organisation_id, label, weekday, starts, ends)
        values ($1,'Private grading squad',2,'18:00','19:00') returning *`, [theirs.id]);
-const theirFee = await one(`insert into fee_schedule (organisation_id, label, amount_cents, period, applies_to, effective_from)
-  values ($1,'Private committee price',9900,'annual','adult','2026-01-01') returning *`, [theirs.id]);
+const theirFee = await one(`insert into fee_schedule (organisation_id, label, amount_cents, period, applies_to, effective_from, currency)
+  values ($1,'Private committee price',9900,'annual','adult','2026-01-01','NZD') returning *`, [theirs.id]);
 const theirRecord = await one(`insert into grading_record (person_id, grade_id, awarded_on, awarded_by_org, result, certificate_no)
   values ($1,(select id from grade order by rank_order limit 1),'2024-01-01',$2,'pass','ISO-PRIVATE-1') returning *`, [theirPerson.id, theirs.id]);
 const theirQual = await one(`insert into qualification (organisation_id, code, label, category, valid_months, required_for)
@@ -205,8 +205,8 @@ const theirQual = await one(`insert into qualification (organisation_id, code, l
 const theirDoc = await one(`insert into member_document (person_id, organisation_id, title, mime, bytes, size_bytes) values ($1,$2,'x','application/pdf','\\x25504446'::bytea,4) returning id`, [theirPerson.id, theirPerson.organisation_id ?? (await one('select organisation_id from affiliation where person_id=$1 limit 1', [theirPerson.id])).organisation_id]);
 const theirAward = await one(`insert into qualification_award (person_id, qualification_id, awarded_on) values ($1,$2,'2024-01-01') returning *`, [theirPerson.id, theirQual.id]);
 const theirPayment = await one(`
-  insert into payment (organisation_id, person_id, amount_cents, status)
-  values ($1,$2,5000,'pending') returning *`, [theirs.id, theirPerson.id]);
+  insert into payment (organisation_id, person_id, amount_cents, status, currency)
+  values ($1,$2,5000,'pending','NZD') returning *`, [theirs.id, theirPerson.id]);
 await pool.query(`insert into payment_line (payment_id, kind, description, amount_cents)
   values ($1,'uniform','Private uniform order',5000)`, [theirPayment.id]);
 

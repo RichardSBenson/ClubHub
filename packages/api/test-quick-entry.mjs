@@ -184,7 +184,7 @@ console.log('\nEXPERIENCE IS COUNTED, NOT TYPED');
 {
   const past = await one(`insert into event (organisation_id, kind, title, slug, starts_at, status, visibility)
     values ($1,'tournament','Old Open','old-open', now() - interval '200 days','published','public') returning id`, [wh.id]);
-  await pool.query(`insert into event_entry (event_id, person_id, status) values ($1,$2,'confirmed')`, [past.id, rua.id]);
+  await pool.query(`insert into event_entry (event_id, person_id, status, currency) values ($1,$2,'confirmed','NZD')`, [past.id, rua.id]);
   await pool.query(`update affiliation set starts = '2018-01-01' where person_id = $1`, [rua.id]);
   const { memberEvents } = await import('./data.mjs');
   const x = await memberEvents.experience(rua.id);
