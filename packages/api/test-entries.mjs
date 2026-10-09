@@ -393,6 +393,15 @@ console.log('\nTHE ENTRY LIST');
     r.html.includes('calculated'), 'placement source not shown');
 }
 
+console.log('\nWHO CAN SEE AN EVENT, SAID PLAINLY');
+{
+  const fed = await req('/o/moknz/events/new');
+  ok('the visibility choices say what each one means', /own roll \(for the federation, just its officials\)/.test(fed.html) && /All members once signed in/.test(fed.html));
+  ok('a federation event is offered to the clubs below by default', /name="publishDown"[^>]*checked/.test(fed.html));
+  const club = await req('/o/whanganui/events/new');
+  ok('a club\'s own event is not', !/name="publishDown"[^>]*checked/.test(club.html));
+}
+
 console.log('\nA SEMINAR HAS ONE FLAT FEE, NOT DIVISIONS');
 {
   const mk = (title, extra = {}) => req('/o/moknz/events/new', { method: 'POST', form: {

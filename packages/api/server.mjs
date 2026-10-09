@@ -4456,7 +4456,7 @@ get('/o/:slug/events/new', async (ctx) => {
   return ctx.send(200, V.eventForm({
     me: ctx.me, org, csrf: ctx.csrf, isNew: true,
     zone: org.timezone, grades: await gradesFor(org),
-    values: { kind: 'training', visibility: 'public' },
+    values: { kind: 'training', visibility: 'public', publishDown: org.type !== 'club' },
   }));
 });
 

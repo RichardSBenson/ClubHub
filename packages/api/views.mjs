@@ -1173,8 +1173,8 @@ const seenTag = (e) => e.status !== 'published' ? ''
 
 const VISIBILITY_LABELS = {
   public: 'Anyone, including the public website',
-  members: 'Members anywhere in the federation',
-  own_org: 'This organisation only (not on the public website)',
+  members: 'All members once signed in (not on the public website)',
+  own_org: 'Only people on this organisation\'s own roll (for the federation, just its officials). Not on the public website',
   by_grade: 'Hidden from everyone outside the grade range below',
   invite: 'Invited people only',
 };
@@ -1432,7 +1432,7 @@ export const eventForm = ({ me, csrf, org, values = {}, zone, error,
     <fieldset>
       <legend>Where it appears</legend>
       ${checkbox('publishDown', 'Show on the calendars below this organisation',
-        !!v('publishDown'), 'Every club under it sees it on their own page.')}
+        !!v('publishDown'), 'Needed for the clubs under this organisation, and their members, to see it. Without it only this organisation\'s own page and roll can.')}
       <p class="muted">To ask for it to appear on the federation's calendar,
         publish it and use "Ask the federation to list it" on the Events list.
         The federation decides.</p>
