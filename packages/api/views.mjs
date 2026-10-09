@@ -1797,6 +1797,8 @@ export const entryList = ({ me, csrf, org, event, entries = [],
   // An event with no disciplines (a grading, a seminar) has entries and no
   // selections. They are named here, or the list counts people it never shows.
   const attending = entries.filter((e) => !e.selections.length);
+  // Divisions and fees are for competitions. A seminar or a free grading has neither, so the page does not mention them.
+  const hasDivisions = ['tournament', 'fight_night'].includes(event.kind) || divisions.length > 0 || entries.some((e) => e.selections.length);
   const hasDeclaration = !!(event.consentVersion ?? event.consent_version);
 
   const byDivision = {};
@@ -1812,15 +1814,15 @@ export const entryList = ({ me, csrf, org, event, entries = [],
     title: `Entries — ${event.title}`, me, csrf, body: `
   <h1>Entries</h1>
   <p class="sub">${esc(event.title)} (${esc((EVENT_KIND_WORDS[event.kind] ?? 'Event').toLowerCase())}) · ${esc(org.name)} ·
-    <a href="/o/${esc(org.slug)}/events/${esc(event.slug)}/setup">Divisions and fees</a></p>
+    ${hasDivisions ? `<a href="/o/${esc(org.slug)}/events/${esc(event.slug)}/setup">Divisions and fees</a>` : '<span class="muted">No divisions or fees for this event</span>'}</p>
   <p><a class="btn" href="/o/${esc(org.slug)}/events/${esc(event.slug)}/entries.csv">Download entries (CSV)</a></p>
 
   ${done ? `<div class="good">${esc(done)}</div>` : ''}
   ${error ? `<div class="bad">${esc(error)}</div>` : ''}
 
-  <div class="note"><strong>${entries.length} entered</strong>
+  <div class="note"><strong>${entries.length} entered</strong>${hasDivisions ? `
     across ${Object.keys(byDivision).length}
-    division${Object.keys(byDivision).length === 1 ? '' : 's'}${unplaced.length
+    division${Object.keys(byDivision).length === 1 ? '' : 's'}` : ''}${unplaced.length
       ? `, with ${unplaced.length} still to place` : ''}.</div>
 
   ${attending.length ? `

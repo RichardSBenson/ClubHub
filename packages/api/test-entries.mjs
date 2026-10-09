@@ -393,6 +393,17 @@ console.log('\nTHE ENTRY LIST');
     r.html.includes('calculated'), 'placement source not shown');
 }
 
+console.log('\nA FREE SEMINAR HAS NO DIVISIONS OR FEES');
+{
+  const src = (await q(`select organisation_id from event where slug = '2026-kokoro-cup'`))[0];
+  await q(`insert into event (organisation_id, kind, title, slug, starts_at, status, visibility)
+    values ($1,'seminar','Free Seminar','free-seminar', now() + interval '20 days','published','public')`, [src.organisation_id]);
+  const r = await req('/o/moknz/events/free-seminar/entries');
+  ok('the seminar entries page opens', r.status === 200, String(r.status));
+  ok('it does not offer divisions and fees', !/Divisions and fees/.test(r.html) && !/across \d+ division/.test(r.html));
+  ok('and says so', /No divisions or fees for this event/.test(r.html));
+}
+
 console.log('\nTHE ENTRIES AS A SPREADSHEET');
 {
   const r = await req('/o/whanganui/events/2026-kokoro-cup/entries.csv');
