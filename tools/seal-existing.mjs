@@ -16,9 +16,9 @@ await client.connect();
 let notes = 0, files = 0;
 try {
   for (const [table, idCol] of [['person_private', 'person_id'], ['newcomer', 'id']]) {
-    const { rows } = await client.query(`select ${idCol} as id, medical_notes from ${table} where medical_notes is not null and medical_notes <> '' and medical_notes not like 'enc:v1:%'`);
+    const { rows } = await client.query(`select ${idCol} as id, medical_notes from ${table} where medical_notes is not null and medical_notes <> '' and medical_notes not like 'enc:v1:%'`);  // security-ok: table and idCol come from the fixed pair list just above
     for (const r of rows) {
-      await client.query(`update ${table} set medical_notes = $2 where ${idCol} = $1`, [r.id, seal(r.medical_notes)]);
+      await client.query(`update ${table} set medical_notes = $2 where ${idCol} = $1`, [r.id, seal(r.medical_notes)]);  // security-ok: table and idCol come from the fixed pair list just above
       notes += 1;
     }
   }

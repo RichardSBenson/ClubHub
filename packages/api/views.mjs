@@ -5,6 +5,7 @@ import { highlight as searchHighlight, linkTo as searchLinkTo }
   from '../content/search.mjs';
 import { REASON_WORDS } from '../core/domain/repeat-entry.mjs';
 import { EVENT_TYPES } from '../core/domain/event-types.mjs';
+import { nextGradingWords } from '../core/domain/next-grading.mjs';
 import { photoNeedsConsent } from '../core/domain/documents.mjs';
 import { ageOn as personAgeOn } from '../core/domain/people.mjs';
 import { slotHint, slotTable } from '../content/image-slots.mjs';
@@ -3159,7 +3160,8 @@ export const myPerson = ({ me, csrf, how, person, private: priv = {}, grade, mem
   ${error ? `<div class="bad">${esc(error)}</div>` : ''}
 
   <h2>Their place in the club</h2>
-  <p>${grade ? `Current grade: <strong>${esc(grade.label)}</strong>` : '<span class="muted">No grade recorded yet.</span>'}</p>
+  <p>${grade ? `Current grade: <strong>${esc(grade.label)}</strong>${grade.awarded_on ? ` <span class="muted">(since ${esc(grade.awarded_on)})</span>` : ''}` : '<span class="muted">No grade recorded yet.</span>'}</p>
+  ${grade?.next_grading ? `<p>${esc(nextGradingWords(grade.next_grading))} <span class="muted">A guide only — your instructor decides when you are ready.</span></p>` : ''}
   ${qualifications.length ? `<h2>Qualifications</h2><table><tbody>${qualifications.map((a) => `<tr><td>${esc(a.label)}</td>
     <td>${esc(QUAL_WORDS[a.state])}${a.expires_on ? ` · until ${esc(a.expires_on)}` : ''}</td></tr>`).join('')}</tbody></table>
     <p class="muted">Send new certificates to your club to be recorded.</p>` : ''}
@@ -4201,7 +4203,7 @@ const personTiles = (p, csrf) => {
         : '<p class="muted">Not on a club\'s roll.</p>'}
       <p><a href="${base}">Details</a>${m.length ? ` · <a href="${base}/card">Membership card</a>` : ''}</p></div>
     ${supporterOnly ? '' : `<div class="tile"><h3>Current grade</h3>
-      ${p.grade ? `<p class="big">${esc(p.grade.label)}</p><p class="muted">since ${esc(p.grade.awarded_on)}</p>`
+      ${p.grade ? `<p class="big">${esc(p.grade.label)}</p><p class="muted">since ${esc(p.grade.awarded_on)}</p>${p.grade.next_grading ? `<p>${esc(nextGradingWords(p.grade.next_grading))}</p>` : ''}`
         : '<p class="muted">No grade recorded yet.</p>'}
       <p><a href="${base}/record">Grade history</a></p></div>`}
     <div class="tile"><h3>Next class</h3>

@@ -12,6 +12,7 @@ export { pool } from '../infrastructure/postgres/pool.mjs';
 import { applyRegister } from './register-import.mjs';
 import { parseCsv } from '../core/domain/register-csv.mjs';
 import { pool } from '../infrastructure/postgres/pool.mjs';
+import { nextGrading } from '../core/domain/next-grading.mjs';
 import { problemsWithPerson, problemsWithMembership, normaliseGender, ageOn }
   from '../core/domain/people.mjs';
 import { seal, open as unseal, sealBytes, openBytes } from '../infrastructure/crypto/vault.mjs';
@@ -2506,8 +2507,12 @@ export const myself = {
     const priv = await one(`select address_line, suburb, city, postcode, emergency_name,
       emergency_phone, medical_notes from person_private where person_id=$1`, [personId]) ?? {};
     priv.medical_notes = unseal(priv.medical_notes);
-    const grade = await one(`select label, rank_order, awarded_on::text as awarded_on
-      from person_current_grade where person_id=$1`, [personId]);
+    const grade = await one(`select cg.label, cg.rank_order, cg.awarded_on::text as awarded_on,
+        (select n.label from grade g join grade n on n.organisation_id = g.organisation_id
+           and n.rank_order = g.rank_order + 1 where g.id = cg.grade_id) as next_label
+      from person_current_grade cg where cg.person_id=$1`, [personId]);
+    if (grade) grade.next_grading = nextGrading({ held: { label: grade.label, awardedOn: grade.awarded_on },
+      next: grade.next_label ? { label: grade.next_label } : null, today: localNow('Pacific/Auckland').date });
     const { rows: memberships } = await pool.query(`
       select o.name, o.slug, a.role, a.status, a.paid_until::text as paid_until
       from affiliation a join organisation o on o.id = a.organisation_id
@@ -5508,8 +5513,12 @@ export const portal = {
       m.standing = m.status === 'trial' ? 'trial'
         : m.role === 'member' ? standing({ paidUntil: m.paid_until, exempt: m.fee_exempt }, localNow(m.timezone).date) : null;
 
-    const grade = await one(`select label, rank_order, awarded_on::text as awarded_on
-      from person_current_grade where person_id = $1`, [person.id]);
+    const grade = await one(`select cg.label, cg.rank_order, cg.awarded_on::text as awarded_on,
+        (select n.label from grade g join grade n on n.organisation_id = g.organisation_id
+           and n.rank_order = g.rank_order + 1 where g.id = cg.grade_id) as next_label
+      from person_current_grade cg where cg.person_id = $1`, [person.id]);
+    if (grade) grade.next_grading = nextGrading({ held: { label: grade.label, awardedOn: grade.awarded_on },
+      next: grade.next_label ? { label: grade.next_label } : null, today: now.date });
 
     const sessions = memberships.length ? await q(`
       select ts.id, ts.label, ts.weekday, to_char(ts.starts,'HH24:MI') as starts, to_char(ts.ends,'HH24:MI') as ends,
