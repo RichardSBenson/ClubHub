@@ -20,6 +20,10 @@ export const AUDIENCES = Object.freeze([
   ['selected',    'People picked from a list'],   // not offered on the compose screen
 ]);
 
+/** Which affiliation roles an audience means, for the audiences that are decided by role. Everyone is the default. */
+export const rolesForAudience = (audience) =>
+  audience === 'instructors' ? ['instructor'] : ['member', 'instructor', 'assistant', 'official'];
+
 /**
  * `announcement` honours a person's opt-out. `event` is about something the
  * person has already entered, so it is a service message and is not stopped by

@@ -151,3 +151,21 @@ export function isRealDate(value) {
   if (m < 1 || m > 12 || d < 1) return false;
   return d <= new Date(Date.UTC(y, m, 0)).getUTCDate();
 }
+
+/**
+ * Is this person already on the register?
+ *
+ * The same name with the same date of birth, or with the same email, is the same person. (A parent's email shared with
+ * a child is fine: the names differ.) `candidates` are people who already have this name, as the database found them:
+ * { display_number, first_name, last_name, date_of_birth ('YYYY-MM-DD' or null), email }. Returns the first match or null.
+ */
+export function findTwin(candidates, { dateOfBirth = null, email = null } = {}) {
+  const mail = String(email ?? '').trim().toLowerCase();
+  return candidates.find((c) =>
+    (dateOfBirth && String(c.date_of_birth ?? '').slice(0, 10) === dateOfBirth)
+    || (mail && String(c.email ?? '').toLowerCase() === mail)) ?? null;
+}
+
+/** What to tell somebody who is about to add a person twice. */
+export const twinMessage = (twin) =>
+  `${twin.first_name} ${twin.last_name} is already on the register as ${twin.display_number}. Open that record instead of adding them again.`;

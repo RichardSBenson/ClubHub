@@ -7,7 +7,7 @@
 
 import { pool } from '../../infrastructure/postgres/pool.mjs';
 import { region } from '../../infrastructure/region-context.mjs';
-import { problemsWithMessage, senderFor, chooseRecipients, renderBody } from '../../core/domain/messaging.mjs';
+import { problemsWithMessage, senderFor, chooseRecipients, renderBody, rolesForAudience } from '../../core/domain/messaging.mjs';
 import crypto from 'node:crypto';
 import { pushFromEnv } from '../../infrastructure/push/webpush.mjs';
 import dns from 'node:dns/promises';
@@ -61,7 +61,7 @@ const peopleIn = async (org, audience, { eventId, personId, personIds }) => {
       where o.path <@ $1::ltree and a.ends is null and a.status = 'active'`, [org.path]);
     return r.map((x) => x.id);
   }
-  const roles = audience === 'instructors' ? ['instructor'] : ['member', 'instructor', 'assistant', 'official'];
+  const roles = rolesForAudience(audience);
   const r = await q(`
     select distinct a.person_id as id from affiliation a
     join organisation o on o.id = a.organisation_id

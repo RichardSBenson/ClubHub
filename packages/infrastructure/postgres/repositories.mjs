@@ -40,13 +40,7 @@ export class PostgresLadder {
         and $2 between ga.from_rank_order and ga.to_rank_order`,
       [federationId, rankOrder]);
     if (!r) return null;
-    return new GradingAuthority({
-      fromRankOrder: r.from_rank_order, toRankOrder: r.to_rank_order,
-      awardedByType: r.awarded_by_type, ratifiedByType: r.ratified_by_type,
-      minPanelSize: r.min_panel_size, minPanelRank: r.min_panel_rank,
-      requiresTitleId: r.requires_title_id,
-      requiresTitleLabel: r.requires_title_label,
-    });
+    return GradingAuthority.fromRow(r);
   }
 }
 

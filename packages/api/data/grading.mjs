@@ -9,6 +9,7 @@ import { pool } from '../../infrastructure/postgres/pool.mjs';
 import { region } from '../../infrastructure/region-context.mjs';
 import { SUPPORTER_NO_RANK } from '../../core/domain/roles.mjs';
 import { payeeFor } from '../../core/domain/payments.mjs';
+import { GradingAuthority } from '../../core/domain/rank.mjs';
 import { AWARDS, problemsWithResults, certificateNumber, entriesOpen } from '../../core/domain/grading.mjs';
 import { CATEGORIES as QUAL_CATEGORIES, REQUIRED_FOR, STARTERS, problemsWithQualification, problemsWithAward, latestPerQualification, clearance, remindersDue, reminderText as qualReminderText, STATE_WORDS } from '../../core/domain/qualification.mjs';
 import { MANAGE, REGISTER } from '../../core/domain/access.mjs';
@@ -62,8 +63,9 @@ export const rank = {
   /** Who may award this grade, with what panel, ratified by whom. */
   async authorityFor(orgId, rankOrder) {
     return one(`
-      select ga.*, g.label as panel_must_hold
+      select ga.*, g.label as panel_must_hold, t.label as requires_title_label
       from grade_authority ga
+      left join title t on t.id = ga.requires_title_id
       left join grade g on g.rank_order = ga.min_panel_rank
                        and g.organisation_id = ga.organisation_id
       where ga.organisation_id = $1
@@ -129,26 +131,19 @@ export const rank = {
     if (!grade) throw new NotFound('Grade');
     const org = await one('select * from organisation where id = $1', [awardedByOrg]);
 
-    const auth = await this.authorityFor(grade.organisation_id, grade.rank_order);
-    if (!auth) throw new Invalid(`No authority rule covers ${grade.label}`);
+    const row = await this.authorityFor(grade.organisation_id, grade.rank_order);
+    if (!row) throw new Invalid(`No authority rule covers ${grade.label}`);
 
-    if (auth.awarded_by_type !== org.type)
-      throw new Invalid(
-        `${grade.label} must be awarded by a ${auth.awarded_by_type}, not a ${org.type}`);
-
-    if (panel.length < auth.min_panel_size)
-      throw new Invalid(
-        `${grade.label} requires a panel of ${auth.min_panel_size}, got ${panel.length}`);
-
-    if (auth.min_panel_rank) {
-      const ranks = await q(`
-        select cg.rank_order from person_current_grade cg
-        where cg.person_id = any($1::uuid[])`, [panel]);
-      const tooJunior = ranks.filter((r) => r.rank_order < auth.min_panel_rank);
-      if (ranks.length < panel.length || tooJunior.length)
-        throw new Invalid(
-          `Every examiner must hold ${auth.panel_must_hold} or above`);
-    }
+    // The rule itself lives in the domain, so this path and the use case judge a grading identically.
+    const ranks = new Map((await q('select person_id, rank_order from person_current_grade where person_id = any($1::uuid[])', [panel]))
+      .map((r) => [r.person_id, r.rank_order]));
+    const titles = await q('select distinct person_id, title_id from title_award where person_id = any($1::uuid[])', [panel]);
+    const objections = GradingAuthority.fromRow(row).objectionsTo({
+      grade: { label: grade.label }, awardingOrgType: org.type,
+      panel: panel.map((id) => ({ personId: id, rankOrder: ranks.get(id) ?? null,
+        titleIds: titles.filter((t) => t.person_id === id).map((t) => t.title_id) })),
+    });
+    if (objections.length) throw new Invalid(objections.join('; '));
 
     // Inside somebody else's transaction when one is passed, so a whole
     // grading night can be awarded together or not at all.

@@ -106,6 +106,16 @@ export class GradingAuthority {
     this.requiresTitleLabel = requiresTitleLabel;
   }
 
+  /** From a grade_authority row (with the required title's label as requires_title_label, when there is one). */
+  static fromRow(r) {
+    return new GradingAuthority({
+      fromRankOrder: r.from_rank_order, toRankOrder: r.to_rank_order,
+      awardedByType: r.awarded_by_type, ratifiedByType: r.ratified_by_type,
+      minPanelSize: r.min_panel_size, minPanelRank: r.min_panel_rank,
+      requiresTitleId: r.requires_title_id, requiresTitleLabel: r.requires_title_label,
+    });
+  }
+
   covers(rankOrder) {
     const r = RankOrder.of(rankOrder);
     return r.isAtLeast(this.from) && this.to.isAtLeast(r);

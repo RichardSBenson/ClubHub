@@ -107,7 +107,7 @@ const fin = (extra = {}) => gradings.finalise(reg.accountId, ev, { results, pane
 ok('every entrant needs a result', await rejects(fin({ results: { [await entry(ann)]: { outcome: 'pass' } } }), Invalid, /Bob Gradetest|Cat Gradetest/));
 ok('a pass needs a panel', await rejects(fin({ panelNumbers: [] }), Invalid, /panel/));
 ok('an unknown panel number is refused', await rejects(fin({ panelNumbers: ['NOPE-1'] }), Invalid, /No member found/));
-ok('a panel who are not senior enough is refused', await rejects(fin({ panelNumbers: [bob.display_number] }), Invalid, /Every examiner/));
+ok('a panel who are not senior enough is refused', await rejects(fin({ panelNumbers: [bob.display_number] }), Invalid, /examiner/));
 ok('and the register is untouched', (await one('select count(*)::int as n from grading_record where event_id=$1', [ev])).n === 0
   && (await one('select status from event where id=$1', [ev])).status === 'published');
 ok('another club cannot finalise it', await rejects(gradings.finalise(wreg.accountId, ev, { results, panelNumbers: [shodan.display_number], date: today }), Forbidden));

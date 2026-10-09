@@ -11,7 +11,7 @@ import { pool } from '../../infrastructure/postgres/pool.mjs';
 import { DEFAULT_TIMEZONE } from '../../core/domain/defaults.mjs';
 import { region } from '../../infrastructure/region-context.mjs';
 import { nextGrading } from '../../core/domain/next-grading.mjs';
-import { problemsWithPerson, problemsWithMembership, normaliseGender, ageOn } from '../../core/domain/people.mjs';
+import { problemsWithPerson, problemsWithMembership, normaliseGender, ageOn, findTwin, twinMessage } from '../../core/domain/people.mjs';
 import { seal, open as unseal, sealBytes, openBytes } from '../../infrastructure/crypto/vault.mjs';
 import { problemsWithDocument, photoNeedsConsent } from '../../core/domain/documents.mjs';
 import { whyNotInstructor, problemsWithRoleAndGrade } from '../../core/domain/roles.mjs';
@@ -169,12 +169,10 @@ export const people = {
 
       // The same name with the same date of birth or the same email is the same person (a parent's email shared with a child is fine). Adding them twice is how a second,
       // empty record ends up being the one somebody opens, so refuse it and say where the first one is.
-      const { rows: [twin] } = await client.query(`select display_number, first_name, last_name from person
-        where lower(first_name) = lower($1) and lower(last_name) = lower($2)
-          and (($3::date is not null and date_of_birth = $3::date)
-            or ($4::text is not null and lower(email) = lower($4)))
-        order by id limit 1`, [firstName.trim(), lastName.trim(), dateOfBirth, email?.trim() || null]);
-      if (twin) throw new Invalid(`${twin.first_name} ${twin.last_name} is already on the register as ${twin.display_number}. Open that record instead of adding them again.`);
+      const { rows: sameName } = await client.query(`select display_number, first_name, last_name, date_of_birth::text as date_of_birth, email
+        from person where lower(first_name) = lower($1) and lower(last_name) = lower($2) order by id`, [firstName.trim(), lastName.trim()]);
+      const twin = findTwin(sameName, { dateOfBirth, email });
+      if (twin) throw new Invalid(twinMessage(twin));
 
       // The federation's prefix, and the next number in its sequence. Inside
       // the transaction so two registrars saving at once cannot collide.
