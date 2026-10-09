@@ -26,19 +26,19 @@ console.log('\nNO DATABASE CONFIGURED, NOTHING TO PROVISION');
 
 console.log('\nTHE PUBLIC SITE RUNS FROM FILES');
 {
-  const dojos = await repos.organisations.publicDojos('moknz');
-  ok('seventeen dojo load', dojos.length === 17, dojos.length);
-  const wh = dojos.find(d => d.slug === 'whanganui');
+  const clubs = await repos.organisations.publicClubs('moknz');
+  ok('seventeen dojo load', clubs.length === 17, clubs.length);
+  const wh = clubs.find(d => d.slug === 'whanganui');
   ok('with their profile attached', wh.venueName === 'Springvale Community Hall');
   ok('and their training sessions', wh.sessions.length === 5, wh.sessions.length);
   ok('an unfilled dojo still loads, with nothing invented',
-    dojos.find(d => d.slug === 'milton').venueName === undefined);
+    clubs.find(d => d.slug === 'milton').venueName === undefined);
 }
 
 console.log('\nTHE SAME USE CASE, THIRD ADAPTER');
 {
   const moknz = (await repos.organisations.byId(
-    (await repos.organisations.publicDojos('moknz'))[0].parentId));
+    (await repos.organisations.publicClubs('moknz'))[0].parentId));
   const check = new CheckEligibility(repos);
 
   const grades = await repos.ladder.gradesFor(moknz.id);

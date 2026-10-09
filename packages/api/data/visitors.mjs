@@ -177,7 +177,7 @@ export const enquiries = {
     // Delivery is best-effort. The enquiry is already safe in the inbox.
     let emailed = false;
     try {
-      const contact = (await one('select email from dojo_profile where organisation_id=$1', [org.id]))?.email ?? null;
+      const contact = (await one('select email from club_profile where organisation_id=$1', [org.id]))?.email ?? null;
       const to = contact ? [contact] : (await q(`select distinct a.email from grant_role g join account a on a.id = g.account_id
         where g.organisation_id = $1 and g.role in ('owner','administrator') order by a.email limit 3`, [org.id])).map((r) => r.email);
       const sender = senderFor({ club: org, baseFrom, contactEmail: null });
@@ -435,7 +435,7 @@ export const trials = {
       const { rows: [pay] } = await client.query(`insert into payment (organisation_id, person_id, amount_cents, currency, status, requested_by)
         values ($1,$2,$3,$4,'pending',$5) returning id`, [orgId, personId, choice.fee.amount_cents, choice.fee.currency ?? region().currency, actor]);
       await client.query(`insert into payment_line (payment_id, kind, description, amount_cents, renews_affiliation_id, renews_months)
-        values ($1,'dojo_fee',$2,$3,$4,$5)`, [pay.id, `${choice.fee.label} — membership ${choice.label.toLowerCase()}`,
+        values ($1,'club_fee',$2,$3,$4,$5)`, [pay.id, `${choice.fee.label} — membership ${choice.label.toLowerCase()}`,
         choice.fee.amount_cents, a.id, PERIODS[period].months]);
       await client.query(`insert into audit_log (account_id, organisation_id, action, entity, entity_id, after)
         values ($1,$2,'trial_join_requested','payment',$3,$4)`, [actor, orgId, pay.id, JSON.stringify({ period, amountCents: choice.fee.amount_cents })]);

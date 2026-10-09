@@ -81,11 +81,11 @@
   "homePage": {
     "_readme": [
       "Which sections appear, and in what order. Remove one to hide it.",
-      "Options: hero, dojoGrid, events, news"
+      "Options: hero, clubGrid, events, news"
     ],
     "sections": [
       "hero",
-      "dojoGrid",
+      "clubGrid",
       "events",
       "news"
     ],
@@ -246,7 +246,7 @@
       }
     }
   },
-  "dojoPage": {
+  "clubPage": {
     "_readme": [
       "Which sections appear on every dojo page, and in what order.",
       "Options: hero, facts, startAnyWeek, times, about, events, findUs"
@@ -296,7 +296,7 @@
     ],
     "items": [
       {
-        "href": "/find-a-dojo",
+        "href": "/find-a-club",
         "label": "Find a dojo"
       },
       {

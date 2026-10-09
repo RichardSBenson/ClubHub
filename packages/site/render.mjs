@@ -2,11 +2,11 @@
  * HONBU — site renderer
  *
  * The public site is a PROJECTION of the register, not a separate CMS.
- * Dojo pages, event listings and results are generated. Nobody edits them, so
+ * Club pages, event listings and results are generated. Nobody edits them, so
  * nobody can leave one half-filled.
  *
  * The advantage over every hosted club platform is here: real slugs, per-page
- * meta, and JSON-LD on every dojo so Google reads it as a physical business.
+ * meta, and JSON-LD on every club so Google reads it as a physical business.
  *
  * This file was written with no imports at all, which was a nice property
  * while it lasted. It buys one exception, for a domain value: writing a second
@@ -61,7 +61,7 @@ function shortRange(starts, ends, tz = DEFAULT_TIMEZONE) {
  */
 function eventBanner(ev, { logoUrl = null, federationName = '', small = false, vocabulary = {} } = {}) {
   const { top, main } = bannerLines(ev, eventTypes());
-  // Who is running it: the dojo's name. An event the federation itself runs does not say so twice.
+  // Who is running it: the club's name. An event the federation itself runs does not say so twice.
   const host = ev.from_org && ev.from_org !== federationName ? `${ev.from_org} ${capitalise(clubWord(vocabulary))}` : '';
   return `<div class="evbanner${small ? ' small' : ''}">
   ${logoUrl ? `<img class="crest" src="${esc(logoUrl)}" alt="${esc(federationName)} crest">` : ''}
@@ -113,30 +113,30 @@ const artOf = (federation) =>
 const clubWord = (v = {}) => (v.club ?? 'club').toLowerCase();
 const clubsWordOf = (v = {}) => (v.clubPlural ?? v.club ?? 'clubs').toLowerCase();
 
-export function dojoJsonLd(dojo, federation, origin, base = '') {
+export function clubJsonLd(club, federation, origin, base = '', word = 'Club') {
   const federationUrl = `${origin}${base}`;
   const ld = {
     '@context': 'https://schema.org',
     '@type': 'SportsActivityLocation',
-    name: `${federation.name} — ${dojo.name} Dojo`,
-    url: `${origin}${base}/${dojo.slug}`,
+    name: `${federation.name} — ${club.name} ${word}`,
+    url: `${origin}${base}/${club.slug}`,
     parentOrganization: { '@type': 'SportsOrganization', name: federation.name,
       url: federationUrl },
     sport: disciplineOf(federation),
   };
-  if (dojo.venue_name || dojo.city) {
-    ld.address = { '@type': 'PostalAddress', addressCountry: dojo.country_code ?? DEFAULT_COUNTRY };
-    if (dojo.address_line) ld.address.streetAddress = dojo.address_line;
-    if (dojo.suburb) ld.address.addressLocality = dojo.suburb;
-    if (dojo.city) ld.address.addressRegion = dojo.city;
-    if (dojo.postcode) ld.address.postalCode = dojo.postcode;
+  if (club.venue_name || club.city) {
+    ld.address = { '@type': 'PostalAddress', addressCountry: club.country_code ?? DEFAULT_COUNTRY };
+    if (club.address_line) ld.address.streetAddress = club.address_line;
+    if (club.suburb) ld.address.addressLocality = club.suburb;
+    if (club.city) ld.address.addressRegion = club.city;
+    if (club.postcode) ld.address.postalCode = club.postcode;
   }
-  if (dojo.latitude) ld.geo = { '@type': 'GeoCoordinates',
-    latitude: dojo.latitude, longitude: dojo.longitude };
-  if (dojo.phone && !dojo.phone.startsWith('[')) ld.telephone = dojo.phone;
-  if (dojo.email) ld.email = dojo.email;
+  if (club.latitude) ld.geo = { '@type': 'GeoCoordinates',
+    latitude: club.latitude, longitude: club.longitude };
+  if (club.phone && !club.phone.startsWith('[')) ld.telephone = club.phone;
+  if (club.email) ld.email = club.email;
 
-  const hours = groupSessions(dojo.sessions ?? []).map((g) => ({
+  const hours = groupSessions(club.sessions ?? []).map((g) => ({
     '@type': 'OpeningHoursSpecification',
     dayOfWeek: g.days.map((d) => `https://schema.org/${d}`),
     opens: g.starts, closes: g.ends,
@@ -458,7 +458,7 @@ ${showcase ? S.header({ federation, nav, at, logoUrl }) : `<header class="site">
 </div></header>`}
 ${body}
 ${showcase ? S.footer({ federation, at, logoUrl, footerLinks: federation.footerLinks ?? [] }) : `<footer class="site"><div class="wrap">
-  ${esc(federation.name)} · <a href="${at('/find-a-dojo')}">${esc(clubsWord)}</a> · <a href="${at('/events')}">Events</a>
+  ${esc(federation.name)} · <a href="${at('/find-a-club')}">${esc(clubsWord)}</a> · <a href="${at('/events')}">Events</a>
 </div></footer>`}
 ${/class="(gallery|gal)"/.test(body) ? `<script src="${at('/vendor/lightbox.js')}" defer></script>` : ''}
 ${body.includes('data-finder') ? `<script src="${at('/vendor/finder.js')}" defer></script>` : ''}
@@ -470,8 +470,8 @@ ${body.includes('data-finder') ? `<script src="${at('/vendor/finder.js')}" defer
 // pages
 // ---------------------------------------------------------------------------
 
-export const DOJO_DEFAULT = ['hero', 'facts', 'startAnyWeek', 'times', 'about', 'instructors', 'gallery', 'events', 'findUs'];
-export const HOME_DEFAULT = ['hero', 'dojoGrid', 'events', 'news'];
+export const CLUB_DEFAULT = ['hero', 'facts', 'startAnyWeek', 'times', 'about', 'instructors', 'gallery', 'events', 'findUs'];
+export const HOME_DEFAULT = ['hero', 'clubGrid', 'events', 'news'];
 
 /**
  * Sections are laid out in the order a federation chose. `hero` and `facts`
@@ -497,22 +497,22 @@ function arrange(order, parts, bands) {
   return out.join('\n');
 }
 
-export function dojoPage({ dojo, federation, events, origin, fonts, nav,
+export function clubPage({ club, federation, events, origin, fonts, nav,
                            base = '', vocabulary = {}, logoUrl = null, gallery = [], galleryTotal = null, instructors = [],
-                           sections = DOJO_DEFAULT, startAnyWeekText = null,
+                           sections = CLUB_DEFAULT, startAnyWeekText = null,
                            showFirstClassFree = true }) {
   logoUrl = logoUrl ?? federation.logoUrl ?? null;
   const at = (p) => `${base}${p}`;
-  const groups = groupSessions(dojo.sessions ?? []);
-  const town = dojo.name;
+  const groups = groupSessions(club.sessions ?? []);
+  const town = club.name;
   const daysLine = groups.length
     ? [...new Set(groups.flatMap((g) => g.days))].join(', ')
     : 'Training nights to confirm';
-  const free = showFirstClassFree && dojo.first_class_free;
+  const free = showFirstClassFree && club.first_class_free;
 
   if (federation.layoutName === 'showcase') {
-    const copy = federation.dojoCopy ?? {};
-    const parts = S.dojoParts({ dojo, federation, events, at, copy, logoUrl, vocabulary, gallery, galleryTotal,
+    const copy = federation.clubCopy ?? {};
+    const parts = S.clubParts({ club, federation, events, at, copy, logoUrl, vocabulary, gallery, galleryTotal,
       instructors, groups, daysLine, free, startAnyWeekText, clubCount: federation.clubCount });
     // Every section is its own band, except the three that read as one column: the turn-up notice, the times and the about text.
     const column = new Set(['startAnyWeek', 'times', 'about']);
@@ -531,40 +531,40 @@ export function dojoPage({ dojo, federation, events, origin, fonts, nav,
     return layout({
       title: `${capitalise(artOf(federation))} in ${town} — ${federation.name}`,
       description: `${capitalise(artOf(federation))} classes in ${town} for adults and ` +
-        `children.${dojo.first_class_free ? ' First class free.' : ''}` +
-        (groups.length ? ` ${daysLine} at ${dojo.venue_name ?? dojo.address_line ?? town}.` : ''),
-      canonical: `${origin}${at(`/${dojo.slug}`)}`,
-      jsonLd: [dojoJsonLd(dojo, federation, origin, base)],
-      image: dojo.hero_url ?? null,
+        `children.${club.first_class_free ? ' First class free.' : ''}` +
+        (groups.length ? ` ${daysLine} at ${club.venue_name ?? club.address_line ?? town}.` : ''),
+      canonical: `${origin}${at(`/${club.slug}`)}`,
+      jsonLd: [clubJsonLd(club, federation, origin, base, capitalise(clubWord(vocabulary)))],
+      image: club.hero_url ?? null,
       federation, fonts, nav, base, vocabulary, logoUrl,
-      body: S.crumb(at, [{ href: '/find-a-dojo', label: `Find a ${clubWord(vocabulary)}` }, { label: town }]) + out.join('\n'),
+      body: S.crumb(at, [{ href: '/find-a-club', label: `Find a ${clubWord(vocabulary)}` }, { label: town }]) + out.join('\n'),
     });
   }
 
   const parts = {
     hero: () => `
-<div class="hero${dojo.hero_url ? ' photo' : ''}"${dojo.hero_url
-  ? ` style="background-image:linear-gradient(100deg,rgba(10,10,12,.78),rgba(10,10,12,.35)),url('${esc(dojo.hero_url)}')"`
+<div class="hero${club.hero_url ? ' photo' : ''}"${club.hero_url
+  ? ` style="background-image:linear-gradient(100deg,rgba(10,10,12,.78),rgba(10,10,12,.35)),url('${esc(club.hero_url)}')"`
   : ''}><div class="wrap">
   <h1>${esc(federation.name)} in ${esc(town)}</h1>
   <p>${esc(capitalise(artOf(federation)))} for adults and children. ${esc(daysLine)}.${
     free ? ' Your first class is free.' : ''}</p>
-  <div class="actions"><a class="btn" href="${free ? `/enquire/${esc(dojo.slug)}?kind=trial` : '#visit'}">${
+  <div class="actions"><a class="btn" href="${free ? `/enquire/${esc(club.slug)}?kind=trial` : '#visit'}">${
     free ? 'Book your free class' : 'Come to a class'}</a>
   <a class="btn ghost" href="#times">See class times</a></div>
 </div></div>`,
 
     facts: () => `
 <div class="facts"><div class="wrap">
-  <div><b>WHERE</b><p>${esc(dojo.venue_name ?? dojo.address_line ?? 'Venue to confirm')}
-    <small>${esc([dojo.suburb, dojo.city, dojo.postcode].filter(Boolean).join(', ') || 'Address to confirm')}</small></p></div>
+  <div><b>WHERE</b><p>${esc(club.venue_name ?? club.address_line ?? 'Venue to confirm')}
+    <small>${esc([club.suburb, club.city, club.postcode].filter(Boolean).join(', ') || 'Address to confirm')}</small></p></div>
   <div><b>WHEN</b><p>${esc(daysLine)}<small>${
     groups.map((g) => `${esc(g.label)} ${time(g.starts)}`).slice(0,2).join(' · ') || 'Times to confirm'}</small></p></div>
   <div><b>CONTACT</b><p>${
-    dojo.phone && !String(dojo.phone).startsWith('[')
-      ? `<a href="tel:${esc(dojo.phone.replace(/\s/g,''))}" style="color:var(--canvas)">${esc(dojo.phone)}</a>`
+    club.phone && !String(club.phone).startsWith('[')
+      ? `<a href="tel:${esc(club.phone.replace(/\s/g,''))}" style="color:var(--canvas)">${esc(club.phone)}</a>`
       : 'Phone to confirm'}
-    <small>${esc(dojo.email ?? '')}</small></p></div>
+    <small>${esc(club.email ?? '')}</small></p></div>
 </div></div>`,
 
     // A claim on the federation's behalf, so it is only made when the
@@ -582,9 +582,9 @@ export function dojoPage({ dojo, federation, events, origin, fonts, nav,
     </tbody></table>`
     : '<p>Training times to be confirmed.</p>'}`,
 
-    about: () => dojo.blurb ? `<h2 style="margin-top:40px">About this ${esc(clubWord(vocabulary))}</h2>
-    <p>${esc(dojo.blurb)}</p>
-    ${dojo.who_trains ? `<p>${esc(dojo.who_trains)}</p>` : ''}` : '',
+    about: () => club.blurb ? `<h2 style="margin-top:40px">About this ${esc(clubWord(vocabulary))}</h2>
+    <p>${esc(club.blurb)}</p>
+    ${club.who_trains ? `<p>${esc(club.who_trains)}</p>` : ''}` : '',
 
     // Always on the page, so a visitor sees where the instructor will be. With nobody published yet it
     // is an honest placeholder in the same layout, not an empty gap.
@@ -596,20 +596,20 @@ export function dojoPage({ dojo, federation, events, origin, fonts, nav,
     <p>Come along to a class and meet them in person.</p></article>`}</div>
   ${instructors.length ? `<p><a href="${at('/instructors')}">All instructors</a></p>` : ''}`,
 
-    gallery: () => gallery.length ? `<h2 style="margin-top:40px">In the dojo</h2>
+    gallery: () => gallery.length ? `<h2 style="margin-top:40px">In the ${esc(clubWord(vocabulary))}</h2>
   <ul class="gallery">${gallery.map((g) => `<li><figure><a class="glink" href="${esc(g.url)}"><img src="${esc(g.url)}" alt="${esc(g.alt ?? '')}" loading="lazy"></a>${
     g.caption ? `<figcaption>${esc(g.caption)}</figcaption>` : ''}</figure></li>`).join('')}</ul>
   ${(galleryTotal ?? gallery.length) > gallery.length
-    ? `<p><a class="btn outline" href="${at(`/${esc(dojo.slug)}/gallery`)}">See all ${galleryTotal} photos</a></p>`
-    : `<p><a href="${at(`/${esc(dojo.slug)}/gallery`)}">Photos by year and event</a></p>`}` : '',
+    ? `<p><a class="btn outline" href="${at(`/${esc(club.slug)}/gallery`)}">See all ${galleryTotal} photos</a></p>`
+    : `<p><a href="${at(`/${esc(club.slug)}/gallery`)}">Photos by year and event</a></p>`}` : '',
 
     events: () => events.length ? `<h2 style="margin-top:40px">What's on</h2>
-  <div class="evcards" style="grid-template-columns:1fr">${events.map((e) => `<a class="evcard" href="${at(e.is_own ? `/${esc(dojo.slug)}/events/${esc(e.slug)}` : `/events/${esc(e.slug)}`)}">
+  <div class="evcards" style="grid-template-columns:1fr">${events.map((e) => `<a class="evcard" href="${at(e.is_own ? `/${esc(club.slug)}/events/${esc(e.slug)}` : `/events/${esc(e.slug)}`)}">
     ${eventBanner(e, { logoUrl, federationName: federation.name, small: true, vocabulary })}</a>`).join('')}</div>` : '',
 
     findUs: () => `<h2 id="visit" style="margin-top:40px">Finding us</h2>
-  <p>${esc(dojo.venue_name ?? '')}<br>${esc([dojo.address_line, dojo.suburb, dojo.city].filter(Boolean).join(', '))}
-  ${dojo.directions ? `<br>${esc(dojo.directions)}` : ''}</p>`,
+  <p>${esc(club.venue_name ?? '')}<br>${esc([club.address_line, club.suburb, club.city].filter(Boolean).join(', '))}
+  ${club.directions ? `<br>${esc(club.directions)}` : ''}</p>`,
   };
 
   // "Come to a class" points at #visit, so a layout without findUs would
@@ -618,12 +618,12 @@ export function dojoPage({ dojo, federation, events, origin, fonts, nav,
   const order = [...sections];
   if (!order.includes('facts')) order.splice(Math.min(1, order.length), 0, 'facts');
   if (!order.includes('findUs')) order.push('findUs');
-  // A gallery appears once a dojo has pictures, whatever layout the federation saved before galleries existed.
+  // A gallery appears once a club has pictures, whatever layout the federation saved before galleries existed.
   const before = (name) => { const i = order.indexOf(name); return i < 0 ? order.length - 1 : i; };
   if (!order.includes('instructors')) order.splice(before('gallery') < order.length - 1 && order.includes('gallery') ? order.indexOf('gallery') : before('events'), 0, 'instructors');
   if (gallery.length && !order.includes('gallery')) order.splice(before('events'), 0, 'gallery');
 
-  const trial = free ? `/enquire/${esc(dojo.slug)}?kind=trial` : '#visit';
+  const trial = free ? `/enquire/${esc(club.slug)}?kind=trial` : '#visit';
   const body = arrange(order, parts, new Set(['hero', 'facts']))
     + `\n<section class="cta"><div class="wrap"><h2>${free ? 'Your first class is free' : 'Come and see a class'}</h2>`
     + `<a class="btn light" href="${trial}">${free ? 'Book your free class' : 'Visit us'}</a></div></section>`
@@ -632,11 +632,11 @@ export function dojoPage({ dojo, federation, events, origin, fonts, nav,
   return layout({
     title: `${capitalise(artOf(federation))} in ${town} — ${federation.name}`,
     description: `${capitalise(artOf(federation))} classes in ${town} for adults and ` +
-      `children.${dojo.first_class_free ? ' First class free.' : ''}` +
-      (groups.length ? ` ${daysLine} at ${dojo.venue_name ?? dojo.address_line ?? town}.` : ''),
-    canonical: `${origin}${at(`/${dojo.slug}`)}`,
-    jsonLd: [dojoJsonLd(dojo, federation, origin, base)],
-    image: dojo.hero_url ?? null,
+      `children.${club.first_class_free ? ' First class free.' : ''}` +
+      (groups.length ? ` ${daysLine} at ${club.venue_name ?? club.address_line ?? town}.` : ''),
+    canonical: `${origin}${at(`/${club.slug}`)}`,
+    jsonLd: [clubJsonLd(club, federation, origin, base, capitalise(clubWord(vocabulary)))],
+    image: club.hero_url ?? null,
     federation, fonts, nav, base, vocabulary, logoUrl, body,
   });
 }
@@ -677,20 +677,20 @@ export function authoredPage({ page, html, federation, origin, fonts, nav,
  * What can honestly be said about all of them at once.
  *
  * This line used to read "Every one takes beginners, and your first class is
- * free" — printed over every federation's list regardless of what any dojo had
+ * free" — printed over every federation's list regardless of what any club had
  * said. Three of MOKNZ's seventeen clubs have a profile row at all, so the
  * national site was making a promise to the public on behalf of fourteen
  * businesses that had never been asked.
  *
- * accepts_beginners and first_class_free are real per-dojo columns. A claim
+ * accepts_beginners and first_class_free are real per-club columns. A claim
  * about all of them is made only when all of them have actually said so;
- * otherwise the page says nothing and the individual dojo pages speak for
+ * otherwise the page says nothing and the individual club pages speak for
  * themselves. Silence is free, and a wrong promise is somebody turning up to
  * a class expecting not to pay.
  */
-function welcomeLine(dojos = []) {
-  if (!dojos.length) return '';
-  const all = (field) => dojos.every((d) => d[field] === true);
+function welcomeLine(clubs = []) {
+  if (!clubs.length) return '';
+  const all = (field) => clubs.every((d) => d[field] === true);
   const beginners = all('accepts_beginners');
   const free = all('first_class_free');
   if (beginners && free) return ' Every one takes beginners, and your first class is free.';
@@ -712,7 +712,7 @@ function welcomeLine(dojos = []) {
  * page is the correct answer when nobody has been asked yet.
  */
 /**
- * An instructor, in one fixed format wherever they appear (a dojo's page, the Instructors page): photograph, name,
+ * An instructor, in one fixed format wherever they appear (a club's page, the Instructors page): photograph, name,
  * title and grade, what they teach, how long they have trained, a few words about them, and the checks they have
  * chosen to show. Every instructor is the same shape; only the data differs.
  */
@@ -751,10 +751,10 @@ export function instructorCard(i, { at = (x) => x, federationSlug = null, full =
 }
 
 /**
- * A dojo's whole gallery, newest year first and within each year by event. Plain links and anchors:
+ * A club's whole gallery, newest year first and within each year by event. Plain links and anchors:
  * the year buttons jump down the page, and an event's name links to its page when it has one.
  */
-export function galleryPage({ dojo, items = [], federation, origin, fonts, nav,
+export function galleryPage({ club, items = [], federation, origin, fonts, nav,
                               base = '', vocabulary = {}, logoUrl = null }) {
   logoUrl = logoUrl ?? federation.logoUrl ?? null;
   const at = (p) => `${base}${p}`;
@@ -773,21 +773,21 @@ export function galleryPage({ dojo, items = [], federation, origin, fonts, nav,
     g.caption ? `<figcaption>${esc(g.caption)}</figcaption>` : ''}</figure></li>`;
   const body = `
 <section><div class="wrap">
-  <p><a href="${at(`/${esc(dojo.slug)}`)}">← ${esc(dojo.name)}</a></p>
-  <h1 style="font-family:var(--display);font-size:clamp(30px,5vw,46px);margin:0 0 12px">${esc(dojo.name)} photos</h1>
+  <p><a href="${at(`/${esc(club.slug)}`)}">← ${esc(club.name)}</a></p>
+  <h1 style="font-family:var(--display);font-size:clamp(30px,5vw,46px);margin:0 0 12px">${esc(club.name)} photos</h1>
   ${items.length ? `<p class="yearnav">${years.map((y) => `<a href="#y${esc(String(y.year))}">${esc(String(label(y)))}</a>`).join('')}</p>` : ''}
   ${years.map((y) => `<h2 id="y${esc(String(y.year))}" style="margin-top:40px">${esc(String(label(y)))}</h2>
     ${y.events.map((e) => `${e.title ? `<h3 class="galevent">${e.slug
-        ? `<a href="${at(`/${esc(dojo.slug)}/events/${esc(e.slug)}`)}">${esc(e.title)}</a>` : esc(e.title)}</h3>` : (y.events.length > 1 ? '<h3 class="galevent">Other photos</h3>' : '')}
+        ? `<a href="${at(`/${esc(club.slug)}/events/${esc(e.slug)}`)}">${esc(e.title)}</a>` : esc(e.title)}</h3>` : (y.events.length > 1 ? '<h3 class="galevent">Other photos</h3>' : '')}
       <ul class="gallery">${e.pics.map(pic).join('')}</ul>`).join('')}`).join('')}
   ${items.length ? '' : '<p style="font-size:19px">No photos yet.</p>'}
 </div></section>`;
   return layout({
-    title: `${dojo.name} photos — ${federation.name}`,
-    description: `Photos from ${dojo.name}${items.length ? `, ${items.length} of them, by year and event` : ''}.`,
-    canonical: `${origin}${at(`/${dojo.slug}/gallery`)}`,
+    title: `${club.name} photos — ${federation.name}`,
+    description: `Photos from ${club.name}${items.length ? `, ${items.length} of them, by year and event` : ''}.`,
+    canonical: `${origin}${at(`/${club.slug}/gallery`)}`,
     jsonLd: [],
-    image: items[0]?.url ?? dojo.hero_url ?? null,
+    image: items[0]?.url ?? club.hero_url ?? null,
     federation, fonts, nav, base, vocabulary, logoUrl, body,
   });
 }
@@ -827,44 +827,44 @@ export function instructorsPage({ instructors = [], federation, origin, fonts,
   });
 }
 
-export function findADojoPage({ dojos, federation, origin, fonts, nav,
+export function findAClubPage({ clubs, federation, origin, fonts, nav,
                                 base = '', vocabulary = {} }) {
   const at = (p) => `${base}${p}`;
-  const ready = dojos.filter((d) => d.published);
+  const ready = clubs.filter((d) => d.published);
   if (federation.layoutName === 'showcase') {
-    const body = S.findBody({ dojos, federation, at, copy: federation.homeCopy ?? {}, vocabulary, lede: welcomeLine(dojos) });
+    const body = S.findBody({ clubs, federation, at, copy: federation.homeCopy ?? {}, vocabulary, lede: welcomeLine(clubs) });
     return layout({
-      title: `Find a dojo — ${federation.name}`,
-      description: `${dojos.length} ${clubsWordOf(vocabulary)}. Find your nearest.${welcomeLine(dojos)}`,
-      canonical: `${origin}${at('/find-a-dojo')}`,
+      title: `Find a ${clubWord(vocabulary)} — ${federation.name}`,
+      description: `${clubs.length} ${clubsWordOf(vocabulary)}. Find your nearest.${welcomeLine(clubs)}`,
+      canonical: `${origin}${at('/find-a-club')}`,
       jsonLd: [{ '@context':'https://schema.org','@type':'SportsOrganization', name: federation.name, url: `${origin}${base}`,
-        subOrganization: dojos.map((d) => ({ '@type':'SportsActivityLocation', name: `${d.name} ${vocabulary.club ?? 'Club'}`, url: `${origin}${at(`/${d.slug}`)}` })) }],
+        subOrganization: clubs.map((d) => ({ '@type':'SportsActivityLocation', name: `${d.name} ${vocabulary.club ?? 'Club'}`, url: `${origin}${at(`/${d.slug}`)}` })) }],
       federation, fonts, nav, base, vocabulary, body,
     });
   }
   const body = `
 <section><div class="wrap">
-  <h1 style="font-family:var(--display);font-size:clamp(30px,5vw,46px);margin:0 0 12px">Find a dojo</h1>
-  <p style="font-size:19px;max-width:60ch">${dojos.length} ${
-    clubsWordOf(vocabulary).toLowerCase()}.${esc(welcomeLine(dojos))}</p>
+  <h1 style="font-family:var(--display);font-size:clamp(30px,5vw,46px);margin:0 0 12px">Find a ${clubWord(vocabulary)}</h1>
+  <p style="font-size:19px;max-width:60ch">${clubs.length} ${
+    clubsWordOf(vocabulary).toLowerCase()}.${esc(welcomeLine(clubs))}</p>
   <div class="grid" style="margin-top:28px">
-    ${dojos.map((d) => `<a href="${at(`/${esc(d.slug)}`)}"><strong>${esc(d.name)}</strong>
+    ${clubs.map((d) => `<a href="${at(`/${esc(d.slug)}`)}"><strong>${esc(d.name)}</strong>
       <span>${esc(d.published ? (d.city ?? 'See times and address')
                                 : 'Details coming')}</span></a>`).join('')}
   </div>
   <p style="margin-top:22px;color:var(--muted);font-size:15px">
-    ${ready.length} of ${dojos.length} pages complete.</p>
+    ${ready.length} of ${clubs.length} pages complete.</p>
 </div></section>`;
 
   return layout({
-    title: `Find a dojo — ${federation.name}`,
-    description: `${dojos.length} ${clubsWordOf(vocabulary)}. `
-      + `Find your nearest.${welcomeLine(dojos)}`,
-    canonical: `${origin}${at('/find-a-dojo')}`,
+    title: `Find a ${clubWord(vocabulary)} — ${federation.name}`,
+    description: `${clubs.length} ${clubsWordOf(vocabulary)}. `
+      + `Find your nearest.${welcomeLine(clubs)}`,
+    canonical: `${origin}${at('/find-a-club')}`,
     jsonLd: [{
       '@context':'https://schema.org','@type':'SportsOrganization',
       name: federation.name, url: `${origin}${base}`,
-      subOrganization: dojos.map((d) => ({
+      subOrganization: clubs.map((d) => ({
         '@type':'SportsActivityLocation',
         name: `${d.name} ${vocabulary.club ?? 'Club'}`,
         url: `${origin}${at(`/${d.slug}`)}` })),
@@ -875,24 +875,24 @@ export function findADojoPage({ dojos, federation, origin, fonts, nav,
 
 /**
  * The public shop: the federation's own range, for anybody to look at. Ordering is for signed-in members, because the
- * order goes to the member's own dojo, which collects the money and may add its own items (a tournament tee).
+ * order goes to the member's own club, which collects the money and may add its own items (a tournament tee).
  */
 export function shopPage({ products = [], federation, origin, fonts, nav, base = '', vocabulary = {} }) {
   const shopPrice = (c, cur = region().currency) => tidyMoney(c, esc(cur));
   const html = `
-<p class="shoplead">Gear for training and grading, ordered through your dojo. You pay your dojo when you collect it.</p>
+<p class="shoplead">Gear for training and grading, ordered through your ${clubWord(vocabulary)}. You pay your ${clubWord(vocabulary)} when you collect it.</p>
 ${products.length ? `<ul class="shopgrid">${products.map((p) => `<li>
   <h2>${esc(p.name)}</h2>
   ${p.description ? `<p>${esc(p.description)}</p>` : ''}
   <div class="shopprice"><strong>${shopPrice(p.price_cents, p.currency)}</strong>${p.sizes?.length ? `<span>Sizes ${esc(p.sizes[0])}–${esc(p.sizes[p.sizes.length - 1])}</span>` : ''}</div>
 </li>`).join('')}</ul>`
-  : '<p>Nothing is listed yet. Your dojo can tell you what is available.</p>'}
+  : '<p>Nothing is listed yet. Your ${clubWord(vocabulary)} can tell you what is available.</p>'}
 <div class="shopcta">
   <h2>Ready to order?</h2>
-  <p>Sign in with your email. There is no password: we send you a link. You will see this range and anything your own dojo adds, such as the tournament tee, and parents can order for their children from the same place.</p>
-  <p><a class="btn" href="/me/shop">Order from your dojo</a></p>
+  <p>Sign in with your email. There is no password: we send you a link. You will see this range and anything your own ${clubWord(vocabulary)} adds, such as the tournament tee, and parents can order for their children from the same place.</p>
+  <p><a class="btn" href="/me/shop">Order from your ${clubWord(vocabulary)}</a></p>
 </div>`;
-  return authoredPage({ page: { title: 'Shop', slug: 'shop' }, html, description: `Gear for ${federation.name} members, ordered through your dojo.`,
+  return authoredPage({ page: { title: 'Shop', slug: 'shop' }, html, description: `Gear for ${federation.name} members, ordered through your ${clubWord(vocabulary)}.`,
     federation, origin, fonts, nav, base, vocabulary });
 }
 
@@ -1063,22 +1063,22 @@ export function articlePage({ article, html, federation, origin, fonts, nav,
  * and nothing read them. The defaults below are MOKNZ's words, kept only so an
  * empty settings file still renders something.
  */
-export function homePage({ federation, dojos, events, articles, origin, fonts,
+export function homePage({ federation, clubs, events, articles, origin, fonts,
                            nav, homeCopy = {}, base = '', vocabulary = {}, heroUrl = null,
                            sections = HOME_DEFAULT }) {
   const at = (p) => `${base}${p}`;
   const heading = homeCopy.heroHeading ?? 'Everyone starts somewhere.';
   const heroText = homeCopy.heroText
-    ?? `${capitalise(artOf(federation))} taught at ${dojos.length} `
+    ?? `${capitalise(artOf(federation))} taught at ${clubs.length} `
      + `${clubsWordOf(vocabulary)}.`;
   const heroButton = homeCopy.heroButton ?? `Find your ${clubWord(vocabulary)}`;
 
   if (federation.layoutName === 'showcase') {
-    const parts = S.homeParts({ federation, dojos, events, articles, at, copy: homeCopy, heroUrl,
+    const parts = S.homeParts({ federation, clubs, events, articles, at, copy: homeCopy, heroUrl,
       logoUrl: federation.logoUrl ?? null, vocabulary, heading, heroText });
     return layout({
       title: `${federation.name} — ${capitalise(artOf(federation))}`,
-      description: `${capitalise(artOf(federation))}. ${dojos.length} ${clubsWordOf(vocabulary)} nationwide.`,
+      description: `${capitalise(artOf(federation))}. ${clubs.length} ${clubsWordOf(vocabulary)} nationwide.`,
       canonical: `${origin}${base}`,
       jsonLd: [{
         '@context':'https://schema.org','@type':'SportsOrganization',
@@ -1097,15 +1097,15 @@ export function homePage({ federation, dojos, events, articles, origin, fonts,
   : ''}><div class="wrap">
   <h1>${esc(heading)}</h1>
   <p>${esc(heroText)}</p>
-  <div class="actions"><a class="btn" href="${at('/find-a-dojo')}">${esc(heroButton)}</a>
+  <div class="actions"><a class="btn" href="${at('/find-a-club')}">${esc(heroButton)}</a>
   <a class="btn ghost" href="${at('/events')}">Events</a></div>
 </div></div>`,
 
     // Only what each club has said. "Book a free class" was printed under
     // every club whether it offered one or not.
-    dojoGrid: () => dojos.length ? `<section><div class="wrap">
+    clubGrid: () => clubs.length ? `<section><div class="wrap">
   <h2>Where we train</h2>
-  <div class="grid">${dojos.slice(0,16).map((d) =>
+  <div class="grid">${clubs.slice(0,16).map((d) =>
     `<a href="${at(`/${esc(d.slug)}`)}"${d.hero_url
       ? ` style="background-image:url('${esc(d.hero_url)}')"` : ''}><strong>${esc(d.name)}</strong><span>${
       d.first_class_free ? 'First class free' : 'See times'}</span></a>`).join('')}</div>
@@ -1137,7 +1137,7 @@ export function homePage({ federation, dojos, events, articles, origin, fonts,
 
   return layout({
     title: `${federation.name} — ${capitalise(artOf(federation))}`,
-    description: `${capitalise(artOf(federation))}. ${dojos.length} ${clubsWordOf(vocabulary)} ` +
+    description: `${capitalise(artOf(federation))}. ${clubs.length} ${clubsWordOf(vocabulary)} ` +
       `nationwide.`,
     canonical: `${origin}${base}`,
     jsonLd: [{

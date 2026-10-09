@@ -109,7 +109,7 @@ function blockToText(block, names) {
       return `{{video ${block.provider ?? 'youtube'}=${block.id ?? ''}${
         block.caption ? ` caption=${block.caption.replace(/\s+/g, '_')}` : ''}}}`;
 
-    case 'dojoList':
+    case 'clubList':
       return `{{clubs${attrs({ heading: block.heading })}}}`;
 
     case 'eventList':
@@ -179,8 +179,8 @@ function liveBlock(inner) {
 
   switch (name) {
     case 'clubs':
-    case 'dojos':
-      return { type: 'dojoList', heading: a.heading ?? '' };
+    case 'dojos': // arch-ok: the old spelling is still accepted in typed text
+      return { type: 'clubList', heading: a.heading ?? '' };
 
     case 'events':
       return { type: 'eventList', heading: a.heading ?? '',

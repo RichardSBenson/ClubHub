@@ -1,5 +1,5 @@
 /**
- * Can somebody who runs a dojo write a page and put it on their website?
+ * Can somebody who runs a club write a page and put it on their website?
  *
  * Driven the way a browser with JavaScript switched off drives it: every
  * button is a form post of the whole page, and nothing here runs a script.
@@ -217,7 +217,7 @@ console.log('\nTHE LIVE BLOCKS CAN BE TYPED');
     withClubs.status);
 
   const stored = await one('select body from page where id=$1', [globalThis.__id]);
-  const live = stored.body.blocks.find((b) => b.type === 'dojoList');
+  const live = stored.body.blocks.find((b) => b.type === 'clubList');
   ok('the block is stored as a live list, not as text', !!live,
     stored.body.blocks.map((b) => b.type).join());
   ok('with the heading that was typed', live?.heading === 'Where we train',
@@ -422,7 +422,7 @@ console.log('\nTHE MENU');
   const r = await req('/o/moknz/menu');
   ok('the menu editor renders', r.status === 200);
   ok('it offers only pages this site has',
-    r.html.includes('/find-a-dojo') && r.html.includes('/instructors'),
+    r.html.includes('/find-a-club') && r.html.includes('/instructors'),
     'built-in destinations missing');
   const flat = (h) => h.replace(/\s+/g, ' ');
   ok('and says the menu is limited to five',
@@ -445,7 +445,7 @@ console.log('\nTHE MENU');
 
   const saved = await req('/o/moknz/menu', { method: 'POST',
     form: { href0: '/events', label0: 'What is on',
-            href1: '/find-a-dojo', label1: '' } });
+            href1: '/find-a-club', label1: '' } });
   ok('a good menu saves', saved.status === 302
     && !saved.location.includes('error='), saved.location);
 

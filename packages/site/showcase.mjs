@@ -3,8 +3,8 @@
  *
  * One of the layouts a theme can choose by name (see theme.mjs). It is the look the Mas Oyama
  * federation approved from its clickable prototype: a belt stripe above a dark masthead with the
- * crest, a hero with a "find your nearest dojo" box, a proof strip, a first-night explainer, a
- * pathway, a dark band of dojo grouped by region, event cards, and a dojo page built from the
+ * crest, a hero with a "find your nearest club" box, a proof strip, a first-night explainer, a
+ * pathway, a dark band of club grouped by region, event cards, and a club page built from the
  * same parts.
  *
  * Why this is code and not part of a theme file: a theme is DATA a federation may download from a
@@ -12,7 +12,7 @@
  * Honbu, reviewed with Honbu, and a theme only picks one by name.
  *
  * Why the words are not here: a layout carries no sentences. Everything a visitor reads comes
- * from the federation (data/settings.json, `homePage` and `dojoPage`), the register, or the
+ * from the federation (data/settings.json, `homePage` and `clubPage`), the register, or the
  * database. A section whose words the federation has not written is left out, never filled with
  * somebody else's.
  *
@@ -163,8 +163,8 @@ p{margin:0 0 18px}
 .quote cite{font-style:normal;font-size:14.5px;color:var(--muted);font-weight:500}
 .quote cite b{display:block;color:var(--ink);font-weight:700;font-size:15.5px}
 
-.dojo-band{background:var(--ink);color:var(--canvas)}
-.dojo-band h2{color:var(--canvas)}
+.club-band{background:var(--ink);color:var(--canvas)}
+.club-band h2{color:var(--canvas)}
 .region{margin-bottom:30px}
 .region h3{font-size:17px;font-weight:600;color:var(--gold);margin:0 0 13px;padding-bottom:8px;border-bottom:1px solid var(--ink-3)}
 .grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:2px;background:var(--ink-3)}
@@ -336,10 +336,10 @@ export function makeShowcase(h) {
   const day = (d, tz = DEFAULT_TIMEZONE) => new Date(d).toLocaleDateString(region().locale, { weekday: 'long', day: 'numeric', month: 'long', timeZone: tz });
 
   /** An event as a card: the federation's text banner, then what, when and where. */
-  function eventCard(e, { at, federation, logoUrl, vocabulary, dojoSlug = null }) {
-    // The federation's own events are NATIONAL; anything else carries the name of the dojo running it.
+  function eventCard(e, { at, federation, logoUrl, vocabulary, clubSlug = null }) {
+    // The federation's own events are NATIONAL; anything else carries the name of the club running it.
     const national = e.from_org === federation.name;
-    const href = dojoSlug && e.is_own ? `/${dojoSlug}/events/${e.slug}` : `/events/${e.slug}`;
+    const href = clubSlug && e.is_own ? `/${clubSlug}/events/${e.slug}` : `/events/${e.slug}`;
     const where = e.venue_name ? ` · ${esc(e.venue_name)}` : '';
     return `<a class="card${national ? '' : ' local'}" href="${at(href)}">
   <div class="pic">${h.eventBanner(e, { logoUrl, federationName: federation.name, small: true, vocabulary })}</div>
@@ -365,13 +365,13 @@ export function makeShowcase(h) {
 
   // ---- the home page --------------------------------------------------------
 
-  function homeParts({ federation, dojos, events, articles, at, copy, heroUrl, logoUrl, vocabulary,
+  function homeParts({ federation, clubs, events, articles, at, copy, heroUrl, logoUrl, vocabulary,
                        heading, heroText }) {
     const clubWordL = h.clubWord(vocabulary);
     const clubsWordL = h.clubsWordOf(vocabulary);
     const known = federation.knownPaths ?? null;
-    const stat = (v) => String(v ?? '').replace(/\{clubs\}/g, String(dojos.length));
-    const allFree = dojos.length > 0 && dojos.every((d) => d.first_class_free === true);
+    const stat = (v) => String(v ?? '').replace(/\{clubs\}/g, String(clubs.length));
+    const allFree = clubs.length > 0 && clubs.every((d) => d.first_class_free === true);
     const media = (src, alt, extra = '') => { const s = safeImage(src); return s ? `<img src="${esc(s)}" alt="${esc(asText(alt, 200))}"${extra} loading="lazy">` : ''; };
 
     return {
@@ -382,12 +382,12 @@ export function makeShowcase(h) {
   <div class="wrap">
     <h1>${esc(heading)}</h1>
     <p>${esc(heroText)}</p>
-    ${dojos.length ? `<div class="finder">
+    ${clubs.length ? `<div class="finder">
       <label for="finder-select">Find your nearest ${esc(clubWordL)}</label>
       <div class="row"><select id="finder-select" data-finder><option value="">Choose your town</option>${
-        dojos.map((d) => `<option value="${esc(at(`/${d.slug}`))}">${esc(d.name)}</option>`).join('')}</select>
-      <a class="btn btn-solid" href="${at('/find-a-dojo')}" data-finder-go>Go</a></div>
-      <p>Not sure? <a href="${at('/find-a-dojo')}">See all ${dojos.length} ${esc(clubsWordL)}</a>.</p>
+        clubs.map((d) => `<option value="${esc(at(`/${d.slug}`))}">${esc(d.name)}</option>`).join('')}</select>
+      <a class="btn btn-solid" href="${at('/find-a-club')}" data-finder-go>Go</a></div>
+      <p>Not sure? <a href="${at('/find-a-club')}">See all ${clubs.length} ${esc(clubsWordL)}</a>.</p>
     </div>` : ''}
   </div>
 </div>`;
@@ -440,20 +440,20 @@ export function makeShowcase(h) {
     style="width:100%;height:100%;object-fit:cover;object-position:center ${Number.isFinite(+c.position) ? +c.position : 38}%"></div>` : '';
       },
 
-      dojoGrid: () => {
-        if (!dojos.length) return '';
+      clubGrid: () => {
+        if (!clubs.length) return '';
         const tile = (d) => `<a href="${at(`/${esc(d.slug)}`)}"><strong>${esc(d.name)}</strong><span>${d.first_class_free ? 'Book a free class' : 'See times'}</span></a>`;
-        const bySlug = new Map(dojos.map((d) => [d.slug, d]));
+        const bySlug = new Map(clubs.map((d) => [d.slug, d]));
         const used = new Set();
         const regions = list(copy.regions).map((r) => ({ name: asText(r?.name, 60),
-          dojos: list(r?.slugs).map((s) => bySlug.get(s)).filter(Boolean) })).filter((r) => r.name && r.dojos.length);
-        regions.forEach((r) => r.dojos.forEach((d) => used.add(d.slug)));
-        const rest = dojos.filter((d) => !used.has(d.slug));
-        const groups = regions.length ? [...regions, ...(rest.length ? [{ name: 'More', dojos: rest }] : [])]
-          : [{ name: '', dojos }];
-        return `<div class="dojo-band"><section><div class="wrap">
-    <div class="sechead"><h2>Where we train</h2><a href="${at('/find-a-dojo')}" style="color:var(--gold)">All ${esc(clubsWordL)}</a></div>
-    ${groups.map((g) => `<div class="region">${g.name ? `<h3>${esc(g.name)}</h3>` : ''}<div class="grid">${g.dojos.map(tile).join('')}</div></div>`).join('')}
+          clubs: list(r?.slugs).map((s) => bySlug.get(s)).filter(Boolean) })).filter((r) => r.name && r.clubs.length);
+        regions.forEach((r) => r.clubs.forEach((d) => used.add(d.slug)));
+        const rest = clubs.filter((d) => !used.has(d.slug));
+        const groups = regions.length ? [...regions, ...(rest.length ? [{ name: 'More', clubs: rest }] : [])]
+          : [{ name: '', clubs }];
+        return `<div class="club-band"><section><div class="wrap">
+    <div class="sechead"><h2>Where we train</h2><a href="${at('/find-a-club')}" style="color:var(--gold)">All ${esc(clubsWordL)}</a></div>
+    ${groups.map((g) => `<div class="region">${g.name ? `<h3>${esc(g.name)}</h3>` : ''}<div class="grid">${g.clubs.map(tile).join('')}</div></div>`).join('')}
   </div></section></div>`;
       },
 
@@ -508,17 +508,17 @@ export function makeShowcase(h) {
     };
   }
 
-  // ---- a dojo's page --------------------------------------------------------
+  // ---- a club's page --------------------------------------------------------
 
-  function dojoParts({ dojo, federation, events, at, copy, logoUrl, vocabulary, gallery, galleryTotal,
+  function clubParts({ club, federation, events, at, copy, logoUrl, vocabulary, gallery, galleryTotal,
                        instructors, groups, daysLine, free, startAnyWeekText, clubCount }) {
-    const town = dojo.name;
-    const phone = dojo.phone && !String(dojo.phone).startsWith('[') ? dojo.phone : null;
+    const town = club.name;
+    const phone = club.phone && !String(club.phone).startsWith('[') ? club.phone : null;
     const lead = instructors[0] ?? null;
 
     return {
-      hero: () => `<div class="hero${dojo.hero_url ? '' : ' plain'}">
-  ${dojo.hero_url ? `<div class="photo" aria-hidden="true"><img src="${esc(dojo.hero_url)}" alt=""></div><div class="veil"></div>`
+      hero: () => `<div class="hero${club.hero_url ? '' : ' plain'}">
+  ${club.hero_url ? `<div class="photo" aria-hidden="true"><img src="${esc(club.hero_url)}" alt=""></div><div class="veil"></div>`
     : (logoUrl ? `<div class="crestwrap" aria-hidden="true"><img class="crest" src="${esc(logoUrl)}" alt=""></div>` : '')}
   <div class="wrap">
     <h1>${esc(h.capitalise(h.artOf(federation)))} in ${esc(town)}</h1>
@@ -531,11 +531,11 @@ export function makeShowcase(h) {
 </div>`,
 
       facts: () => `<div class="facts"><div class="wrap">
-  <div><b>WHERE</b><p>${esc(dojo.venue_name ?? dojo.address_line ?? 'Venue to confirm')}
-    <small>${esc([dojo.venue_name ? dojo.address_line : null, dojo.suburb, dojo.city, dojo.postcode].filter(Boolean).join(', ') || 'Address to confirm')}</small></p></div>
+  <div><b>WHERE</b><p>${esc(club.venue_name ?? club.address_line ?? 'Venue to confirm')}
+    <small>${esc([club.venue_name ? club.address_line : null, club.suburb, club.city, club.postcode].filter(Boolean).join(', ') || 'Address to confirm')}</small></p></div>
   <div><b>WHEN</b><p>${esc(daysLine)}<small>${
     groups.map((g) => `${esc(g.label)} ${h.time(g.starts)}`).slice(0, 2).join(' · ') || 'Times to confirm'}</small></p></div>
-  <div><b>WHO TO ASK</b><p>${esc(lead ? titledName(lead) || 'The dojo' : 'The dojo')}<small>${esc(dojo.email ?? (phone ? '' : 'Contact details to confirm'))}</small>
+  <div><b>WHO TO ASK</b><p>${esc(lead ? titledName(lead) || `The ${h.clubWord(vocabulary)}` : `The ${h.clubWord(vocabulary)}`)}<small>${esc(club.email ?? (phone ? '' : 'Contact details to confirm'))}</small>
     ${phone ? `<span class="callrow"><a class="callbtn" href="tel:${esc(phone.replace(/[^\d+]/g, ''))}">Call ${esc(phone)}</a></span>` : ''}</p></div>
 </div></div>`,
 
@@ -546,8 +546,8 @@ export function makeShowcase(h) {
     <tbody>${groups.map((g) => `<tr><td>${esc(g.label)}</td><td>${esc(g.days.join(' & '))}</td><td>${h.time(g.starts)} – ${h.time(g.ends)}</td></tr>`).join('')}</tbody></table>`
     : '<p>Training times to be confirmed.</p>'}`,
 
-      about: () => dojo.blurb ? `<h2 style="margin-top:44px">About this ${esc(h.clubWord(vocabulary))}</h2>
-    <p>${esc(dojo.blurb)}</p>${dojo.who_trains ? `<p>${esc(dojo.who_trains)}</p>` : ''}` : '',
+      about: () => club.blurb ? `<h2 style="margin-top:44px">About this ${esc(h.clubWord(vocabulary))}</h2>
+    <p>${esc(club.blurb)}</p>${club.who_trains ? `<p>${esc(club.who_trains)}</p>` : ''}` : '',
 
       instructors: () => {
         if (!instructors.length) return '';
@@ -575,24 +575,24 @@ export function makeShowcase(h) {
 
       events: () => events.length ? `<section style="background:var(--canvas-2)"><div class="wrap">
     <div class="sechead"><h2>What's on</h2><a href="${at('/events')}">All events</a></div>
-    <div class="ev">${events.slice(0, 3).map((e) => eventCard(e, { at, federation, logoUrl, vocabulary, dojoSlug: dojo.slug })).join('')}</div>
+    <div class="ev">${events.slice(0, 3).map((e) => eventCard(e, { at, federation, logoUrl, vocabulary, clubSlug: club.slug })).join('')}</div>
   </div></section>` : '',
 
-      gallery: () => gallery.length ? `<section><div class="wrap narrow"><h2>In the dojo</h2>
+      gallery: () => gallery.length ? `<section><div class="wrap narrow"><h2>In the ${esc(h.clubWord(vocabulary))}</h2>
     <ul class="gal">${gallery.slice(0, 6).map((g) => `<li class="t"><a class="glink" href="${esc(g.url)}"><img src="${esc(g.url)}" alt="${esc(g.alt ?? '')}" loading="lazy"></a></li>`).join('')}</ul>
-    <p style="margin-top:14px"><a href="${at(`/${esc(dojo.slug)}/gallery`)}">${(galleryTotal ?? gallery.length) > gallery.length
+    <p style="margin-top:14px"><a href="${at(`/${esc(club.slug)}/gallery`)}">${(galleryTotal ?? gallery.length) > gallery.length
       ? `See all ${galleryTotal} photos` : 'Photos by year and event'}</a></p>
   </div></section>` : '',
 
       findUs: () => `<section><div class="wrap narrow" id="visit"><h2>Finding us</h2>
-    <p style="line-height:1.7"><strong style="font-family:var(--display);font-size:19px">${esc(dojo.venue_name ?? '')}</strong><br>${
-      esc([dojo.address_line, dojo.suburb, dojo.city].filter(Boolean).join(', '))}${dojo.directions ? `<br>${esc(dojo.directions)}` : ''}</p>
+    <p style="line-height:1.7"><strong style="font-family:var(--display);font-size:19px">${esc(club.venue_name ?? '')}</strong><br>${
+      esc([club.address_line, club.suburb, club.city].filter(Boolean).join(', '))}${club.directions ? `<br>${esc(club.directions)}` : ''}</p>
   </div></section>`,
 
       enquire: () => `<section id="enquire"><div class="wrap narrow">
     <h2>${free ? 'Come along' : 'Get in touch'}</h2>
     <p>Send this and the ${esc(town)} ${esc(h.clubWord(vocabulary))} will get back to you with the next class you can walk into. You can also just turn up.</p>
-    <form class="box" method="post" action="/enquire/${esc(dojo.slug)}">
+    <form class="box" method="post" action="/enquire/${esc(club.slug)}">
       <input type="hidden" name="kind" value="${free ? 'trial' : 'contact'}">
       <div class="row"><div><label for="enq-name">Your name</label><input id="enq-name" name="name" maxlength="100" required autocomplete="name"></div>
       <div><label for="enq-email">Email</label><input id="enq-email" name="email" type="email" maxlength="120" required autocomplete="email"></div></div>
@@ -611,26 +611,26 @@ export function makeShowcase(h) {
     };
   }
 
-  // ---- find a dojo & events lists -----------------------------------------
+  // ---- find a club & events lists -----------------------------------------
 
-  function findBody({ dojos, federation, at, copy, vocabulary, lede }) {
+  function findBody({ clubs, federation, at, copy, vocabulary, lede }) {
     const clubsWordL = h.clubsWordOf(vocabulary);
     const tile = (d) => `<a href="${at(`/${esc(d.slug)}`)}"><strong>${esc(d.name)}</strong><span>${esc(d.published
       ? (d.first_class_free ? 'Book a free class' : (d.city ?? 'See times and address')) : 'Details coming')}</span></a>`;
-    const bySlug = new Map(dojos.map((d) => [d.slug, d]));
+    const bySlug = new Map(clubs.map((d) => [d.slug, d]));
     const used = new Set();
     const regions = list(copy.regions).map((r) => ({ name: asText(r?.name, 60),
-      dojos: list(r?.slugs).map((s) => bySlug.get(s)).filter(Boolean) })).filter((r) => r.name && r.dojos.length);
-    regions.forEach((r) => r.dojos.forEach((d) => used.add(d.slug)));
-    const rest = dojos.filter((d) => !used.has(d.slug));
-    const groups = regions.length ? [...regions, ...(rest.length ? [{ name: 'More', dojos: rest }] : [])] : [{ name: '', dojos }];
+      clubs: list(r?.slugs).map((s) => bySlug.get(s)).filter(Boolean) })).filter((r) => r.name && r.clubs.length);
+    regions.forEach((r) => r.clubs.forEach((d) => used.add(d.slug)));
+    const rest = clubs.filter((d) => !used.has(d.slug));
+    const groups = regions.length ? [...regions, ...(rest.length ? [{ name: 'More', clubs: rest }] : [])] : [{ name: '', clubs }];
     return `${crumb(at, [{ label: `Find a ${h.clubWord(vocabulary)}` }])}
 <section><div class="wrap">
   <h1 class="page">Find a ${esc(h.clubWord(vocabulary))}</h1>
-  <p class="lede" style="max-width:60ch">${dojos.length} ${esc(clubsWordL)}.${esc(lede)}</p>
+  <p class="lede" style="max-width:60ch">${clubs.length} ${esc(clubsWordL)}.${esc(lede)}</p>
 </div></section>
-<div class="dojo-band" style="padding-bottom:20px" id="dojolist"><section style="padding-top:44px">
-  <div class="wrap">${groups.map((g) => `<div class="region">${g.name ? `<h3>${esc(g.name)}</h3>` : ''}<div class="grid">${g.dojos.map(tile).join('')}</div></div>`).join('')}</div>
+<div class="club-band" style="padding-bottom:20px" id="clublist"><section style="padding-top:44px">
+  <div class="wrap">${groups.map((g) => `<div class="region">${g.name ? `<h3>${esc(g.name)}</h3>` : ''}<div class="grid">${g.clubs.map(tile).join('')}</div></div>`).join('')}</div>
 </section></div>`;
   }
 
@@ -645,5 +645,5 @@ export function makeShowcase(h) {
     : '<p>No events are on the calendar yet.</p>'}</div></section>`;
   }
 
-  return { header, footer, crumb, homeParts, dojoParts, findBody, eventsBody, federationBand };
+  return { header, footer, crumb, homeParts, clubParts, findBody, eventsBody, federationBand };
 }

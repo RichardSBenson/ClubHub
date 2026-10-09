@@ -70,7 +70,7 @@ console.log('\nA DOJO CAN OVERRIDE ITS PARENT');
   await define.execute({ actorId: DOUG, organisationId: wh.id,
     definition: { ...INSTRUCTOR, label:'Sensei',
       fields:[...INSTRUCTOR.fields,
-        { name:'dojoRole', label:'Role here', type:FieldType.TEXT, sortOrder:5 }] } });
+        { name:'clubRole', label:'Role here', type:FieldType.TEXT, sortOrder:5 }] } });
 
   const local = await types.byName(wh.id, 'instructor');
   ok('the nearest definition wins', local.label === 'Sensei');
@@ -86,14 +86,14 @@ console.log('\nENTRIES SAVE AND VALIDATE AGAINST THE REAL TYPE');
   const out = await save.execute({ actorId: DOUG, organisationId: wh.id,
     typeName:'instructor',
     values:{ title:'Jane Smith', grade:'3rd dan', since:'2011-03-01',
-             dojoRole:'Head instructor' } });
+             clubRole:'Head instructor' } });
   ok('an entry saves', !!out.entry.id);
   ok('with a slug from the name', out.entry.slug.value === 'jane-smith');
   ok('a revision is kept', !!out.revisionId);
 
   await throws('a field only the dojo defines is rejected nationally', () =>
     save.execute({ actorId: DOUG, organisationId: moknz.id,
-      typeName:'instructor', values:{ title:'X', dojoRole:'Y' } }),
+      typeName:'instructor', values:{ title:'X', clubRole:'Y' } }),
     'not a field');
 
   await throws('a bad date is caught', () =>

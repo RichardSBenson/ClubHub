@@ -1,16 +1,16 @@
 /**
  * DOMAIN — membership fees and renewal
  *
- * Every dojo sets its own prices. A price is a line in the dojo's own fee
+ * Every club sets its own prices. A price is a line in the club's own fee
  * schedule: what it is called, for whom, how often, how much. Nothing here
- * knows a price; it only chooses among the dojo's.
+ * knows a price; it only chooses among the club's.
  *
  * "Paid until" on a person's membership is the date their fees run to. A
  * renewal moves it on from whichever is LATER — today, or where it already
  * runs to — so paying early does not throw away the days already paid for, and
  * paying late does not backdate cover to a time they were not a member.
  *
- * A member can be EXEMPT: the dojo has decided they do not pay (an instructor
+ * A member can be EXEMPT: the club has decided they do not pay (an instructor
  * who gives their time, a life member, hardship). The reason is recorded. They
  * still renew — their membership is carried forward — they are simply never
  * asked for money.
@@ -89,7 +89,7 @@ export const STANDING_WORDS = Object.freeze({
   exempt: 'Not charged', overdue: 'Overdue', due: 'Due soon', current: 'Paid up', unpaid: 'Never paid', trial: 'Free trial',
 });
 
-/** Which of the dojo's prices applies to this person for this period. */
+/** Which of the club's prices applies to this person for this period. */
 export function feeFor(schedules, { ageYears, period, today, adultAge = ADULT_AGE }) {
   const wanted = ageYears != null && ageYears < adultAge ? 'junior' : 'adult';
   const live = schedules.filter((f) => f.period === period
@@ -132,7 +132,7 @@ export function problemsWithExemption({ exempt, reason }) {
 /**
  * What a fees reminder says. Two tones: fees about to run out, and fees that
  * have. {club} and {payLink} are filled in when it is sent, so the same text
- * serves every club. It never says how much: the amount is the dojo's own and
+ * serves every club. It never says how much: the amount is the club's own and
  * differs by person, and the pay link shows it.
  */
 export function reminderText(kind) {

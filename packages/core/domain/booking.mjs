@@ -1,7 +1,7 @@
 /**
  * DOMAIN — booking a place in a class
  *
- * A class on the timetable repeats every week. A dojo can give a class a number of places; people then book a place on a
+ * A class on the timetable repeats every week. A club can give a class a number of places; people then book a place on a
  * particular date. When the class is full they join a waiting list, and when somebody cancels the person who has waited
  * longest gets the place. A class with no number is not booked at all: people just turn up.
  *

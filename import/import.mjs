@@ -9,7 +9,7 @@
  *  - A dojo publishes only when publish=yes AND the facts a visitor needs are present.
  *  - Re-runnable. Importing twice does not duplicate anything.
  *
- * Usage:  node import.mjs dojos.csv [sessions.csv] [instructors.csv]
+ * Usage:  node import.mjs clubs.csv [sessions.csv] [instructors.csv]
  */
 
 import fs from 'node:fs';
@@ -17,9 +17,9 @@ import { pool } from '../packages/api/data.mjs';
 import { applyRegister } from '../packages/api/register-import.mjs';
 import { parseCsv } from '../packages/core/domain/register-csv.mjs';
 
-const [dojoFile, sessionFile, instructorFile] = process.argv.slice(2);
-if (!dojoFile) {
-  console.error('usage: node import.mjs <dojos.csv> [sessions.csv] [instructors.csv]');
+const [clubFile, sessionFile, instructorFile] = process.argv.slice(2);
+if (!clubFile) {
+  console.error('usage: node import.mjs <clubs.csv> [sessions.csv] [instructors.csv]');
   process.exit(1);
 }
 const read = (f) => (f ? parseCsv(fs.readFileSync(f, 'utf8')) : []);
@@ -28,7 +28,7 @@ const client = await pool.connect();
 let report;
 try {
   await client.query('begin');
-  report = await applyRegister(client, { dojos: read(dojoFile), sessions: read(sessionFile), instructors: read(instructorFile) });
+  report = await applyRegister(client, { clubs: read(clubFile), sessions: read(sessionFile), instructors: read(instructorFile) });
   await client.query('commit');
 } catch (e) {
   await client.query('rollback');

@@ -15,7 +15,7 @@ import { slugFrom } from './founding.mjs';
  * to take the events page.
  */
 export const RESERVED_SLUGS = Object.freeze([
-  'events', 'news', 'instructors', 'find-a-dojo', 'about', 'contact', 'vendor',
+  'events', 'news', 'instructors', 'find-a-club', 'about', 'contact', 'vendor',
   'theme', 'admin', 'api', 'o', 'p', 'a', 'signin', 'signout', 'search',
   'dashboard', 'me', 'unsubscribe', 'bootstrap', 'try', 'enter', 'enquire', 'cron', 'v', 'checkin', 'trial', 'r', 'sitemap', 'robots', 'assets', 'static',
 ]);

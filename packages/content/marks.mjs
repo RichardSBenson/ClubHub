@@ -4,7 +4,7 @@
  * A block document stores rich text as runs with marks:
  *
  *   [{ text: 'Hanshi Doug', marks: ['strong'] },
- *    { text: ' opened the first dojo in ' },
+ *    { text: ' opened the first club in ' },
  *    { text: 'Whanganui', marks: ['link'], href: '/whanganui' }]
  *
  * That is the right thing to store — it can be rendered to HTML, to a PDF

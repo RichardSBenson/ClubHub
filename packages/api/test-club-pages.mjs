@@ -2,8 +2,8 @@
  * A club's page on the federation's website.
  *
  * Richard: "the theme we have already is specifically designed for MOKNZ, its
- * main organisation and the dojos that belong to it — we should have a
- * mechanism to enable a dojo page based on the design of the main page."
+ * main organisation and the clubs that belong to it — we should have a
+ * mechanism to enable a club page based on the design of the main page."
  *
  * Three things are being proved, in the order they matter:
  *
@@ -102,7 +102,7 @@ const PNG = Buffer.from(
 
 const club = await one(`select * from organisation where slug='wellington'`);
 const federation = await one(`select * from organisation where parent_id is null`);
-const profile = () => one(`select * from dojo_profile where organisation_id=$1`, [club.id]);
+const profile = () => one(`select * from club_profile where organisation_id=$1`, [club.id]);
 
 // The picture select is part of the form, so it is posted every time. Posting
 // without it means "no picture", which is what a save used to do here.
@@ -263,11 +263,11 @@ console.log('\nASKING, AND NOT BEING ABLE TO ANSWER YOURSELF');
     `${self.status} ${self.location}`);
 
   const theirs = await one(`select * from organisation where slug='whanganui'`);
-  const before = await one(`select published from dojo_profile where organisation_id=$1`, [theirs.id]);
+  const before = await one(`select published from club_profile where organisation_id=$1`, [theirs.id]);
   await req(`/o/wellington/club-pages/${theirs.id}/decide`,
     { method: 'POST', form: { answer: 'approve' } });
   await req(`/o/whanganui/club-page/takedown`, { method: 'POST', form: {} });
-  const after = await one(`select published from dojo_profile where organisation_id=$1`, [theirs.id]);
+  const after = await one(`select published from club_profile where organisation_id=$1`, [theirs.id]);
   ok('nor anybody else\'s, and it cannot take another club down',
     after.published === before.published, `${before.published} → ${after.published}`);
 
@@ -332,7 +332,7 @@ console.log('\nWHAT THE PUBLIC SEES');
   const foot = (h) => h.match(/<footer class="site">[\s\S]*?<\/footer>/)?.[0];
   ok('and the same footer', !!foot(page) && foot(page) === foot(home));
 
-  const find = site('find-a-dojo/index.html');
+  const find = site('find-a-club/index.html');
   ok('it is listed in Find a dojo', /Wellington/.test(find));
   ok('and a club that never asked has no page',
     site('christchurch/index.html') === null);
@@ -371,7 +371,7 @@ console.log('\nTAKING IT DOWN');
     down.status === 302 && (await profile()).published === false);
   await build();
   ok('and it is gone from the website', site('wellington/index.html') === null);
-  ok('and from the list', !/Wellington/.test(site('find-a-dojo/index.html') ?? ''));
+  ok('and from the list', !/Wellington/.test(site('find-a-club/index.html') ?? ''));
   ok('without losing what it wrote', (await profile()).venue_name !== null);
 }
 

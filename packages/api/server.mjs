@@ -313,9 +313,9 @@ get('/dashboard', async (ctx) => {
 
   // Every other screen looks at one federation, so one vocabulary does. This
   // one does not: an account can span federations in different arts, and a
-  // karate dojo and a jiu-jitsu academy can appear on the same screen. Taking
+  // karate club and a jiu-jitsu academy can appear on the same screen. Taking
   // the home federation's words and applying them to everybody calls the
-  // academies dojos, which is exactly the thing configuration-over-code is
+  // academies clubs, which is exactly the thing configuration-over-code is
   // supposed to make impossible.
   const clubs = rows.filter((o) => o.type === 'club');
   const parents = rows.filter((o) => o.type !== 'club');
@@ -388,7 +388,7 @@ get('/o/:slug/roster', async (ctx) => {
     if (!have) byId.set(r.id, { ...r, isInstructor: r.role === 'instructor' });
     else {
       if (r.role === 'instructor') have.isInstructor = true;
-      if (r.role === 'member' && have.role !== 'member') Object.assign(have, { role: r.role, paid_until: r.paid_until, status: r.status, dojo: r.dojo, dojo_slug: r.dojo_slug });
+      if (r.role === 'member' && have.role !== 'member') Object.assign(have, { role: r.role, paid_until: r.paid_until, status: r.status, club: r.club, club_slug: r.club_slug });
     }
   }
   const canManage = await mayPublishAt(ctx, org.id).catch(() => false);
@@ -1673,13 +1673,13 @@ get('/o/:slug/pages/:pageId/preview', async (ctx) => {
   const { site } = await repositories();
 
   // The federation whose site this page belongs to, and its own words for
-  // things — a taekwondo club's preview must not say "dojo".
+  // things — a taekwondo club's preview must not say "club".
   const root = await lookups.rootOf(org.id);
   const federation = root ?? org;
 
-  const [brand, dojos, evs] = await Promise.all([
+  const [brand, clubRows, evs] = await Promise.all([
     site.brand(federation.id),
-    site.dojos(federation.slug),
+    site.clubs(federation.slug),
     site.eventsFor(federation.slug),
   ]);
 
@@ -1695,7 +1695,7 @@ get('/o/:slug/pages/:pageId/preview', async (ctx) => {
   const previewAssets = Object.fromEntries(
     (await assets.list(ctx.me.accountId, org.id)).map((a) => [a.id, `/a/${a.id}`]));
 
-  const html = renderBlocks(pg.body, { dojos, events: evs, assets: previewAssets, enquiryAction: `/enquire/${org.slug}` },
+  const html = renderBlocks(pg.body, { clubs: clubRows, events: evs, assets: previewAssets, enquiryAction: `/enquire/${org.slug}` },
     { origin });
 
   const body = R.authoredPage({
@@ -2076,7 +2076,7 @@ post('/o/:slug/payments/:paymentId/received', async (ctx) => {
   }
 });
 
-// ---- renewals: the dojo's own prices, who is due, who is not charged -----------
+// ---- renewals: the club's own prices, who is due, who is not charged -----------
 
 async function renewalsScreen(ctx, org, extra = {}) {
   const actor = ctx.me.accountId;
@@ -2356,9 +2356,9 @@ get('/o/:slug/forms/:formId/status.csv', async (ctx) => {
   const r = await forms.report(ctx.me.accountId, org.id, ctx.params.formId);
   const W = { current: 'Signed', missing: 'Not signed', expired: 'Run out' };
   return ctx.download(fileName(org.slug, `form-${r.form.title}`, new Date().toISOString().slice(0, 10)), 'text/csv',
-    toCsv([{ key: 'number', label: 'Number' }, { key: 'first', label: 'First name' }, { key: 'last', label: 'Last name' }, { key: 'dojo', label: words().club },
+    toCsv([{ key: 'number', label: 'Number' }, { key: 'first', label: 'First name' }, { key: 'last', label: 'Last name' }, { key: 'club', label: words().club },
       { key: 'standing', label: 'Status' }, { key: 'signed', label: 'Signed by' }, { key: 'until', label: 'Until' }],
-      r.rows.map((p) => ({ number: p.display_number, first: p.first_name, last: p.last_name, dojo: p.dojo, standing: W[p.standing],
+      r.rows.map((p) => ({ number: p.display_number, first: p.first_name, last: p.last_name, club: p.club, standing: W[p.standing],
         signed: p.response?.signed_name ?? '', until: p.response?.expires_on ?? '' }))));
 });
 get('/o/:slug/forms/:formId/people/:personId', async (ctx) => {
@@ -2730,13 +2730,13 @@ get('/o/:slug/clubs', async (ctx) => {
   return clubsScreen(ctx, org);
 });
 
-// Loading the dojo register's CSV files: dojos, class times and instructors. Preview first; nothing is saved until confirmed.
+// Loading the club register's CSV files: clubs, class times and instructors. Preview first; nothing is saved until confirmed.
 async function registerImportScreen(ctx, org, extra = {}) {
   return ctx.send(extra.status ?? 200, V.registerImportScreen({ me: ctx.me, org, csrf: ctx.csrf, ...extra }));
 }
 
 // The three files that ship with this version (import/*.csv), for filling the boxes without pasting.
-const BUNDLED_REGISTER = ['dojos', 'sessions', 'instructors'];
+const BUNDLED_REGISTER = ['clubs', 'sessions', 'instructors'];
 function bundledRegisterFiles() {
   const files = {};
   for (const name of BUNDLED_REGISTER) {
@@ -2756,7 +2756,7 @@ post('/o/:slug/register-import', async (ctx) => {
   const org = await organisationFor(ctx);
   if (org.type === 'club') throw new Forbidden('Only a federation or region can import clubs.');
   const form = await ctx.form();
-  const files = { dojos: form.dojos ?? '', sessions: form.sessions ?? '', instructors: form.instructors ?? '' };
+  const files = { clubs: form.clubs ?? form.clubs ?? '', sessions: form.sessions ?? '', instructors: form.instructors ?? '' };
   try {
     const confirm = form.confirm === 'yes';
     const report = await registerImport.run(ctx.me.accountId, org.id, files, { confirm });
@@ -3058,14 +3058,14 @@ get('/o/:slug/club-page/preview', async (ctx) => {
     ? `https://${process.env.VERCEL_PROJECT_PRODUCTION_URL}`
     : `${ctx.secure ? 'https' : 'http'}://${ctx.req.headers.host}`;
 
-  const dojo = {
+  const clubInfo = {
     ...club, ...profile, sessions: sessions.map((t) => ({ ...t,
       starts: t.starts, ends: t.ends })),
     venue_name: profile.venue_name ?? null,
     hero_url: profile.hero_asset_id ? `/a/${profile.hero_asset_id}` : null,
   };
-  const html = R.dojoPage({
-    dojo, federation, events: await site.eventsFor(club.slug), origin,
+  const html = R.clubPage({
+    club: clubInfo, federation, events: await site.eventsFor(club.slug), origin,
     fonts: brand?.fonts ?? { display: 'Bitter', body: 'Source Sans 3' },
     nav: [], base: '', vocabulary,
     gallery: (await gallery.list(ctx.me.accountId, club.id)).map((g) => ({ url: `/a/${g.asset_id}`, alt: g.alt_text, caption: g.caption })),
@@ -3406,7 +3406,7 @@ async function articlePost(ctx, { org, article = null }) {
 
 // ---- media ------------------------------------------------------------------
 
-/** A dojo's photo gallery. Pictures come from its own library, or are added here. */
+/** A club's photo gallery. Pictures come from its own library, or are added here. */
 async function galleryScreen(ctx, org, extra = {}) {
   if (org.type !== 'club') return ctx.redirect(`/o/${org.slug}/club-pages`);
   const q = ctx.url.searchParams;
@@ -3737,7 +3737,7 @@ post('/o/:slug/events/:eventSlug/setup/price', async (ctx) => {
 /**
  * The event may belong to somebody else.
  *
- * A dojo enters its people in the federation's tournament, and it has no role
+ * A club enters its people in the federation's tournament, and it has no role
  * at the federation. So the organisation in the path is the CLUB doing the
  * entering — checked for the registrar role there — and the event is found by
  * looking up the tree from it. Requiring a grant at the host would mean only
@@ -3906,7 +3906,7 @@ get('/o/:slug/events/:eventSlug/entries', async (ctx) => {
   }));
 });
 
-// Every entry as a spreadsheet: who, how heavy, how old on the day, what grade, which dojo.
+// Every entry as a spreadsheet: who, how heavy, how old on the day, what grade, which club.
 // The same people who may see the list may download it (entriesFor checks the role).
 get('/o/:slug/events/:eventSlug/entries.csv', async (ctx) => {
   const { host, event } = await entryContextFor(ctx);
@@ -4702,7 +4702,7 @@ async function handle(req, res) {
     }
 
     // A moved page is a redirect, not a 404. Held in the register, so renaming
-    // a dojo slug does not break every link that points at it.
+    // a club slug does not break every link that points at it.
     const moved = await lookups.redirectFor(url.pathname);
     if (moved) {
       res.writeHead(moved.permanent ? 301 : 302, { location: moved.to_path });

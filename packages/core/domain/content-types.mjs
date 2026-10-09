@@ -12,7 +12,7 @@
  *
  * So a registrar can add a "Kata" type with the fields they want, and the pages
  * that display kata are generated from it. What nobody can do is drag a
- * carousel into the middle of a dojo page, because a canvas is how volunteer
+ * carousel into the middle of a club page, because a canvas is how volunteer
  * organisations end up with broken sites.
  *
  * Imports only ./values.mjs and ./publishing.mjs.

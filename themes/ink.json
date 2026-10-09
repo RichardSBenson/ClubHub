@@ -19,12 +19,12 @@
   "homePage": {
     "sections": [
       "hero",
-      "dojoGrid",
+      "clubGrid",
       "events",
       "news"
     ]
   },
-  "dojoPage": {
+  "clubPage": {
     "sections": [
       "hero",
       "facts",

@@ -38,7 +38,7 @@ const account = async (org, role) => {
 const admin = await account(whanganui, 'administrator');
 const registrar = await account(whanganui, 'registrar');
 const wellReg = await account(wellington, 'registrar');
-await pool.query(`insert into dojo_profile (organisation_id, email) values ($1,'club@whanganui.test') on conflict (organisation_id) do update set email='club@whanganui.test'`, [whanganui.id]);
+await pool.query(`insert into club_profile (organisation_id, email) values ($1,'club@whanganui.test') on conflict (organisation_id) do update set email='club@whanganui.test'`, [whanganui.id]);
 
 console.log('\nENQUIRIES');
 const mail = new MemoryMessenger();
@@ -49,7 +49,7 @@ ok('goes to the club contact address', mail.sent[0].to === 'club@whanganui.test'
 ok('replies go to the visitor', mail.sent[0].sender?.replyTo === 'kiri@example.nz');
 ok('visitor text only in the body, not the headers', !/Kiri/.test(mail.sent[0].sender?.address ?? ''));
 
-await pool.query(`delete from dojo_profile where organisation_id=$1`, [whanganui.id]);
+await pool.query(`delete from club_profile where organisation_id=$1`, [whanganui.id]);
 const m2 = new MemoryMessenger();
 await enquiries.submit({ slug: 'whanganui', input: { ...good, name: 'Hemi', email: 'hemi@example.nz' }, ipHash: 'ip-b', messenger: m2, baseFrom: 'noreply@honbu.test' });
 ok('falls back to owners and administrators when no contact address', m2.sent.length >= 1 && m2.sent.every((m) => m.to !== 'club@whanganui.test'));

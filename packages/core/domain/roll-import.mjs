@@ -1,7 +1,7 @@
 /**
  * DOMAIN — reading a club's existing roll
  *
- * A dojo that joins does not start empty. It arrives with a spreadsheet, and
+ * A club that joins does not start empty. It arrives with a spreadsheet, and
  * until that spreadsheet is in the register the platform is useless to them —
  * nobody retypes eighty members to try something out.
  *

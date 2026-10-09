@@ -276,7 +276,7 @@ export const assets = {
 // news
 //
 // Articles are pages with a date, a hero image and somewhere to go. The one
-// thing that makes them different is that a dojo's article can ask to appear
+// thing that makes them different is that a club's article can ask to appear
 // on the federation's site, and the federation decides — see db/017. A
 // federation's name on a page reads as an endorsement whether it was meant as
 // one or not.
@@ -418,7 +418,7 @@ export const news = {
     await assertRole(actor, decidedBy, MANAGE);
 
     // The decision belongs to an organisation this article sits beneath, and
-    // not to the article's own, or a dojo would approve itself.
+    // not to the article's own, or a club would approve itself.
     const beneath = await one(`
       select 1 from organisation mine, organisation theirs
       where mine.id = $1 and theirs.id = $2
@@ -500,12 +500,12 @@ export const scheduledPublishing = {
 };
 
 // ---------------------------------------------------------------------------
-// A dojo's photo gallery
+// A club's photo gallery
 // ---------------------------------------------------------------------------
 
 export const MAX_GALLERY = 300;
 
-/** The year a picture belongs to when nobody said: this one, in the dojo's own calendar. */
+/** The year a picture belongs to when nobody said: this one, in the club's own calendar. */
 const thisYear = () => new Date().getFullYear();
 
 /** A year somebody typed, checked; blank means "work it out". */
@@ -517,7 +517,7 @@ function readYear(v) {
 }
 
 export const gallery = {
-  /** Newest year first, then by event, then in the order the dojo set. */
+  /** Newest year first, then by event, then in the order the club set. */
   async list(actor, orgId, { year = null, eventId = null } = {}) {
     await assertRole(actor, orgId, TEACH);
     return q(`select g.id, g.asset_id, g.caption, g.position, g.year, g.event_id, g.created_at,
@@ -532,7 +532,7 @@ export const gallery = {
       [orgId, year, eventId]);
   },
 
-  /** The events a picture can be filed under: this dojo's own, newest first. */
+  /** The events a picture can be filed under: this club's own, newest first. */
   async events(actor, orgId) {
     await assertRole(actor, orgId, TEACH);
     return q(`select id, title, starts_at from event where organisation_id = $1 and status <> 'cancelled'
@@ -546,7 +546,7 @@ export const gallery = {
       group by year order by year desc`, [orgId]);
   },
 
-  /** Checks an event belongs to this dojo and returns it (or null for "no event"). */
+  /** Checks an event belongs to this club and returns it (or null for "no event"). */
   async _event(orgId, eventId) {
     if (!eventId) return null;
     const e = await one('select id, starts_at from event where id = $1 and organisation_id = $2', [eventId, orgId]);

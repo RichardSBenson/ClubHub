@@ -19,10 +19,10 @@ const FONTS = { display: 'Shippori Mincho', body: 'Zen Kaku Gothic New' };
 const fed = (more = {}) => ({ id: 'f', name: 'Mas Oyama Karate New Zealand', country_code: 'NZ', discipline: 'Karate',
   artName: 'Kyokushin karate', layoutName: 'showcase', logoUrl: '/media/crest.png',
   stripe: ['#F4F4F5', '#D9761F', 'nonsense', '#1C1C1E'], wordmark: { main: 'Mas Oyama Karate', sub: 'NEW ZEALAND' },
-  footerLinks: [{ href: '/find-a-dojo', label: 'Dojo' }], ...more });
+  footerLinks: [{ href: '/find-a-club', label: 'Dojo' }], ...more });
 
-const dojo = (slug, name, more = {}) => ({ slug, name, published: true, first_class_free: null, sessions: [], city: name, ...more });
-const DOJOS = [dojo('whanganui', 'Whanganui', { first_class_free: true }), dojo('hawera', 'Hawera'), dojo('nagoya', 'Nagoya')];
+const club = (slug, name, more = {}) => ({ slug, name, published: true, first_class_free: null, sessions: [], city: name, ...more });
+const CLUBS = [club('whanganui', 'Whanganui', { first_class_free: true }), club('hawera', 'Hawera'), club('nagoya', 'Nagoya')];
 const page = { origin: 'https://example.org', fonts: FONTS, nav: [{ href: '/events', label: 'Events' }], base: '', vocabulary: { club: 'Dojo', clubPlural: 'Dojo' } };
 
 console.log('\nA THEME CHOOSES A LAYOUT BY NAME, AND NOTHING ELSE');
@@ -41,7 +41,7 @@ console.log('\nA THEME CHOOSES A LAYOUT BY NAME, AND NOTHING ELSE');
   const html = readTheme({ ...BUILT_IN.showcase, layout: '<script>alert(1)</script>' });
   ok('a layout name cannot carry markup', !html.ok);
   ok('the look carries the layout to the build', lookOf(r2.theme).layout === 'showcase');
-  const out = exportTheme({ ...r2.theme, homeSections: r2.theme.homePage.sections, dojoSections: r2.theme.dojoPage.sections });
+  const out = exportTheme({ ...r2.theme, homeSections: r2.theme.homePage.sections, clubSections: r2.theme.clubPage.sections });
   ok('a download keeps the layout', out.layout === 'showcase');
   ok('a downloaded theme reads back the same', JSON.stringify(readTheme(out).theme) === JSON.stringify(r2.theme));
 }
@@ -85,8 +85,8 @@ console.log('\nTHE HOME PAGE');
     spotlight: { heading: 'Spotlight', paragraphs: ['s'], button: { label: 'Go', href: 'javascript:alert(1)' } },
     memberBand: { heading: 'Already training?', button: { label: 'Login', href: '/signin' } },
   };
-  const html = R.homePage({ ...page, federation: fed({ knownPaths: new Set(['/', '/about', '/signin']) }), dojos: DOJOS, events: [], articles: [],
-    homeCopy: copy, sections: ['hero', 'proof', 'firstNight', 'quotes', 'dojoGrid', 'lineage', 'spotlight', 'memberBand'] });
+  const html = R.homePage({ ...page, federation: fed({ knownPaths: new Set(['/', '/about', '/signin']) }), clubs: CLUBS, events: [], articles: [],
+    homeCopy: copy, sections: ['hero', 'proof', 'firstNight', 'quotes', 'clubGrid', 'lineage', 'spotlight', 'memberBand'] });
 
   ok('the masthead carries the crest and the wordmark', html.includes('class="masthead"') && html.includes('Mas Oyama Karate') && html.includes('NEW ZEALAND'));
   ok('the belt stripe draws the valid colours and ignores the invalid one', (html.match(/<i style="background:#/g) ?? []).length === 6 && !html.includes('nonsense'));
@@ -103,41 +103,41 @@ console.log('\nTHE HOME PAGE');
   ok('the dojo are grouped by the federation\'s regions', html.includes('North Island') && html.includes('>Japan<'));
   ok('a dojo with no stated free class says "See times", not a promise', html.includes('<strong>Hawera</strong><span>See times</span>') && html.includes('<strong>Whanganui</strong><span>Book a free class</span>'));
 
-  const allFree = R.homePage({ ...page, federation: fed(), dojos: DOJOS.map((d) => ({ ...d, first_class_free: true })), events: [], articles: [],
+  const allFree = R.homePage({ ...page, federation: fed(), clubs: CLUBS.map((d) => ({ ...d, first_class_free: true })), events: [], articles: [],
     homeCopy: copy, sections: ['proof'] });
   ok('when every dojo says so, the claim appears', allFree.includes('First class, everywhere'));
 
-  const none = R.homePage({ ...page, federation: fed(), dojos: DOJOS, events: [], articles: [], homeCopy: {}, sections: ['hero', 'proof', 'firstNight', 'pathway', 'lineage', 'spotlight', 'memberBand'] });
+  const none = R.homePage({ ...page, federation: fed(), clubs: CLUBS, events: [], articles: [], homeCopy: {}, sections: ['hero', 'proof', 'firstNight', 'pathway', 'lineage', 'spotlight', 'memberBand'] });
   ok('a federation that has written nothing gets a hero and no invented sections',
     none.includes('class="hero tall') && !none.includes('class="proof"') && !none.includes('class="path"') && !none.includes('class="national"'));
 
-  const classic = R.homePage({ ...page, federation: fed({ layoutName: 'classic' }), dojos: DOJOS, events: [], articles: [], homeCopy: copy, sections: ['hero', 'proof', 'dojoGrid'] });
+  const classic = R.homePage({ ...page, federation: fed({ layoutName: 'classic' }), clubs: CLUBS, events: [], articles: [], homeCopy: copy, sections: ['hero', 'proof', 'clubGrid'] });
   ok('classic still draws the classic header and skips what it does not know', classic.includes('<header class="site">') && !classic.includes('class="proof"'));
 }
 
 console.log('\nA DOJO\'S PAGE');
 {
-  const d = { ...dojo('whanganui', 'Whanganui', { first_class_free: true, venue_name: 'Hall', address_line: '1 Road', phone: '+64 6 000 0000', email: 'a@b.nz' }),
+  const d = { ...club('whanganui', 'Whanganui', { first_class_free: true, venue_name: 'Hall', address_line: '1 Road', phone: '+64 6 000 0000', email: 'a@b.nz' }),
     sessions: [{ label: 'Juniors', weekday: 2, starts: '17:30', ends: '18:30' }] };
-  const html = R.dojoPage({ ...page, dojo: d, federation: fed({ dojoCopy: { firstNight: { heading: 'Your first night', items: [{ title: 'Turn up early', text: 'Say hello.' }] },
+  const html = R.clubPage({ ...page, club: d, federation: fed({ clubCopy: { firstNight: { heading: 'Your first night', items: [{ title: 'Turn up early', text: 'Say hello.' }] },
     federationBand: { heading: 'Part of us', text: '{clubs} dojo.', button: { label: 'Events', href: '/events' } } }, clubCount: 17, knownPaths: new Set(['/events']) }),
     events: [], gallery: [], instructors: [], startAnyWeekText: 'Start any week.',
     sections: ['hero', 'facts', 'startAnyWeek', 'times', 'about', 'instructors', 'firstNight', 'events', 'gallery', 'findUs', 'enquire', 'federationBand'] });
-  ok('it has a breadcrumb back to find a dojo', html.includes('class="crumb"') && html.includes('href="/find-a-dojo"'));
+  ok('it has a breadcrumb back to find a dojo', html.includes('class="crumb"') && html.includes('href="/find-a-club"'));
   ok('the facts name where, when and who to ask, with a call button', html.includes('WHERE') && html.includes('WHEN') && html.includes('WHO TO ASK') && html.includes('href="tel:+6460000000"'));
   ok('the enquiry form posts to this dojo, and has the hidden box robots fill in',
     html.includes('action="/enquire/whanganui"') && html.includes('name="website"') && html.includes('name="kind" value="trial"'));
   ok('the federation band uses the live count', html.includes('17 dojo.'));
   ok('with nobody published there is no "who teaches here" placeholder', !html.includes('Who teaches here'));
   ok('the page title uses the federation\'s name for the art', html.includes('<title>Kyokushin karate in Whanganui'));
-  const evil = R.dojoPage({ ...page, dojo: { ...d, name: '<script>alert(1)</script>' }, federation: fed(), events: [], gallery: [], instructors: [] });
+  const evil = R.clubPage({ ...page, club: { ...d, name: '<script>alert(1)</script>' }, federation: fed(), events: [], gallery: [], instructors: [] });
   ok('a hostile dojo name cannot become markup', !evil.includes('<script>alert(1)') && evil.includes('&lt;script&gt;'));
 }
 
 console.log('\nTHE OTHER PAGES WEAR THE SAME CHROME');
 {
   const f = fed();
-  const find = R.findADojoPage({ ...page, dojos: DOJOS, federation: { ...f, homeCopy: { regions: [{ name: 'North Island', slugs: ['whanganui'] }] } } });
+  const find = R.findAClubPage({ ...page, clubs: CLUBS, federation: { ...f, homeCopy: { regions: [{ name: 'North Island', slugs: ['whanganui'] }] } } });
   ok('find a dojo is grouped by region and has the masthead', find.includes('North Island') && find.includes('class="masthead"'));
   const ev = R.eventsPage({ ...page, events: [], federation: { ...f, eventsIntro: 'Nationals and camps.' } });
   ok('events carries the federation\'s introduction', ev.includes('Nationals and camps.'));
@@ -157,7 +157,7 @@ console.log('\nTHE DATE IS THE DATE WHERE THE EVENT IS HELD');
   ok('and so does the classic page', /14 November/.test(classic) && !/13 November/.test(classic));
   const noZone = R.eventsPage({ ...page, events: [{ ...ev, host_timezone: undefined }], federation: fed() });
   ok('an event with no zone recorded still reads in New Zealand time', /Saturday, 14 November/.test(noZone));
-  const home = R.homePage({ ...page, federation: fed(), dojos: DOJOS, events: [ev], articles: [{ slug: 'a', title: 'A', published_at: '2026-10-07T23:30:00Z' }], vocabulary: page.vocabulary });
+  const home = R.homePage({ ...page, federation: fed(), clubs: CLUBS, events: [ev], articles: [{ slug: 'a', title: 'A', published_at: '2026-10-07T23:30:00Z' }], vocabulary: page.vocabulary });
   ok('the home page lists it on the 14th', />14<\/b>/.test(home) || /14 Nov/.test(home) || /Saturday, 14 November/.test(home));
   ok('and a news item from 11:30am on the 8th is the 8th', />8<\/b>/.test(home) || !/news/i.test(home));
 }

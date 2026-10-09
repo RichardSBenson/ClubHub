@@ -120,9 +120,9 @@ console.log('\nNOBODY ELSE\'S FEDERATION IS ANYWHERE IN IT');
 
 console.log('\nONCE A FEDERATION EXISTS, IT IS THE ONLY ONE PUBLISHED');
 {
-  // Muay Thai, deliberately. An aikido federation calling its places dojos is
-  // correct — aikido trains in a dojo — so it proved nothing. A Muay Thai
-  // federation calling them dojos would mean the install had borrowed
+  // Muay Thai, deliberately. An aikido federation calling its places clubs is
+  // correct — aikido trains in a club — so it proved nothing. A Muay Thai
+  // federation calling them clubs would mean the install had borrowed
   // karate's word from somewhere.
   sh('node tools/found.mjs --name "Taranaki Muay Thai" --art "Muay Thai"'
     + ' --country NZ --email secretary@example.org', asFresh);

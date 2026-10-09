@@ -84,7 +84,7 @@ for (const k of [kid1, kid2])
   await pool.query(`insert into guardian_link (guardian_id, child_id) values ($1,$2)`, [guardian.id, k.id]);
 const stranger = await person('Wellie', 'wellie@msg.test', { org: wellington });
 await pool.query(`insert into email_preference (person_id, token, opted_out) values ($1,'opted-out-token',true)`, [optedOut.id]);
-await pool.query(`insert into dojo_profile (organisation_id, email) values ($1,'club@whanganui.test')
+await pool.query(`insert into club_profile (organisation_id, email) values ($1,'club@whanganui.test')
   on conflict (organisation_id) do update set email='club@whanganui.test'`, [whanganui.id]);
 
 const BASE = 'noreply@mail.moknz.test';
@@ -162,11 +162,11 @@ console.log('\nWHAT CANNOT BE SENT');
   let err;
   try { await messages.prepare(doug.id, whanganui.id, input(), { baseFrom: null }); } catch (e) { err = e; }
   ok('with no sending domain it says so', err instanceof Invalid && /sending address/.test(err.message));
-  await pool.query(`update dojo_profile set email=null where organisation_id=$1`, [whanganui.id]);
+  await pool.query(`update club_profile set email=null where organisation_id=$1`, [whanganui.id]);
   const fb = await messages.prepare(doug.id, whanganui.id, input({ audience: 'instructors', subject: 'No contact' }), { baseFrom: BASE });
   const fbRow = await one('select reply_to from message where id=$1', [fb.message.id]);
   ok('with no club contact, replies go to the administrator sending it', fbRow.reply_to === 'doug@example.nz', fbRow.reply_to);
-  await pool.query(`update dojo_profile set email='club@whanganui.test' where organisation_id=$1`, [whanganui.id]);
+  await pool.query(`update club_profile set email='club@whanganui.test' where organisation_id=$1`, [whanganui.id]);
 }
 
 console.log('\nOTHER AUDIENCES');

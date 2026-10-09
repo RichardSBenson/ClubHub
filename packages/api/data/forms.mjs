@@ -141,7 +141,7 @@ export const forms = {
   async report(actor, orgId, formId) {
     const f = await this.get(actor, orgId, formId);
     const day = await todayFor(orgId);
-    const people = await q(`select distinct on (p.id) p.id as person_id, p.display_number, p.first_name, p.last_name, p.date_of_birth::text as dob, o.name as dojo
+    const people = await q(`select distinct on (p.id) p.id as person_id, p.display_number, p.first_name, p.last_name, p.date_of_birth::text as dob, o.name as club
       from organisation fo join organisation o on o.path <@ fo.path
       join affiliation a on a.organisation_id = o.id and a.role = 'member' and a.ends is null and a.status in ('active','trial')
       join person p on p.id = a.person_id where fo.id = $1 order by p.id`, [orgId]);
@@ -155,7 +155,7 @@ export const forms = {
     return { form: f, rows, counts: { current: count('current'), missing: count('missing'), expired: count('expired'), total: rows.length } };
   },
 
-  /** One person's answers to one form. Medical answers go only to those who run the dojo or teach there. */
+  /** One person's answers to one form. Medical answers go only to those who run the club or teach there. */
   async answers(actor, orgId, formId, personId) {
     const f = await this.get(actor, orgId, formId);
     const r = await one(`select * from form_response where form_id = $1 and person_id = $2 order by answered_at desc limit 1`, [formId, personId]);

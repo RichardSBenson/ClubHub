@@ -8,6 +8,12 @@
       "includeFiles": "import/*.csv"
     }
   },
+  "redirects": [
+    { "source": "/find-a-dojo", "destination": "/find-a-club", "permanent": true },
+    { "source": "/find-a-dojo/", "destination": "/find-a-club", "permanent": true },
+    { "source": "/demo/:name/find-a-dojo", "destination": "/demo/:name/find-a-club", "permanent": true },
+    { "source": "/:fed/find-a-dojo", "destination": "/:fed/find-a-club", "permanent": true }
+  ],
   "rewrites": [
     {
       "source": "/platform",

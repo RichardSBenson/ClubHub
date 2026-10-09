@@ -29,7 +29,7 @@ export class Grade {
 
   /**
    * Every requirement this grade places on a candidate, each answered
-   * independently — a dojo operator has to tell a student what is missing, not
+   * independently — a club operator has to tell a student what is missing, not
    * just that something is.
    */
   requirementsFor({ heldSince, sessionsSince, dateOfBirth, on }) {

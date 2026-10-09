@@ -28,9 +28,9 @@ const GOOD = {
   colours: { primary:'#CE372C', accent:'#F0CE41', ink:'#161617',
              canvas:'#F5F5F5', neutral:'#BDBDBF' },
   fonts: { display:'Shippori Mincho', body:'Zen Kaku Gothic New' },
-  homePage: { sections:['hero','dojoGrid','events'] },
-  dojoPage: { sections:['hero','facts','times'] },
-  navigation: { items:[{ href:'/find-a-dojo', label:'Find a dojo' }] },
+  homePage: { sections:['hero','clubGrid','events'] },
+  clubPage: { sections:['hero','facts','times'] },
+  navigation: { items:[{ href:'/find-a-club', label:'Find a dojo' }] },
 };
 
 console.log('\nA GOOD FILE LOADS AND FILLS IN THE REST');
@@ -65,7 +65,7 @@ console.log('\nMISTAKES ARE EXPLAINED, NOT JUST REJECTED');
   fails('a section that does not exist', { ...GOOD,
     homePage: { sections:['hero','carousel'] } }, 'choose from');
   fails('a dojo page with no facts strip', { ...GOOD,
-    dojoPage: { sections:['hero','times'] } }, 'where, when and who');
+    clubPage: { sections:['hero','times'] } }, 'where, when and who');
   fails('a sixth menu item', { ...GOOD, navigation: { items:
     [1,2,3,4,5,6].map(n => ({ href:`/p${n}`, label:`Page ${n}` })) } },
     'five is the limit');

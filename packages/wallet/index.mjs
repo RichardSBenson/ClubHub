@@ -9,7 +9,7 @@
  *  - It expires by itself when affiliation lapses. Nobody has to collect it.
  *  - There is nothing to install.
  *
- * The card carries the member number, current grade and dojo. The barcode
+ * The card carries the member number, current grade and club. The barcode
  * carries a signed token, so a card can be verified at an event without a
  * database lookup — which matters when the venue has no wifi.
  */
@@ -86,7 +86,7 @@ export function applePass(member, federation, config) {
   } = config;
 
   // What this federation calls a club. Printed on the card, so it has to be
-  // their word: a dojang is not a dojo and a member can see the difference.
+  // their word: a dojang is not a club and a member can see the difference.
   const V = { club: 'Club', grade: 'Grade', ...(federation.vocabulary ?? {}) };
 
   const pass = {
@@ -118,7 +118,7 @@ export function applePass(member, federation, config) {
       ],
       secondaryFields: [
         { key: 'grade', label: 'GRADE', value: member.grade ?? 'Ungraded' },
-        { key: 'club', label: V.club.toUpperCase(), value: member.dojo },
+        { key: 'club', label: V.club.toUpperCase(), value: member.club },
       ],
       auxiliaryFields: [
         { key: 'number', label: 'NUMBER', value: member.memberNumber },
@@ -200,7 +200,7 @@ export function googleObject(member, federation, config) {
                alternateText: member.memberNumber },
     textModulesData: [
       { id: 'grade', header: V.grade, body: member.grade ?? 'Ungraded' },
-      { id: 'club', header: V.club, body: member.dojo },
+      { id: 'club', header: V.club, body: member.club },
       { id: 'number', header: 'Member number', body: member.memberNumber },
     ],
   };
@@ -236,7 +236,7 @@ export async function cardFor(pool, personId, { secret, includeHistory = false }
     select p.id, p.display_number, p.first_name, p.last_name,
            coalesce(p.preferred_name, p.first_name) || ' ' || p.last_name as name,
            cg.label as grade, cg.rank_order,
-           o.name as dojo, o.slug as dojo_slug,
+           o.name as club, o.slug as club_slug,
            a.paid_until, a.starts as since, a.status,
            root.name as federation_name, root.slug as federation_slug
     from person p
@@ -265,7 +265,7 @@ export async function cardFor(pool, personId, { secret, includeHistory = false }
     name: m.name,
     grade: m.grade,
     rankOrder: m.rank_order,
-    dojo: m.dojo,
+    club: m.club,
     expires: m.paid_until,
     since: m.since,
     history,

@@ -1,11 +1,11 @@
 /**
- * Loading the dojo register from CSV files, from inside the app.
+ * Loading the club register from CSV files, from inside the app.
  *
  * Richard: "1 2 3 are not in the system."
  *
  *   1. The federation pastes the three files, sees a preview, and nothing is saved until it confirms.
- *   2. Saving updates dojo, class times and instructors, and a dojo it did not know is added.
- *   3. A dojo missing what a visitor needs is held back, not published.
+ *   2. Saving updates club, class times and instructors, and a club it did not know is added.
+ *   3. A club missing what a visitor needs is held back, not published.
  *   4. Running it twice changes nothing more.
  *   5. A club cannot use it; mistakes in the files say what to fix.
  */
@@ -38,7 +38,7 @@ const one = async (sql, a = []) => (await pool.query(sql, a)).rows[0] ?? null;
 const signIn = async (email) => { delete jar.honbu_session; await req('/signin'); const { token } = await auth.requestLink(email); await req(`/signin/${token}`, { method: 'POST', form: {} }); };
 const federation = await one('select * from organisation where parent_id is null');
 
-const DOJOS = `slug,name,venue_name,address_line,suburb,city,postcode,latitude,longitude,phone,email,directions,blurb,who_trains,instructor_name,instructor_grade,publish
+const CLUBS = `slug,name,venue_name,address_line,suburb,city,postcode,latitude,longitude,phone,email,directions,blurb,who_trains,instructor_name,instructor_grade,publish
 wellington,Wellington,Toitu Hub,49 Kilbirnie Crescent,Kilbirnie,Wellington,6022,,,+64 27 564 7822,kenworthydojo@gmail.com,,,,,,yes
 hornby,Hornby,Webster Dojo,442 Main South Road,Hornby,Christchurch,8042,,,+64 21 031 1606,sensei@example.test,,,,,,yes
 taumarunui,Taumarunui,,4 Marae Street,,Taumarunui,3920,,,+64 21 0297 7149,v@example.test,,,,,,yes
@@ -53,10 +53,10 @@ wellington,Mike,Kenworthy,7,
 wellington,Penina,Kenworthy,6,
 hornby,Mark,Webster,4,
 hornby,Mike,Kenworthy,7,`;
-const files = { dojos: DOJOS, sessions: SESSIONS, instructors: INSTRUCTORS };
+const files = { clubs: CLUBS, sessions: SESSIONS, instructors: INSTRUCTORS };
 const slug = federation.slug;
 const state = async () => ({
-  dojo: (await one('select count(*)::int n from organisation')).n,
+  club: (await one('select count(*)::int n from organisation')).n,
   people: (await one('select count(*)::int n from person')).n,
   sessions: (await one('select count(*)::int n from training_session')).n,
   grades: (await one('select count(*)::int n from grading_record')).n,
@@ -67,7 +67,7 @@ await signIn('doug@example.nz');
 console.log('\nPREVIEW SAVES NOTHING');
 {
   const screen = await req(`/o/${slug}/register-import`);
-  ok('the screen opens for the federation', screen.status === 200 && /Import dojo/.test(screen.html), String(screen.status));
+  ok('the screen opens for the federation', screen.status === 200 && /Import (clubs|dojo)/i.test(screen.html), String(screen.status));
   ok('and is reachable from the clubs screen', /register-import/.test((await req(`/o/${slug}/clubs`)).html));
   const before = await state();
   const prev = await req(`/o/${slug}/register-import`, { method: 'POST', form: files });
@@ -85,7 +85,7 @@ console.log('\nNO PASTING NEEDED');
   ok('the button fills the boxes from the bundled files', b.status === 200 && /slug,name,venue_name/.test(b.html) && /Kenworthy/.test(b.html) && /Fill the boxes|filled from the files/.test(b.html), String(b.status));
   ok('and the offer to do so is on the empty screen', /use=bundled/.test((await req(`/o/${slug}/register-import`)).html));
   const bd = await state();
-  const pv = await req(`/o/${slug}/register-import`, { method: 'POST', form: { dojos: (b.html.match(/<textarea id="dojos"[^>]*>([\s\S]*?)<\/textarea>/)?.[1] ?? '').replace(/&amp;/g, '&').replace(/&#39;/g, "'").replace(/&quot;/g, '"').replace(/&lt;/g, '<').replace(/&gt;/g, '>') } });
+  const pv = await req(`/o/${slug}/register-import`, { method: 'POST', form: { clubs: (b.html.match(/<textarea id="clubs"[^>]*>([\s\S]*?)<\/textarea>/)?.[1] ?? '').replace(/&amp;/g, '&').replace(/&#39;/g, "'").replace(/&quot;/g, '"').replace(/&lt;/g, '<').replace(/&gt;/g, '>') } });
   ok('previewing them works and saves nothing', pv.status === 200 && /Nothing is saved yet/.test(pv.html) && JSON.stringify(bd) === JSON.stringify(await state()), String(pv.status));
 }
 
@@ -93,14 +93,14 @@ console.log('\nCONFIRMING SAVES IT');
 {
   const done = await req(`/o/${slug}/register-import`, { method: 'POST', form: { ...files, confirm: 'yes' } });
   ok('confirming saves', done.status === 200 && /Saved\./.test(done.html), String(done.status));
-  const wel = await one(`select p.* from dojo_profile p join organisation o on o.id = p.organisation_id where o.slug = 'wellington'`);
+  const wel = await one(`select p.* from club_profile p join organisation o on o.id = p.organisation_id where o.slug = 'wellington'`);
   ok('Wellington has its venue and is published', wel.venue_name === 'Toitu Hub' && wel.published === true, JSON.stringify(wel));
   ok('and the phone number as given', wel.phone === '+64 27 564 7822');
-  const hornby = await one(`select o.parent_id, o.type, p.published from organisation o join dojo_profile p on p.organisation_id = o.id where o.slug = 'hornby'`);
+  const hornby = await one(`select o.parent_id, o.type, p.published from organisation o join club_profile p on p.organisation_id = o.id where o.slug = 'hornby'`);
   ok('Hornby is a new dojo under the federation', hornby?.type === 'club' && hornby.parent_id === federation.id && hornby.published === true, JSON.stringify(hornby));
-  const tau = await one(`select p.published, p.venue_name from organisation o join dojo_profile p on p.organisation_id = o.id where o.slug = 'taumarunui'`);
+  const tau = await one(`select p.published, p.venue_name from organisation o join club_profile p on p.organisation_id = o.id where o.slug = 'taumarunui'`);
   ok('Taumarunui publishes on its address, with no venue name invented', tau.published === true && tau.venue_name === null, JSON.stringify(tau));
-  const cart = await one(`select p.published from organisation o join dojo_profile p on p.organisation_id = o.id where o.slug = 'carterton'`);
+  const cart = await one(`select p.published from organisation o join club_profile p on p.organisation_id = o.id where o.slug = 'carterton'`);
   ok('Carterton has no address, so it is held back', cart.published === false, JSON.stringify(cart));
   const times = await one(`select count(*)::int n from training_session s join organisation o on o.id = s.organisation_id where o.slug = 'wellington'`);
   ok('class times are in', times.n === 2, String(times.n));
@@ -134,11 +134,11 @@ console.log('\nREPAIRING INSTRUCTORS WHO WERE ONLY INSTRUCTORS');
 
 console.log('\nMISTAKES AND WHO MAY');
 {
-  const empty = await req(`/o/${slug}/register-import`, { method: 'POST', form: { dojos: '', sessions: '', instructors: '' } });
+  const empty = await req(`/o/${slug}/register-import`, { method: 'POST', form: { clubs: '', sessions: '', instructors: '' } });
   ok('nothing pasted is refused', empty.status === 422 && /at least one file/.test(empty.html), String(empty.status));
   const wrong = await req(`/o/${slug}/register-import`, { method: 'POST', form: { instructors: 'slug,first,last\nwellington,A,B' } });
   ok('a missing column is named', wrong.status === 422 && /no (?:"|&quot;)first_name(?:"|&quot;) column/.test(wrong.html), String(wrong.status));
-  const noHeader = await req(`/o/${slug}/register-import`, { method: 'POST', form: { dojos: 'wellington,Wellington,Toitu Hub\nhornby,Hornby,Webster Dojo' } });
+  const noHeader = await req(`/o/${slug}/register-import`, { method: 'POST', form: { clubs: 'wellington,Wellington,Toitu Hub\nhornby,Hornby,Webster Dojo' } });
   ok('a file pasted without its column names says what it found', noHeader.status === 422 && /first line must be the column names/.test(noHeader.html) && /wellington/.test(noHeader.html), String(noHeader.status));
   const tabbed = await req(`/o/${slug}/register-import`, { method: 'POST', form: { instructors: 'slug\tfirst_name\tlast_name\tdan\twellington\tA\tB\t1'.replace('dan\twellington', 'dan\nwellington').replace(/\t(?=A)/, '\t') } });
   ok('tab-separated text, as copied from a spreadsheet, is read', tabbed.status === 200 && /Preview/.test(tabbed.html), String(tabbed.status));

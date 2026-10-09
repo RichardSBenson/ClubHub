@@ -21,7 +21,7 @@
  *
  * Pure: no file, database or request in here.
  */
-import { tokensFor, readability, HOME_SECTIONS, DOJO_SECTIONS } from './settings.mjs';
+import { tokensFor, readability, HOME_SECTIONS, CLUB_SECTIONS } from './settings.mjs';
 
 export const THEME_FORMAT = 'honbu-theme';
 export const THEME_VERSION = 1;
@@ -46,19 +46,19 @@ const COLOUR_NAMES = ['primary', 'accent', 'ink', 'canvas', 'neutral'];
  * from a stranger can still be safe to open.
  *
  *   classic   the plain layout every federation gets until it chooses another
- *   showcase  the Mas Oyama prototype: belt stripe, crest masthead, "find your nearest dojo" hero,
- *             proof strip, pathway, dojo grouped by region, event cards
+ *   showcase  the Mas Oyama prototype: belt stripe, crest masthead, "find your nearest club" hero,
+ *             proof strip, pathway, club grouped by region, event cards
  */
 export const LAYOUTS = Object.freeze(['classic', 'showcase']);
 export const DEFAULT_LAYOUT = 'classic';
 
 const ALLOWED = {
   top: ['format', 'version', 'name', 'description', 'author', 'layout',
-        'colours', 'fonts', 'homePage', 'dojoPage'],
+        'colours', 'fonts', 'homePage', 'clubPage'],
   colours: COLOUR_NAMES,
   fonts: ['display', 'body'],
   homePage: ['sections'],
-  dojoPage: ['sections'],
+  clubPage: ['sections'],
 };
 
 const trim = (v, max) => String(v ?? '').replace(/\s+/g, ' ').trim().slice(0, max);
@@ -69,6 +69,8 @@ const trim = (v, max) => String(v ?? '').replace(/\s+/g, ' ').trim().slice(0, ma
  * Never throws. Returns every problem at once, as sentences, because a person
  * fixing a file should not have to submit it five times to find five mistakes.
  */
+import { modernise } from './legacy.mjs';
+
 export function readTheme(input) {
   const problems = [];
 
@@ -86,6 +88,7 @@ export function readTheme(input) {
 
   if (!doc || typeof doc !== 'object' || Array.isArray(doc))
     return refuse('That is not a theme file.');
+  doc = modernise(doc);
 
   if (doc.format !== THEME_FORMAT)
     return refuse(`That is not a Honbu theme. It should say "format": "${THEME_FORMAT}".`);
@@ -136,10 +139,10 @@ export function readTheme(input) {
 
   const homeSections = sectionsOf(doc.homePage?.sections, HOME_SECTIONS,
     'homePage', problems);
-  const dojoSections = sectionsOf(doc.dojoPage?.sections, DOJO_SECTIONS,
-    'dojoPage', problems);
-  if (dojoSections && !dojoSections.includes('facts'))
-    problems.push('dojoPage.sections is missing "facts" — where, when and who to '
+  const clubSections = sectionsOf(doc.clubPage?.sections, CLUB_SECTIONS,
+    'clubPage', problems);
+  if (clubSections && !clubSections.includes('facts'))
+    problems.push('clubPage.sections is missing "facts" — where, when and who to '
       + 'ask is the reason anybody is on that page.');
 
   const notes = [];
@@ -161,7 +164,7 @@ export function readTheme(input) {
       layout,
       colours, fonts,
       homePage: { sections: homeSections },
-      dojoPage: { sections: dojoSections },
+      clubPage: { sections: clubSections },
     },
   };
 }
@@ -197,7 +200,7 @@ export function lookOf(theme) {
     layout: theme.layout ?? DEFAULT_LAYOUT,
     tokens, fonts: { ...theme.fonts },
     homeSections: [...theme.homePage.sections],
-    dojoSections: [...theme.dojoPage.sections],
+    clubSections: [...theme.clubPage.sections],
     notes: warnings,
   };
 }
@@ -209,14 +212,14 @@ export function lookOf(theme) {
  * kept in version control shows only what somebody actually changed.
  */
 export function exportTheme({ name, description = '', author = '', layout = DEFAULT_LAYOUT, colours, fonts,
-                              homeSections, dojoSections }) {
+                              homeSections, clubSections }) {
   return {
     format: THEME_FORMAT, version: THEME_VERSION,
     name, description, author, layout,
     colours: Object.fromEntries(COLOUR_NAMES.map((c) => [c, String(colours[c]).toUpperCase()])),
     fonts: { display: fonts.display, body: fonts.body },
     homePage: { sections: [...homeSections] },
-    dojoPage: { sections: [...dojoSections] },
+    clubPage: { sections: [...clubSections] },
   };
 }
 

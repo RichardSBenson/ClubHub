@@ -1,9 +1,9 @@
 /**
  * DOMAIN — the shop
  *
- * Gear a member orders from their own dojo: gi, gloves, shin pads, tournament tee shirts. A product belongs to one
- * organisation. The federation's products are the national range, which every dojo beneath it can offer; a dojo's own
- * products are shown to that dojo's members and nobody else. A dojo can hide a national item or set its own price.
+ * Gear a member orders from their own club: gi, gloves, shin pads, tournament tee shirts. A product belongs to one
+ * organisation. The federation's products are the national range, which every club beneath it can offer; a club's own
+ * products are shown to that club's members and nobody else. A club can hide a national item or set its own price.
  *
  * The price on an order is always the price the SERVER works out. Nothing a browser sends can set one.
  *
@@ -26,7 +26,7 @@ export const ORDER_STATUSES = {
   cancelled: 'Cancelled',
 };
 
-/** What a dojo may move an order to from where it is now. */
+/** What a club may move an order to from where it is now. */
 const NEXT = {
   placed: ['paid', 'ready', 'cancelled'],
   paid: ['ready', 'collected', 'cancelled'],
@@ -74,14 +74,14 @@ export function readProduct(f) {
   return { value: { name, category, price_cents: price.value, description, sizes: readSizes(f.sizes) } };
 }
 
-/** What a dojo's own say over a national item comes to: a price (or blank for the national price) and shown or hidden. */
+/** What a club's own say over a national item comes to: a price (or blank for the national price) and shown or hidden. */
 export function readListing(f) {
   const price = readMoney(f.price);
   if (price.problem) return { problem: price.problem };
   return { value: { hidden: f.hidden === 'on' || f.hidden === 'yes' || f.hidden === '1', price_cents: price.value } };
 }
 
-/** The price a member pays at a dojo: the dojo's own price for the item if it set one, otherwise the item's. */
+/** The price a member pays at a club: the club's own price for the item if it set one, otherwise the item's. */
 export const priceAt = (product, listing) => listing?.price_cents ?? product.price_cents;
 
 import { money } from './money.mjs';

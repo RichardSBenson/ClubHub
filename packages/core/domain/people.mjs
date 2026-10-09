@@ -9,7 +9,7 @@
  * disagreeing.
  *
  * What was missing is the rules themselves, and there is one reason to put
- * them here rather than inline in the form handler: a dojo joining brings a
+ * them here rather than inline in the form handler: a club joining brings a
  * spreadsheet, and a row typed into the form and a row read out of a CSV must
  * be judged identically. If the form rejects a date of birth in the future,
  * the import cannot quietly accept a hundred of them.

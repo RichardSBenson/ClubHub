@@ -12,12 +12,12 @@ const PAGES = [{ slug: 'about', title: 'About us' },
 
 console.log('\nTHE LABEL FOLLOWS THE FEDERATION\'S OWN WORD');
 {
-  ok('karate', defaultLabel('/find-a-dojo', KARATE) === 'Find a dojo',
-    defaultLabel('/find-a-dojo', KARATE));
-  ok('taekwondo', defaultLabel('/find-a-dojo', TKD) === 'Find a dojang',
-    defaultLabel('/find-a-dojo', TKD));
+  ok('karate', defaultLabel('/find-a-club', KARATE) === 'Find a dojo',
+    defaultLabel('/find-a-club', KARATE));
+  ok('taekwondo', defaultLabel('/find-a-club', TKD) === 'Find a dojang',
+    defaultLabel('/find-a-club', TKD));
   ok('and a federation that has said nothing gets a neutral word',
-    defaultLabel('/find-a-dojo', {}) === 'Find a club');
+    defaultLabel('/find-a-club', {}) === 'Find a club');
   ok('other destinations have fixed labels',
     defaultLabel('/events', TKD) === 'Events');
   ok('and something not built in has none',
@@ -28,7 +28,7 @@ console.log('\nWHAT THE SITE ACTUALLY HAS A PAGE FOR');
 {
   const d = destinations({ authored: PAGES, vocabulary: KARATE });
   ok('the generated pages are there',
-    ['/', '/find-a-dojo', '/events', '/news', '/instructors']
+    ['/', '/find-a-club', '/events', '/news', '/instructors']
       .every((h) => d.some((x) => x.href === h)));
   ok('and the written ones', d.some((x) => x.href === '/about'));
   ok('a written page keeps its own title',
@@ -40,7 +40,7 @@ console.log('\nWHAT THE SITE ACTUALLY HAS A PAGE FOR');
 console.log('\nREADING A STORED MENU');
 {
   const items = navigationFrom({ items: [
-    { href: '/find-a-dojo' },
+    { href: '/find-a-club' },
     { href: '/about', label: 'Who we are' },
   ]}, { vocabulary: KARATE });
   ok('two items', items.length === 2);
@@ -117,7 +117,7 @@ console.log('\nPROBLEMS ARE REPORTED ALL AT ONCE, NOT ONE PER ATTEMPT');
 console.log('\nWHAT THE BUILD ENDS UP WITH');
 {
   const stored = { items: [{ href: '/about', label: 'Who we are' }] };
-  const file = [{ href: '/events' }, { href: '/find-a-dojo' }];
+  const file = [{ href: '/events' }, { href: '/find-a-club' }];
 
   ok('what the federation stored wins',
     menuFor({ stored, fileItems: file, authored: PAGES, vocabulary: KARATE })
@@ -125,7 +125,7 @@ console.log('\nWHAT THE BUILD ENDS UP WITH');
 
   ok('the settings file is the fallback',
     menuFor({ stored: null, fileItems: file, authored: PAGES })
-      .map((i) => i.href).join() === '/events,/find-a-dojo');
+      .map((i) => i.href).join() === '/events,/find-a-club');
 
   const fresh = menuFor({ authored: [], vocabulary: TKD });
   ok('a fresh install gets a working menu without anybody editing anything',

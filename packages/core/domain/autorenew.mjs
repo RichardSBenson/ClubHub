@@ -1,8 +1,8 @@
 /**
  * DOMAIN — automatic renewal
  *
- * A member (or a parent) lets the dojo charge their saved card or bank debit each time their membership is about to
- * run out, at the dojo's own price for their age. Nothing here touches a database or a provider.
+ * A member (or a parent) lets the club charge their saved card or bank debit each time their membership is about to
+ * run out, at the club's own price for their age. Nothing here touches a database or a provider.
  *
  *  - The card number never reaches us: the provider keeps it and gives back a token. We keep the token and the last four.
  *  - The charge is made CHARGE_LEAD_DAYS before fees run out, so a hiccup leaves time to fix it.

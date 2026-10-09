@@ -111,7 +111,7 @@ console.log('\nTHE DASHBOARD');
   ok('shows every organisation in scope', r.html.includes('Whanganui')
     && r.html.includes('Mas Oyama Karate New Zealand'));
   ok('and a sign-out button', r.html.includes('Sign out'));
-  // "Dojo", not "Dojos": 道場 does not inflect and MOKNZ kept that in
+  // "Club", not "Clubs": 道場 does not inflect and MOKNZ kept that in
   // English. The word is theirs to choose, which is the point.
   ok('one federation, so the heading is just its word',
     /<h2>Dojo<\/h2>/.test(r.html), r.html.match(/<h2>[^<]*<\/h2>/g));
@@ -121,8 +121,8 @@ console.log('\nONE ACCOUNT, TWO ARTS');
 {
   // The dashboard is the only screen that can show several federations at
   // once, and so the only one where a single vocabulary is wrong. Doug helps
-  // out at a jiu-jitsu academy; his dojos must not become academies, and the
-  // academy must not become a dojo.
+  // out at a jiu-jitsu academy; his clubs must not become academies, and the
+  // academy must not become a club.
   const { rows:[acct] } = await pool.query(
     `select id from account where email='doug@example.nz'`);
 
@@ -223,7 +223,7 @@ console.log('\nRUNNING A GRADING');
     new RegExp(`name="grade_${aroha}" value="([0-9a-f-]{36})"`))?.[1];
   ok('the next grade is pre-selected for each candidate', !!gradeId);
 
-  // Aroha's next grade is 3rd kyu, which MOKNZ awards at the dojo. A grading
+  // Aroha's next grade is 3rd kyu, which MOKNZ awards at the club. A grading
   // still needs somebody to sit on the panel.
   const bad = await req('/o/whanganui/grading', { method:'POST', form:{
     awarded_on:'2026-10-17', panel:'',

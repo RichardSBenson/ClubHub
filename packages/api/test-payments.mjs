@@ -1,7 +1,7 @@
 /**
  * Who gets paid, and paying.
  *
- *   dojo fee / kyu grading / uniform / equipment → the member's dojo
+ *   club fee / kyu grading / uniform / equipment → the member's club
  *   tournament entry                              → whoever runs the tournament
  *   black belt grading                            → the federation
  *
@@ -49,13 +49,13 @@ console.log('\nTHE RULES');
 {
   const ids = { clubId: 'club', organiserId: 'organiser', federationId: 'fed' };
   const to = (k) => payeeFor(k, ids);
-  ok('dojo fees go to the dojo', to('dojo_fee') === 'club');
+  ok('dojo fees go to the dojo', to('club_fee') === 'club');
   ok('kyu grading goes to the dojo', to('kyu_grading') === 'club');
   ok('uniform goes to the dojo', to('uniform') === 'club');
   ok('other equipment goes to the dojo', to('equipment') === 'club');
   ok('a tournament entry goes to whoever runs it', to('tournament_entry') === 'organiser');
   ok('a black belt grading goes to the federation', to('dan_grading') === 'fed');
-  let err; try { payeeFor('dojo_fee', { federationId: 'fed' }); } catch (e) { err = e; }
+  let err; try { payeeFor('club_fee', { federationId: 'fed' }); } catch (e) { err = e; }
   ok('no club means no payee, not "the federation"', !!err && /not in a club/.test(err.message));
   try { payeeFor('mystery', ids); err = null; } catch (e) { err = e; }
   ok('an unknown kind is refused', !!err);
@@ -114,7 +114,7 @@ console.log('\nWHO CAN SEE AND PAY');
   ok('the person sees what they owe', (await payments.forPerson(ada.accountId, ada.id)).length === 3);
   ok('another member cannot read it', await payments.forPerson(bob.accountId, ada.id).then(() => false, (e) => e instanceof Forbidden));
   ok('another member cannot pay it', await payments.pay(bob.accountId, uniform.id, { method: 'bank', card: '' }, { provider: new TestProvider() }).then(() => false, (e) => e instanceof Forbidden));
-  const k = await payments.request(doug.id, whanganui.id, ask({ personNumber: kid.display_number, kind: 'dojo_fee', amountCents: 4000 }));
+  const k = await payments.request(doug.id, whanganui.id, ask({ personNumber: kid.display_number, kind: 'club_fee', amountCents: 4000 }));
   ok('a parent sees their child\'s', (await payments.forPerson(mum.accountId, kid.id)).length === 1);
   ok('and what they owe altogether', (await payments.owedBy(mum.accountId)).some((p) => p.id === k.id));
   const paid = await payments.pay(mum.accountId, k.id, { method: 'card', card: '4242424242424242' }, { provider: new TestProvider() });
@@ -151,12 +151,12 @@ console.log('\nPAYING');
 
   let calls = 0;
   const slow = new ScriptedProvider(async () => { calls++; await new Promise((r) => setTimeout(r, 60)); return { ref: 'x', status: 'succeeded', detail: '' }; });
-  const again = await payments.request(doug.id, whanganui.id, ask({ kind: 'dojo_fee', amountCents: 1000 }));
+  const again = await payments.request(doug.id, whanganui.id, ask({ kind: 'club_fee', amountCents: 1000 }));
   const both = await Promise.allSettled([1, 2].map(() => payments.pay(ada.accountId, again.id, { method: 'card', card: '4242424242424242' }, { provider: slow })));
   ok('pressing pay twice reaches the provider once', calls === 1 && both.filter((b) => b.status === 'fulfilled').length === 1, `${calls} calls`);
 
   const broken = new ScriptedProvider(() => { throw new Error('socket hang up'); });
-  const b2 = await payments.request(doug.id, whanganui.id, ask({ kind: 'dojo_fee', amountCents: 1100 }));
+  const b2 = await payments.request(doug.id, whanganui.id, ask({ kind: 'club_fee', amountCents: 1100 }));
   ok('an unreachable provider charges nothing and says so',
     await payments.pay(ada.accountId, b2.id, { method: 'card', card: '4242424242424242' }, { provider: broken }).then(() => false, (e) => e instanceof Invalid && /Nothing was charged/.test(e.message)));
   ok('and it can be tried again', (await one('select status from payment where id=$1', [b2.id])).status === 'failed');

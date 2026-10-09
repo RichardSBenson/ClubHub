@@ -150,7 +150,7 @@ for (const n of rootSettings.notes ?? []) console.log(`  note: ${n}`);
  *
  * It is not fine shipped. A federation who installs this gets a settings file
  * describing Mas Oyama Karate New Zealand, and their brand new aikido site
- * says "Find a dojo" in somebody else's colours. The test for a fresh install
+ * says "Find a club" in somebody else's colours. The test for a fresh install
  * caught exactly that.
  *
  * So the file is used only when it is about the federation at the root. If it
@@ -274,9 +274,9 @@ for (const target of SITES) {
   const fileLayout = atRoot ? rootSettings.layout : null;
   const layoutName = look?.layout ?? (LAYOUTS.includes(fileLayout) ? fileLayout : 'classic');
   const homeSections = look?.homeSections ?? fromFile('homePage')?.sections;
-  const dojoSections = look?.dojoSections ?? fromFile('dojoPage')?.sections;
+  const clubSections = look?.clubSections ?? fromFile('clubPage')?.sections;
   // Words, not look: these stay the federation's own whatever theme is chosen.
-  const dojoCopy = strip(fromFile('dojoPage') ?? {});
+  const clubCopy = strip(fromFile('clubPage') ?? {});
 
 
   const base = target.base;
@@ -346,13 +346,13 @@ for (const target of SITES) {
   // that had told the federation nothing went live with the placeholder text
   // from the template in its description. `published` has been in the schema
   // since the first migration and nothing read it.
-  const everyClub = (await site.dojos(target.slug)).map((d) => ({
+  const everyClub = (await site.clubs(target.slug)).map((d) => ({
     ...d,
     venue_name: d.venue_name ?? d.venueName ?? null,
     address_line: d.address_line ?? d.addressLine ?? null,
     who_trains: d.who_trains ?? d.whoTrains ?? null,
-    // Not defaulted to true. A dojo with no profile row has told us nothing
-    // about its first class, and inventing "free" here is how fourteen dojos
+    // Not defaulted to true. A club with no profile row has told us nothing
+    // about its first class, and inventing "free" here is how fourteen clubs
     // that have never filled anything in ended up with the national site
     // promising the public something on their behalf.
     first_class_free: d.first_class_free ?? d.firstClassFree ?? null,
@@ -360,8 +360,8 @@ for (const target of SITES) {
     sessions: d.sessions ?? [],
     hero_url: assets[d.hero_asset_id ?? d.heroAssetId] ?? null,
   }));
-  const dojos = everyClub.filter((d) => d.published === true);
-  const unlisted = everyClub.length - dojos.length;
+  const clubs = everyClub.filter((d) => d.published === true);
+  const unlisted = everyClub.length - clubs.length;
 
   const galleryRows = new Map();
   for (const g of (site.galleryFor ? await site.galleryFor(target.slug) : []))
@@ -402,7 +402,7 @@ for (const target of SITES) {
   // What the chosen layout needs beyond the theme: the federation's words, which are never in a theme.
   const homeCopy = { ...(atRoot ? strip(rootSettings.homePage ?? {}) : {}), ...strip(orgSettings.homePage ?? {}) };
   const footerLinks = [
-    { href: '/find-a-dojo', label: clubsWord },
+    { href: '/find-a-club', label: clubsWord },
     { href: '/events', label: 'Events' },
     ...(articles.length ? [{ href: '/news', label: 'News' }] : []),
     ...authored.map((p) => ({ href: `/${p.slug}`, label: p.title })),
@@ -413,9 +413,9 @@ for (const target of SITES) {
       layoutName,
       stripe: orgWords.stripe, wordmark: orgWords.wordmark, footerLine: orgWords.footerLine,
       eventsIntro: orgWords.eventsIntro ?? null,
-      footerLinks, homeCopy, dojoCopy, clubCount: dojos.length,
+      footerLinks, homeCopy, clubCopy, clubCount: clubs.length,
       // Every path this site will have a page for, so a layout never draws a button that leads to a 404.
-      knownPaths: new Set(['/', '/find-a-dojo', '/events', '/news', '/instructors', '/signin', '/shop',
+      knownPaths: new Set(['/', '/find-a-club', '/events', '/news', '/instructors', '/signin', '/shop',
         ...authored.map((p) => `/${p.slug}`)]),
     },
     fonts, nav, base, vocabulary, origin: ORIGIN,
@@ -494,33 +494,33 @@ for (const target of SITES) {
   const teachers = (site.instructors ? await site.instructors(target.slug) : [])
     .map((x) => ({ ...x, photoUrl: assets[x.photoAssetId] ?? null, paragraphs: paragraphs(x.bio) }));
 
-  // A dojo's pictures, newest year first, as the pages want them.
-  const galleryFor = (dojo) => (galleryRows.get(dojo.id) ?? []).map((g) => ({
+  // A club's pictures, newest year first, as the pages want them.
+  const galleryFor = (club) => (galleryRows.get(club.id) ?? []).map((g) => ({
     url: assets[g.asset_id], alt: g.alt_text, caption: g.caption, year: g.year ?? null,
     eventId: g.event_id ?? null, eventTitle: g.event_title ?? null, eventSlug: g.event_slug ?? null })).filter((g) => g.url);
 
-  for (const dojo of dojos) {
-    const dojoEvents = await site.eventsFor(dojo.slug);
-    if (galleryFor(dojo).length)
-      await write(`${dojo.slug}/gallery/index.html`, R.galleryPage({ dojo, items: galleryFor(dojo), ...shared }));
-    // A dojo's own events get their page under the dojo, so a local event needs nobody's
+  for (const club of clubs) {
+    const clubEvents = await site.eventsFor(club.slug);
+    if (galleryFor(club).length)
+      await write(`${club.slug}/gallery/index.html`, R.galleryPage({ club, items: galleryFor(club), ...shared }));
+    // A club's own events get their page under the club, so a local event needs nobody's
     // permission to be on the website. Ones that reached the federation's calendar are there too.
-    for (const ev of dojoEvents.filter((e) => e.is_own))
+    for (const ev of clubEvents.filter((e) => e.is_own))
     {
-      const at = `/${dojo.slug}/events/${ev.slug}`;
-      await write(`${dojo.slug}/events/${ev.slug}/index.html`, R.eventPage({ ev, ...shared, path: at }));
-      await writeCalendar(ev, `${dojo.slug}/events/${ev.slug}`, at);
+      const at = `/${club.slug}/events/${ev.slug}`;
+      await write(`${club.slug}/events/${ev.slug}/index.html`, R.eventPage({ ev, ...shared, path: at }));
+      await writeCalendar(ev, `${club.slug}/events/${ev.slug}`, at);
     }
-    await write(`${dojo.slug}/index.html`,
-      R.dojoPage({ dojo, events: dojoEvents, ...shared, instructors: teachers.filter((x) => x.organisationSlug === dojo.slug),
-        gallery: galleryFor(dojo).slice(0, 8), galleryTotal: galleryFor(dojo).length,
-        sections: dojoSections, startAnyWeekText: dojoCopy.startAnyWeekText ?? null,
-        showFirstClassFree: dojoCopy.showFirstClassFree !== false }));
+    await write(`${club.slug}/index.html`,
+      R.clubPage({ club, events: clubEvents, ...shared, instructors: teachers.filter((x) => x.organisationSlug === club.slug),
+        gallery: galleryFor(club).slice(0, 8), galleryTotal: galleryFor(club).length,
+        sections: clubSections, startAnyWeekText: clubCopy.startAnyWeekText ?? null,
+        showFirstClassFree: clubCopy.showFirstClassFree !== false }));
   }
 
   await write('shop/index.html', R.shopPage({ products: site.shopRange ? await site.shopRange(target.slug) : [], ...shared }));
 
-  await write('find-a-dojo/index.html', R.findADojoPage({ dojos, ...shared }));
+  await write('find-a-club/index.html', R.findAClubPage({ clubs, ...shared }));
 
   await write('instructors/index.html',
     R.instructorsPage({ instructors: teachers, assets, ...shared }));
@@ -532,7 +532,7 @@ for (const target of SITES) {
   await write('events/index.html', R.eventsPage({ events: evs, ...shared }));
 
   for (const pg of authored) {
-    const html = renderBlocks(pg.body, { dojos, events: evs, assets, enquiryAction: `/enquire/${target.slug}` },
+    const html = renderBlocks(pg.body, { clubs, events: evs, assets, enquiryAction: `/enquire/${target.slug}` },
       { origin: ORIGIN + base });
     await write(`${pg.slug}/index.html`, R.authoredPage({
       // Only computed when the page has no description of its own, as it was
@@ -546,7 +546,7 @@ for (const target of SITES) {
   await write('news/index.html', R.newsPage({ articles, ...shared }));
   for (const article of articles) {
     const body = article.body
-      ? renderBlocks(article.body, { dojos, events: evs, assets, enquiryAction: `/enquire/${target.slug}` },
+      ? renderBlocks(article.body, { clubs, events: evs, assets, enquiryAction: `/enquire/${target.slug}` },
                      { origin: ORIGIN + base })
       : '';
     await write(`news/${article.slug}/index.html`,
@@ -554,7 +554,7 @@ for (const target of SITES) {
   }
 
   await write('index.html', R.homePage({
-    dojos, events: evs, articles,
+    clubs, events: evs, articles,
     // The file supplies defaults at the root; what the federation stored wins.
     homeCopy,
     sections: homeSections,
@@ -564,7 +564,7 @@ for (const target of SITES) {
   }));
 
   console.log(`  ${(base || '/').padEnd(11)} ${federation.name}`
-    + ` — ${dojos.length} ${clubsWord.toLowerCase()}`
+    + ` — ${clubs.length} ${clubsWord.toLowerCase()}`
     + (unlisted ? ` (+${unlisted} without a page)` : '')
     + `, ${evs.length} event(s),`
     + ` ${articles.length} article(s)`);

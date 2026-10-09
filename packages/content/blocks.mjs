@@ -31,7 +31,7 @@ export const BLOCKS = {
   embed:     { fields: { provider: 'enum:youtube,vimeo', id: 'string',
                          caption: 'string' } },
   // Pulls live data into an authored page. The point of one system.
-  dojoList:  { fields: { heading: 'string' } },
+  clubList:  { fields: { heading: 'string' } },
   eventList: { fields: { heading: 'string', kind: 'string', limit: 'number' } },
   honours:   { fields: { heading: 'string', award: 'string' } },
   // A written-out roll of honour (name and year), shown as an even grid of cards.
@@ -54,7 +54,7 @@ const SAFE_PROTOCOL = /^(https?:|mailto:|tel:|\/)/i;
 
 /**
  * [{ text: 'Hanshi Doug', marks: ['strong'] },
- *  { text: ' opened the first dojo' }]
+ *  { text: ' opened the first club' }]
  */
 function cleanRich(value) {
   if (typeof value === 'string') return [{ text: value }];
@@ -110,15 +110,19 @@ function renderRich(runs, origin = '') {
 // validation — returns a clean document and a list of what was dropped
 // ---------------------------------------------------------------------------
 
+/** Pages saved before the platform stopped using karate's word for a club call this block by its old name. */
+const LEGACY_TYPE = { 'dojoList': 'clubList' }; // arch-ok: reading names saved before the rename
+const typeOf = (t) => LEGACY_TYPE[t] ?? t;
+
 export function validate(doc) {
   const dropped = [];
   const blocks = [];
 
   for (const [i, raw] of (doc?.blocks ?? []).entries()) {
-    const spec = BLOCKS[raw?.type];
+    const spec = BLOCKS[typeOf(raw?.type)];
     if (!spec) { dropped.push(`block ${i}: unknown type "${raw?.type}"`); continue; }
 
-    const block = { type: raw.type };
+    const block = { type: typeOf(raw.type) };
     for (const [field, kind] of Object.entries(spec.fields)) {
       const v = raw[field];
       if (v === undefined || v === null) continue;
@@ -177,12 +181,12 @@ export function validate(doc) {
 // ---------------------------------------------------------------------------
 
 /**
- * `data` supplies the live blocks: { dojos, events, honours }.
+ * `data` supplies the live blocks: { clubs, events, honours }.
  * Absent data renders nothing rather than an empty shell.
  */
 export function renderBlocks(doc, data = {}, { origin = '' } = {}) {
   return (doc?.blocks ?? []).map((b) => {
-    switch (b.type) {
+    switch (typeOf(b.type)) {
       case 'heading':
         return `<h${b.level}>${esc(b.text ?? '')}</h${b.level}>`;
 
@@ -223,11 +227,11 @@ export function renderBlocks(doc, data = {}, { origin = '' } = {}) {
         return '';
       }
 
-      case 'dojoList': {
-        const dojos = data.dojos ?? [];
-        if (!dojos.length) return '';
+      case 'clubList': {
+        const clubs = data.clubs ?? [];
+        if (!clubs.length) return '';
         return (b.heading ? `<h2>${esc(b.heading)}</h2>` : '') +
-          `<div class="grid">${dojos.map((d) =>
+          `<div class="grid">${clubs.map((d) =>
             `<a href="/${esc(d.slug)}"><strong>${esc(d.name)}</strong>` +
             `<span>${esc(d.city ?? '')}</span></a>`).join('')}</div>`;
       }
@@ -302,7 +306,7 @@ export function renderBlocks(doc, data = {}, { origin = '' } = {}) {
 
       case 'trialCta': {
         const club = /^[a-z0-9]+(-[a-z0-9]+)*$/.test(b.club ?? '') ? b.club : null;
-        const href = club ? `/enquire/${club}?kind=trial` : '/find-a-dojo';
+        const href = club ? `/enquire/${club}?kind=trial` : '/find-a-club';
         return `<div class="trialcta"><h2>${esc(b.heading || 'Try a free class')}</h2>`
           + (b.text ? `<p>${esc(b.text)}</p>` : '')
           + `<a class="btn light" href="${esc(href)}">${esc(b.button || (club ? 'Book a free class' : 'Find your nearest club'))}</a></div>`;

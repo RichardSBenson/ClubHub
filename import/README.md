@@ -4,10 +4,10 @@ Two CSVs, one command. Blank means unknown — the database stores NULL and the
 site says "to confirm". Never type a placeholder into a cell.
 
 ```bash
-cp dojos-template.csv dojos.csv
+cp clubs-template.csv clubs.csv
 cp sessions-template.csv sessions.csv
 # fill them in
-node import.mjs dojos.csv sessions.csv
+node import.mjs clubs.csv sessions.csv
 ```
 
 Re-runnable. Importing twice changes nothing extra.
@@ -53,7 +53,7 @@ reading "Tuesday & Thursday".
 `instructors.csv` puts people on a dojo's roll as members who also instruct, at the dan grade they hold:
 
 ```bash
-node import.mjs dojos.csv sessions.csv instructors.csv
+node import.mjs clubs.csv sessions.csv instructors.csv
 ```
 
 Columns: `slug, first_name, last_name, dan` (1 to 8), and `distinct` (`yes` when the same name

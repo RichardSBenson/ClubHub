@@ -87,11 +87,11 @@ console.log('\nTHE LADDER AND AUTHORITY ARE DOMAIN OBJECTS');
     awardingOrgType:'dojo', panel:[{personId:'c', rankOrder:15, titleIds:[]}] });
   ok('rank alone does not stand in for the title', seniorButUntitled.length === 1);
 
-  // 3rd kyu is the dojo's own, with no title requirement at all.
+  // 3rd kyu is the club's own, with no title requirement at all.
   const sankyu = new Grade({ id:'g8', label:'3rd kyu', rankOrder:8 });
-  const dojoBand = new GradingAuthority({ fromRankOrder:1, toRankOrder:8,
+  const clubBand = new GradingAuthority({ fromRankOrder:1, toRankOrder:8,
     awardedByType:'dojo', ratifiedByType:'country', minPanelSize:1, minPanelRank:11 });
-  ok('3rd kyu needs no Shihan', dojoBand.objectionsTo({ grade: sankyu,
+  ok('3rd kyu needs no Shihan', clubBand.objectionsTo({ grade: sankyu,
     awardingOrgType:'dojo', panel:[{personId:'d', rankOrder:11, titleIds:[]}] }).length === 0);
 
   ok('a backwards range is rejected',
@@ -238,7 +238,7 @@ console.log('\nAWARDING — THE RULES ARE IN THE CORE, NOT THE CONTROLLER');
 
 console.log("\nA TITLE THE CALLER DOES NOT GET TO ASSERT");
 {
-  // MOKNZ: 2nd kyu is the dojo's grading, but a Shihan must see it.
+  // MOKNZ: 2nd kyu is the club's grading, but a Shihan must see it.
   const ladder = new InMemoryLadder({
     grades: [
       { id:'g8', label:'3rd kyu', rankOrder:8 },

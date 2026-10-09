@@ -9,7 +9,7 @@
  *     every image block on every page rendered as an empty string.
  *   - article.body was never selected by the site query, so every news page
  *     was a headline, a date, and nothing else.
- *   - article.publish_up existed and nothing honoured it, so a dojo's notice
+ *   - article.publish_up existed and nothing honoured it, so a club's notice
  *     appeared on the national site whether it meant it to or not.
  *
  * None of them failed. That is what made them expensive: an empty string is a

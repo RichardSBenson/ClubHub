@@ -203,7 +203,7 @@ export function startingPage(name, art) {
         { text: ' organisation. This page is a starting point — edit it from '
               + 'the admin to say who you are, when you were founded and what '
               + 'you teach.' }] },
-      { type: 'dojoList', heading: 'Where to train' },
+      { type: 'clubList', heading: 'Where to train' },
       { type: 'eventList', heading: "What's coming up", limit: 5 },
     ]},
   };

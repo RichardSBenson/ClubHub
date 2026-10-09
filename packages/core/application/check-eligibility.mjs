@@ -64,7 +64,7 @@ export class CheckEligibility {
       nextGradeId: next.id,
       eligible: unmet.length === 0,
       requirements,
-      // Phrased so a dojo operator can read it straight to a student.
+      // Phrased so a club operator can read it straight to a student.
       reasons: unmet.map((r) => r.shortfall == null
         ? `${r.name} unknown`
         : `${r.shortfall} more ${r.unit}`),

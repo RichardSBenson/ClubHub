@@ -66,11 +66,11 @@ console.log('\nAUTHORITY RULES HOLD AGAINST REAL DATA');
 {
   // MOKNZ's real authority table, which is data and not code:
   //
-  //   ranks  1–8   awarded by a dojo,    ratified nationally, panel of 1
-  //   ranks  9–10  awarded by a dojo,    ratified nationally, panel of 1
+  //   ranks  1–8   awarded by a club,    ratified nationally, panel of 1
+  //   ranks  9–10  awarded by a club,    ratified nationally, panel of 1
   //   ranks 11–18  awarded by the country,                    panel of 3
   //
-  // Kyu grades are a dojo's business and dan grades are the federation's,
+  // Kyu grades are a club's business and dan grades are the federation's,
   // which is how Kyokushin has always done it. This file was written against
   // an earlier table where 3rd kyu was national, and asserted the opposite of
   // what the register now says. It never ran, so it never disagreed.
@@ -78,7 +78,7 @@ console.log('\nAUTHORITY RULES HOLD AGAINST REAL DATA');
   const grade = async (label) => (await id(
     `select id from grade where label=$2 and organisation_id=$1`,
     [moknz, label])).id;
-  const thirdKyu = await grade('3rd kyu');   // rank 8  — a dojo grade
+  const thirdKyu = await grade('3rd kyu');   // rank 8  — a club grade
   const shodan   = await grade('1st dan');    // rank 11 — a national grade
 
   await throws('a dojo cannot award a dan grade', () =>

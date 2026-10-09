@@ -192,7 +192,7 @@ export class Publication {
  * The domain says what happened. It does not know or care who listens.
  *
  * That is the decoupling: publishing emits PublicationCreated, and whether that
- * rebuilds a page, warms a cache, notifies a dojo or does nothing at all is an
+ * rebuilds a page, warms a cache, notifies a club or does nothing at all is an
  * adapter's business.
  */
 export class DomainEvent {

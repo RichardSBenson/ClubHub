@@ -1,7 +1,7 @@
 /**
  * Writing news, and who decides where it appears.
  *
- * The rule being proved is Richard's: a dojo may say what it likes on its own
+ * The rule being proved is Richard's: a club may say what it likes on its own
  * site, and cannot put it in the federation's voice by itself. People write
  * strange things, sincerely held and not factual, and a federation's name on a
  * page reads as an endorsement whether or not it was meant as one.
@@ -246,7 +246,7 @@ console.log('\nA DOJO ASKS; THE FEDERATION DECIDES');
     (await one(`select publish_up_state s from article where id=$1`, [id])).s
       === 'requested');
 
-  // The dojo must not be able to answer its own request.
+  // The club must not be able to answer its own request.
   const selfApprove = await req(`/o/whanganui/news/${id}/decide`,
     { method: 'POST', form: { answer: 'approve' } });
   ok('the dojo cannot approve itself',

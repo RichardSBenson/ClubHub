@@ -61,7 +61,7 @@ console.log('\nHEADINGS CANNOT STEAL THE H1');
 console.log('\nLIVE BLOCKS PULL FROM THE REGISTER');
 {
   const { doc } = validate({ blocks: [
-    { type: 'dojoList', heading: 'Where we train' },
+    { type: 'clubList', heading: 'Where we train' },
     { type: 'eventList', heading: 'Gradings', kind: 'grading', limit: 2 },
     { type: 'honours', heading: 'The 50 Man Kumite', award: 'kumite50' },
   ]});
@@ -70,7 +70,7 @@ console.log('\nLIVE BLOCKS PULL FROM THE REGISTER');
   ok('no data renders nothing, not an empty shell', empty === '');
 
   const html = renderBlocks(doc, {
-    dojos: [{ slug: 'whanganui', name: 'Whanganui', city: 'Whanganui' }],
+    clubs: [{ slug: 'whanganui', name: 'Whanganui', city: 'Whanganui' }],
     events: [
       { slug: 'g1', title: 'National grading', kind: 'grading', starts_at: '2026-10-17' },
       { slug: 't1', title: 'Nationals', kind: 'tournament', starts_at: '2026-11-08' },

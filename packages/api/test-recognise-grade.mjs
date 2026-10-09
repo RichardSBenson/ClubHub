@@ -1,5 +1,5 @@
 /**
- * Recording a grade somebody already holds: kyu by their dojo, dan by the federation, never awarded.
+ * Recording a grade somebody already holds: kyu by their club, dan by the federation, never awarded.
  */
 import './reset.mjs';
 import http from 'node:http';

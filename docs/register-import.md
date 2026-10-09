@@ -1,14 +1,14 @@
 # Loading the dojo register
 
 The federation's dojo (venue, address, contact, class times) and their instructors are loaded from three CSV
-files, the same ones in `import/`: `dojos.csv`, `sessions.csv`, `instructors.csv`.
+files, the same ones in `import/`: `clubs.csv`, `sessions.csv`, `instructors.csv`.
 
 **In the app (the way to do it on the live site):** Clubs → *Import dojo, class times and instructors from CSV
 files* (`/o/<federation>/register-import`). Paste the contents of each file, press **Preview**, read what would
 happen, then **Save these changes**. The preview is the real import followed by a rollback, so what it shows is
 what saving does. Owners and administrators of the federation only; a club cannot use it.
 
-**On the command line:** `node import/import.mjs dojos.csv sessions.csv instructors.csv` against whatever
+**On the command line:** `node import/import.mjs clubs.csv sessions.csv instructors.csv` against whatever
 `DATABASE_URL` points at. Same code, saved straight away.
 
 Rules, both ways:

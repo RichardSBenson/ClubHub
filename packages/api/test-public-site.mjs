@@ -107,8 +107,8 @@ await signIn('doug@example.nz');
   ok('the site uses the stored heading, words and button', /<h1>Train with us<\/h1>/.test(home) && /Karate across Aotearoa\./.test(home) && />Find a dojo</.test(home));
   ok('the big picture is behind the heading', /class="hero photo"[^>]*url\('\/images\//.test(home));
   ok('the share picture is offered to Facebook and chat apps', /<meta property="og:image" content="https?:\/\/[^"]+\/images\/[^"]+">/.test(home) && /twitter:card" content="summary_large_image"/.test(home));
-  const dojoPage = fs.readFileSync(path.join(OUT, 'whanganui/index.html'), 'utf8');
-  ok('so is every other page, absolute and on this site', /og:image" content="https?:\/\//.test(dojoPage));
+  const clubPage = fs.readFileSync(path.join(OUT, 'whanganui/index.html'), 'utf8');
+  ok('so is every other page, absolute and on this site', /og:image" content="https?:\/\//.test(clubPage));
 
   r = await multi('/o/moknz/appearance/home', { heroHeading: '', heroText: '', heroButton: '', removeHero: '1', removeShare: '1' });
   const cleared = (await one(`select settings->'homePage' as h from organisation where id=$1`, [root.id])).h;

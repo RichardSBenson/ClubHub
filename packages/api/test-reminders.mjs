@@ -61,7 +61,7 @@ const today = (await one(`select to_char((now() at time zone 'Pacific/Auckland')
 const daysFrom = async (n) => (await one(`select to_char($1::date + $2::int,'YYYY-MM-DD') as d`, [today, n])).d;
 const BASE = 'noreply@mail.moknz.test';
 for (const [org, mail] of [[whanganui, 'club@whanganui.test'], [wellington, null]])
-  await pool.query(`insert into dojo_profile (organisation_id, email) values ($1,$2)
+  await pool.query(`insert into club_profile (organisation_id, email) values ($1,$2)
     on conflict (organisation_id) do update set email = $2`, [org.id, mail]);
 
 let seq = 0;

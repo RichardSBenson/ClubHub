@@ -42,7 +42,7 @@ const day = async (n) => (await one(`select to_char($1::date + $2::int,'YYYY-MM-
 await pool.query(`update affiliation set ends='2020-01-01', status='resigned' where organisation_id in ($1,$2)`, [whanganui.id, wellington.id]);
 await pool.query(`delete from qualification_award`); await pool.query(`delete from qualification`);
 for (const [org, mail] of [[whanganui, 'club@whanganui.test'], [wellington, 'club@wellington.test']])
-  await pool.query(`insert into dojo_profile (organisation_id, email) values ($1,$2) on conflict (organisation_id) do update set email=$2`, [org.id, mail]);
+  await pool.query(`insert into club_profile (organisation_id, email) values ($1,$2) on conflict (organisation_id) do update set email=$2`, [org.id, mail]);
 
 let seq = 0;
 const person = async (first, org, { role = 'member', age = 30, grant = null } = {}) => {

@@ -5,7 +5,7 @@
  *   3rd dan 三段
  *
  * The title (Sensei, Shihan, Hanshi...) comes first when the person holds one; the dan grade follows with its Japanese
- * written the way a dojo writes it. The kanji is worked out from the grade's number, so it needs no extra data:
+ * written the way a club writes it. The kanji is worked out from the grade's number, so it needs no extra data:
  * dan 初段 二段 三段 ... 十段, and kyu 十級 九級 ... 一級.
  */
 

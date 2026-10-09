@@ -199,7 +199,7 @@ from organisation where slug = 'whanganui';
 -- A page does not publish until its facts are in. Proving that is the point.
 -- ---------------------------------------------------------------------------
 
-insert into dojo_profile (organisation_id, venue_name, address_line, suburb, city,
+insert into club_profile (organisation_id, venue_name, address_line, suburb, city,
                           postcode, latitude, longitude, directions, phone, email,
                           blurb, who_trains, published)
 select o.id, d.venue, d.addr, d.suburb, d.city, d.pc, d.lat, d.lng, d.dir,

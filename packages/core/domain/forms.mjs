@@ -1,7 +1,7 @@
 /**
  * DOMAIN — forms and consent
  *
- * A dojo or federation builds its own forms (a waiver, a photo consent, a medical form) out of a few plain question types,
+ * A club or federation builds its own forms (a waiver, a photo consent, a medical form) out of a few plain question types,
  * and people fill them in once, or again every so many months. Nothing here touches a database.
  *
  * Rules that matter:

@@ -279,7 +279,7 @@ function pathFor(pattern) {
  * Words that only appear if somebody else's data came back.
  *
  * The organisation's own NAME is deliberately not on this list. Clubs are
- * listed on the public website — anybody can read them at /find-a-dojo —
+ * listed on the public website — anybody can read them at /find-a-club —
  * so a refusal saying "You do not have access to Whanganui" discloses
  * nothing that is not already published, and it is far more use to whoever
  * is reading it than a bare "no".
@@ -446,7 +446,7 @@ console.log('\nAND NOTHING OF THEIRS CAN BE CHANGED');
         (select count(*)::int from guardian_link
           where ended_on is null and child_id in
             (select person_id from affiliation where organisation_id = $1)) as guardian_links,
-        (select count(*)::int from dojo_profile
+        (select count(*)::int from club_profile
           where organisation_id = $1
             and (published or page_requested_at is not null)) as club_pages
       `, [theirs.id]);

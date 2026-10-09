@@ -1,5 +1,5 @@
 /**
- * Carries out the dojo register's three CSV files against the database.
+ * Carries out the club register's three CSV files against the database.
  *
  * Used by the Register import screen and by import/import.mjs. It runs inside the caller's
  * transaction on the caller's client, so a preview is the same code as the real thing followed by
@@ -14,26 +14,26 @@
 import { randomUUID } from 'node:crypto';
 import { nul, num, yes, DAYS, publishable } from '../core/domain/register-csv.mjs';
 
-export async function applyRegister(client, { dojos = [], sessions = [], instructors = [] }) {
+export async function applyRegister(client, { clubs = [], sessions = [], instructors = [] }) {
   const report = { notes: [], added: [], updated: 0, published: 0, held: [], people: { added: 0, instructors: 0, graded: 0 } };
-  const byDojo = new Map();
-  for (const s of sessions) { if (!byDojo.has(s.slug)) byDojo.set(s.slug, []); byDojo.get(s.slug).push(s); }
+  const byClub = new Map();
+  for (const s of sessions) { if (!byClub.has(s.slug)) byClub.set(s.slug, []); byClub.get(s.slug).push(s); }
 
   const { rows: [root] } = await client.query(
     'select id, path, country_code, timezone, coalesce(short_name, slug) as prefix from organisation where parent_id is null order by created_at limit 1');
-  if (!root) { report.notes.push('There is no federation to put dojo under.'); return report; }
+  if (!root) { report.notes.push('There is no federation to put clubs under.'); return report; }
 
   // Every organisation any of the three files names, in one query.
-  const slugs = [...new Set([...dojos, ...sessions, ...instructors].map((r) => r.slug).filter(Boolean))];
+  const slugs = [...new Set([...clubs, ...sessions, ...instructors].map((r) => r.slug).filter(Boolean))];
   const { rows: found } = await client.query('select id, name, slug from organisation where slug = any($1::text[])', [slugs]);
   const orgBySlug = new Map(found.map((o) => [o.slug, o]));
 
-  // ---- dojo: add the ones the register does not have, then one upsert for all profiles --------------------------
+  // ---- club: add the ones the register does not have, then one upsert for all profiles --------------------------
   const profiles = [];
-  for (const row of dojos) {
+  for (const row of clubs) {
     let org = orgBySlug.get(row.slug);
     if (!org && row.name) {
-      // A dojo the register does not have yet is added beneath the federation, the way Add a club does.
+      // A club the register does not have yet is added beneath the federation, the way Add a club does.
       ({ rows: [org] } = await client.query(`
         insert into organisation (parent_id, type, name, slug, path, country_code, timezone, status)
         values ($1,'club',$2,$3,($4 || '.' || $5)::ltree,$6,$7,'active') returning id, name, slug`,
@@ -44,7 +44,7 @@ export async function applyRegister(client, { dojos = [], sessions = [], instruc
     }
     if (!org) { report.notes.push(`No organisation with slug "${row.slug}": skipped.`); continue; }
 
-    const mine = byDojo.get(row.slug) ?? [];
+    const mine = byClub.get(row.slug) ?? [];
     const missing = publishable(row, mine.length);
     const willPublish = yes(row.publish) && missing.length === 0;
     if (yes(row.publish) && missing.length) report.held.push({ slug: row.slug, name: row.name || row.slug, missing });
@@ -55,7 +55,7 @@ export async function applyRegister(client, { dojos = [], sessions = [], instruc
   if (profiles.length) {
     const col = (f) => profiles.map(({ row }) => nul(row[f]));
     await client.query(`
-      insert into dojo_profile (organisation_id, venue_name, address_line, suburb, city, postcode,
+      insert into club_profile (organisation_id, venue_name, address_line, suburb, city, postcode,
         latitude, longitude, directions, phone, email, blurb, who_trains, published, updated_at)
       select * , now() from unnest($1::uuid[], $2::text[], $3::text[], $4::text[], $5::text[], $6::text[],
         $7::numeric[], $8::numeric[], $9::text[], $10::text[], $11::text[], $12::text[], $13::text[], $14::boolean[])
@@ -71,10 +71,10 @@ export async function applyRegister(client, { dojos = [], sessions = [], instruc
        col('directions'), col('phone'), col('email'), col('blurb'), col('who_trains'), profiles.map((p) => p.willPublish)]);
   }
 
-  // ---- class times: a dojo that has any in the file has them replaced, in two queries ----------------------------
+  // ---- class times: a club that has any in the file has them replaced, in two queries ----------------------------
   const timed = [], ids = [];
   for (const { org, row } of profiles) {
-    const mine = byDojo.get(row.slug) ?? [];
+    const mine = byClub.get(row.slug) ?? [];
     if (!mine.length) continue;
     ids.push(org.id);
     let order = 0;
@@ -117,16 +117,16 @@ export async function applyRegister(client, { dojos = [], sessions = [], instruc
     // An instructor is a member who also instructs: two rows, the way the instructor tick on a profile does it.
     const has = new Set(affs.map((a) => `${a.person_id}|${a.organisation_id}|${a.role}`));
     const top = new Map(tops.map((t) => [t.person_id, t.top]));
-    // A person is a member of ONE dojo (their home); at any other dojo where they teach they are an instructor only.
+    // A person is a member of ONE club (their home); at any other club where they teach they are an instructor only.
     const homed = new Set(affs.filter((a) => a.role === 'member').map((a) => a.person_id));
 
     const newPeople = [], newAffs = [], newGrades = [];
     for (const r of instructors) {
       const org = orgBySlug.get(r.slug);
-      if (!org) { report.notes.push(`No dojo "${r.slug}" for ${r.first_name} ${r.last_name}: skipped.`); continue; }
+      if (!org) { report.notes.push(`No club "${r.slug}" for ${r.first_name} ${r.last_name}: skipped.`); continue; }
       const first = String(r.first_name).trim(), last = String(r.last_name).trim();
       const k = key(first, last);
-      // The same name on another dojo's roll is the same person (two people teach at two dojo), unless the row says it is not.
+      // The same name on another club's roll is the same person (two people teach at two club), unless the row says it is not.
       const candidates = byName.get(k) ?? [];
       let id = yes(r.distinct) ? candidates.find((c) => has.has(`${c}|${org.id}|member`) || has.has(`${c}|${org.id}|instructor`)) : candidates[0];
       if (!id) {
@@ -161,7 +161,7 @@ export async function applyRegister(client, { dojos = [], sessions = [], instruc
       `insert into grading_record (person_id, grade_id, awarded_on, awarded_by_org, result, panel, notes)
        select p, g, current_date, o, 'pass', '[]', $4 from unnest($1::uuid[], $2::uuid[], $3::uuid[]) as t(p, g, o)`,
       [newGrades.map((x) => x.id), newGrades.map((x) => x.grade), newGrades.map((x) => x.org),
-       "Held on joining. Imported from the dojo's own records; not graded through this system."]);
+       "Held on joining. Imported from the club's own records; not graded through this system."]);
   }
   return report;
 }

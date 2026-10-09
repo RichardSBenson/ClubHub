@@ -4,7 +4,7 @@
  * Emailed sign-in links, no passwords.
  *
  * Volunteer organisations forget passwords, and a reset flow is a support
- * burden nobody signed up for. The same mechanism handles a dojo operator
+ * burden nobody signed up for. The same mechanism handles a club operator
  * logging in once a month and a member checking their grade once a year.
  *
  * Security notes that matter:

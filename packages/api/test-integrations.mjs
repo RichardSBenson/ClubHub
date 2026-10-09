@@ -68,14 +68,14 @@ console.log('\nTHE API');
   r = await api('/api/v1/members', tokenAll);
   ok('a token reads members, as JSON', r.status === 200 && /application\/json/.test(r.type) && Array.isArray(r.body.data) && r.body.data.length >= 3);
   const m = r.body.data.find((x) => x.last_name === 'Whanganui');
-  ok('with names, number, dojo and status', m && m.number && m.dojo === 'whanganui' && m.status === 'active');
+  ok('with names, number, dojo and status', m && m.number && m.club === 'whanganui' && m.status === 'active');
   ok('and nothing private', !JSON.stringify(r.body).match(/date_of_birth|dob|email|phone|1990-02-02|wai@example/i));
   r = await api('/api/v1/events', tokenAll);
   ok('a token without the scope is refused', r.status === 403 && r.body.error === 'insufficient_scope');
   r = await api('/api/v1/events', tokenEvents);
   ok('the events scope reads events', r.status === 200 && Array.isArray(r.body.data));
   r = await api('/api/v1/members', tokenWh);
-  ok('a dojo token sees only its own dojo', r.status === 200 && r.body.data.length > 0 && r.body.data.every((x) => x.dojo === 'whanganui') && !r.body.data.some((x) => x.last_name === 'Wellington'));
+  ok('a dojo token sees only its own dojo', r.status === 200 && r.body.data.length > 0 && r.body.data.every((x) => x.club === 'whanganui') && !r.body.data.some((x) => x.last_name === 'Wellington'));
   r = await api('/api/v1/organisations', tokenAll);
   ok('organisations lists the tree', r.status === 200 && r.body.data.some((o) => o.slug === 'whanganui') && r.body.data.some((o) => o.slug === 'wellington'));
   r = await api('/api/v1/members?limit=2', tokenAll);
@@ -109,7 +109,7 @@ let hook;
   ok('the secret is what we sign with', hook.secret === secret);
   r = await req(`/o/${root.slug}/integrations`);
   ok('and is not shown again', !r.html.includes(secret));
-  // a dojo's own endpoint should not hear about another dojo
+  // a club's own endpoint should not hear about another club
   await webhooks.create(doug.id, wg.id, { url: 'https://wellington.example.com/h', events: ['member.created'] });
 
   const before = (await one('select count(*)::int n from webhook_delivery')).n;

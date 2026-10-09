@@ -83,7 +83,7 @@ console.log('\nTHE FEDERATION ADDS A CLUB');
   ok('in the federation\'s tree', club?.path === `${federation.path}.taupo_karate`);
   ok('with the federation\'s timezone', club?.timezone === federation.timezone);
   ok('and no public page until it asks',
-    (await one(`select published from dojo_profile where organisation_id=$1`, [club.id]))
+    (await one(`select published from club_profile where organisation_id=$1`, [club.id]))
       ?.published !== true);
 
   const link = add.html.match(/\/signin\/[A-Za-z0-9_-]+/)?.[0];

@@ -105,8 +105,8 @@ export async function homesOf(personId) {
 // ---------------------------------------------------------------------------
 // fees and renewals
 //
-// Each dojo sets its own prices. Asking for a renewal creates an ordinary
-// payment — to the dojo — whose line says which membership it renews and for
+// Each club sets its own prices. Asking for a renewal creates an ordinary
+// payment — to the club — whose line says which membership it renews and for
 // how long. However it is paid (online, cash, transfer), paying moves the
 // membership on. Somebody marked exempt is never asked.
 // ---------------------------------------------------------------------------
@@ -205,7 +205,7 @@ export const ageOnDate = (dob, date) => {
 /** Best-effort email from the club. A message that cannot be sent never undoes what it was about. */
 export async function clubMail(org, { messenger, baseFrom }, to, subject, text) {
   try {
-    const contact = (await one('select email from dojo_profile where organisation_id=$1', [org.id]))?.email ?? null;
+    const contact = (await one('select email from club_profile where organisation_id=$1', [org.id]))?.email ?? null;
     const sender = senderFor({ club: org, baseFrom, contactEmail: contact });
     if (!messenger || !sender || !to) return false;
     await messenger.send({ to, subject: String(subject).slice(0, 150), text, kind: 'trial', sender });

@@ -75,7 +75,7 @@ export const rank = {
 
   /**
    * Eligibility, computed. Returns every unmet requirement rather than a bare
-   * no, because a dojo operator needs to tell the student what is missing.
+   * no, because a club operator needs to tell the student what is missing.
    */
   async eligibility(personId, federationId) {
     const row = await one(`
@@ -157,7 +157,7 @@ export const rank = {
 
   /**
    * Grades this actor may RECORD for a person who already holds them: kyu by an official of the
-   * person's own dojo, dan by an official of the federation that owns the ladder. A dojo cannot
+   * person's own club, dan by an official of the federation that owns the ladder. A club cannot
    * type in a black belt. Nothing here is awarded: no panel, no certificate.
    */
   async recognisable(actor, personId) {

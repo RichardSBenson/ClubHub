@@ -83,7 +83,7 @@ export const messages = {
         and e.starts_at > now() - interval '60 days'
       order by e.starts_at desc limit 40`, [org.path]);
     const contact = org.type === 'club'
-      ? (await one('select email from dojo_profile where organisation_id=$1', [orgId]))?.email : null;
+      ? (await one('select email from club_profile where organisation_id=$1', [orgId]))?.email : null;
     const me = actor ? await one('select email from account where id=$1', [actor]) : null;
     const sender = senderFor({ club: org, baseFrom, contactEmail: contact, actorEmail: me?.email });
     return { org, events, sender, contactEmail: contact };
@@ -406,7 +406,7 @@ export const api = {
   },
   async members(auth, { limit, after }) {
     const n = pageSize(limit);
-    const rows = await q(`select p.id, p.display_number as number, p.first_name, p.last_name, o.slug as dojo, a.role, a.status, a.paid_until::text as paid_until,
+    const rows = await q(`select p.id, p.display_number as number, p.first_name, p.last_name, o.slug as club, a.role, a.status, a.paid_until::text as paid_until,
         a.starts::text as joined, g.label as grade
       from affiliation a join organisation o on o.id = a.organisation_id join organisation me on me.id = $1 and o.path <@ me.path
       join person p on p.id = a.person_id left join person_current_grade g on g.person_id = p.id

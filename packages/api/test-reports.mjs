@@ -86,7 +86,7 @@ console.log('\nMONEY, ATTENDANCE, GRADINGS');
 {
   const pay = await one(`insert into payment (organisation_id, person_id, amount_cents, status, method, settled_at, receipt_no, currency)
     values ($1,$2,6000,'succeeded','cash', now(), 'R-2026-0001','NZD') returning id`, [whanganui.id, ann.id]);
-  await pool.query(`insert into payment_line (payment_id, kind, description, amount_cents) values ($1,'dojo_fee','Annual fee',6000)`, [pay.id]);
+  await pool.query(`insert into payment_line (payment_id, kind, description, amount_cents) values ($1,'club_fee','Annual fee',6000)`, [pay.id]);
   await pool.query(`insert into payment (organisation_id, person_id, amount_cents, status, currency) values ($1,$2,9999,'pending','NZD')`, [whanganui.id, bob.id]);
   const r = await reports.run(doug, whanganui.id, 'payments');
   ok('succeeded payments are listed with their total', r.rows.length === 1 && r.total === 6000 && r.rows[0].amount === '60.00' && r.rows[0].receipt === 'R-2026-0001');

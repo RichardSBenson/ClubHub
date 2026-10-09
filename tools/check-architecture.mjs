@@ -9,6 +9,7 @@
  *   4. A route (server.mjs) or a screen (views.mjs) talking to the database itself.
  *   5. The domain reading the clock, so its answers change with the time of day.
  *   6. The same block of code pasted into two files.
+ *   3b. The word "dojo" in code (it belongs to a vocabulary, not to the platform).
  *   7. A file growing without limit (see CAPS: a cap may be lowered, never raised).
  *
  * To satisfy a rule, change the code. A line that is genuinely an exception ends with `// arch-ok: <reason>`.
@@ -51,6 +52,18 @@ for (const f of files) {
       if (r.skipSql && /array\[/.test(l)) continue;
       if (r.re.test(l)) fail(f, i + 1, `defines ${r.what} again; it lives in ${r.owner}`);
     }
+  });
+}
+
+// 3b: the platform serves every art. "Dojo" is karate's and judo's word, so it belongs to an organisation's vocabulary
+// (data), not to code. Exceptions: the vocabulary list itself, the code that reads names saved before the rename, and the
+// customer-zero checks.
+const DOJO_OK = ['core/domain/founding.mjs', 'core/domain/values.mjs', 'site/legacy.mjs', 'site/verify.mjs'];
+for (const f of files) {
+  if (DOJO_OK.some((o) => is(f, o))) continue;
+  read(f).forEach((l, i) => {
+    if (/arch-ok:/.test(l) || /^\s*(\/\/|\*|\/\*)/.test(l)) return;
+    if (/dojo/i.test(l)) fail(f, i + 1, 'says "dojo" in code; use club (or the organisation\'s own word from its vocabulary)');
   });
 }
 

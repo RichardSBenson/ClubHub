@@ -2,10 +2,10 @@
  * HONBU — block documents
  *
  * The authored layer. About fifteen pages per federation: about us, history,
- * the dojo kun, affiliation, safeguarding.
+ * the club kun, affiliation, safeguarding.
  *
  * The point of having one system rather than two is DYNAMIC BLOCKS. An authored
- * page can drop in live register data — the dojo grid, upcoming events, the
+ * page can drop in live register data — the club grid, upcoming events, the
  * grade ladder, an honours board — and it stays correct without anyone editing
  * it. A separate CMS can only ever hold a stale copy.
  *
@@ -37,11 +37,11 @@ export const STATIC_BLOCKS = {
 
 /** Dynamic blocks that read the register at build time. */
 export const DYNAMIC_BLOCKS = {
-  dojoGrid:      { fields: ['columns'],        reads: 'dojos' },
+  clubGrid:      { fields: ['columns'],        reads: 'clubs' },
   eventList:     { fields: ['limit', 'kind'],  reads: 'events' },
   gradeLadder:   { fields: ['showSyllabus'],   reads: 'grades' },
   honoursBoard:  { fields: ['title', 'entries'], reads: 'honours' },
-  sessionTable:  { fields: ['dojoSlug'],       reads: 'sessions' },
+  sessionTable:  { fields: ['clubSlug'],       reads: 'sessions' },
   statBand:      { fields: ['stats'],          reads: 'counts' },
 };
 
@@ -105,7 +105,7 @@ export function validate(doc) {
           problems.push(`${at}: table has no rows`);
         break;
       case 'sessionTable':
-        if (!b.dojoSlug) problems.push(`${at}: which dojo's timetable?`);
+        if (!b.clubSlug) problems.push(`${at}: which club's timetable?`);
         break;
       case 'honoursBoard':
         if (!Array.isArray(b.entries) || !b.entries.length)
@@ -135,7 +135,7 @@ export function inline(text = '') {
 
 /**
  * Render a document.
- * `ctx` supplies whatever the dynamic blocks need: dojos, events, grades,
+ * `ctx` supplies whatever the dynamic blocks need: clubs, events, grades,
  * an asset resolver, and the origin.
  */
 export function renderDocument(doc, ctx = {}) {
@@ -187,10 +187,10 @@ function renderBlock(b, ctx) {
         `<tr>${r.map((c) => `<td>${inline(c)}</td>`).join('')}</tr>`).join('')}</tbody></table>`;
 
     // ---- dynamic: read the register, never a copy of it --------------------
-    case 'dojoGrid': {
-      const dojos = ctx.dojos ?? [];
-      if (!dojos.length) return '';
-      return `<div class="grid">${dojos.map((d) =>
+    case 'clubGrid': {
+      const clubs = ctx.clubs ?? [];
+      if (!clubs.length) return '';
+      return `<div class="grid">${clubs.map((d) =>
         `<a href="/${esc(d.slug)}"><strong>${esc(d.name)}</strong>
           <span>${esc(d.published ? (d.city ?? 'Book a free class') : 'Details coming')}</span></a>`
       ).join('')}</div>`;
@@ -222,7 +222,7 @@ function renderBlock(b, ctx) {
         </tr>`).join('')}</tbody></table>`;
     }
     case 'sessionTable': {
-      const sessions = ctx.sessionsBySlug?.[b.dojoSlug] ?? [];
+      const sessions = ctx.sessionsBySlug?.[b.clubSlug] ?? [];
       const groups = groupSessions(sessions);
       if (!groups.length) return '<p>Training times to be confirmed.</p>';
       return `<table class="times"><thead><tr><th>Class</th><th>Day</th><th>Time</th>

@@ -1,5 +1,5 @@
 /**
- * DOMAIN — reading the dojo register's three CSV files.
+ * DOMAIN — reading the club register's three CSV files.
  *
  * Pure: text in, rows out. Blank means unknown and is stored as NULL; nothing here invents a value.
  */

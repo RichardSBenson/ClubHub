@@ -33,7 +33,7 @@ function dayIn(date, zone) {
 
 /**
  * Is this the same event twice? Decided by WHEN it is and what kind it is, never by its title:
- * a dojo runs several gradings a year, for juniors and for seniors, and they are all called
+ * a club runs several gradings a year, for juniors and for seniors, and they are all called
  * "Kyu Grading". Two events of one kind starting at the same moment is a slip of the finger.
  * `exceptId` lets an event be saved over itself.
  */

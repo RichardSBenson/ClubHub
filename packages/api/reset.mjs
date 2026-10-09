@@ -20,7 +20,7 @@ const ADMIN = `${PSQL} -d postgres`;
 const run = (cmd) => execSync(cmd, { stdio: 'pipe' }).toString();
 
 // Structure first, then one customer's data. They used to be one file, which
-// is why a new federation's install had seventeen karate dojo in it.
+// is why a new federation's install had seventeen karate club in it.
 const files = ['../../db/install/schema.sql', '../../db/seeds/moknz.sql'];
 if (process.env.HONBU_SEED_DEMOS) files.push('../../db/seeds/demo-federations.sql');
 

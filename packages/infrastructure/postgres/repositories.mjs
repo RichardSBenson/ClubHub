@@ -276,7 +276,7 @@ export class PostgresSiteContent {
     return rows;
   }
 
-  async dojos(rootSlug) {
+  async clubs(rootSlug) {
     const { rows } = await this.pool.query(`
       select o.id, o.name, o.slug, o.country_code, d.*,
              coalesce(json_agg(json_build_object(
@@ -285,7 +285,7 @@ export class PostgresSiteContent {
                order by t.sort_order) filter (where t.id is not null), '[]') as sessions
       from organisation root
       join organisation o on o.path <@ root.path and o.type = 'club' and o.status='active'
-      left join dojo_profile d on d.organisation_id=o.id
+      left join club_profile d on d.organisation_id=o.id
       left join training_session t on t.organisation_id=o.id
       where root.slug=$1
       group by o.id, o.name, o.slug, o.country_code, d.organisation_id
@@ -298,7 +298,7 @@ export class PostgresSiteContent {
    * The pictures each club under this federation has put in its gallery, in
    * order. A database that has not had db/038 yet has none, and the build says nothing.
    */
-  /** What the federation sells to everyone: its own active products. A dojo's extras show only to its members. */
+  /** What the federation sells to everyone: its own active products. A club's extras show only to its members. */
   async shopRange(orgSlug) {
     const { rows } = await this.pool.query(`
       select p.id, p.category, p.name, p.description, p.sizes, p.price_cents, p.currency
@@ -386,7 +386,7 @@ export class PostgresSiteContent {
       where a.status='published'
         and ($1::uuid is null or a.organisation_id = $1 or (
           -- Somebody else's article reaches this site only if they asked and
-          -- this federation agreed. A dojo may say what it likes on its own
+          -- this federation agreed. A club may say what it likes on its own
           -- site; putting it in the federation's voice is the federation's
           -- decision, because its name on a page reads as an endorsement
           -- whether or not it was meant as one.
@@ -584,8 +584,8 @@ export class PostgresContentTypes {
 
   /**
    * A type defined by a parent organisation is available to everything beneath
-   * it — so a national body defines "Instructor" once and every dojo has it.
-   * The nearest definition wins, which lets a dojo override.
+   * it — so a national body defines "Instructor" once and every club has it.
+   * The nearest definition wins, which lets a club override.
    */
   async byName(organisationId, name) {
     const { rows: [r] } = await this.pool.query(`

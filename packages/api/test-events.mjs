@@ -1,5 +1,5 @@
 /**
- * Can somebody who runs a dojo actually put an event on the calendar?
+ * Can somebody who runs a club actually put an event on the calendar?
  *
  * This drives the real HTTP routes with real form posts against a real
  * database — no stubs. If this passes, a person with a browser can do it.

@@ -218,10 +218,10 @@ export class JsonOrganisations {
   }
 
   /** Everything the public site needs, with no database. */
-  async publicDojos(rootSlug) {
+  async publicClubs(rootSlug) {
     const orgs = this.data.read('organisations');
     const profiles = new Map(
-      this.data.read('dojo-profiles').map((d) => [d.organisationId, d]));
+      this.data.read('club-profiles').map((d) => [d.organisationId, d]));
     const sessions = this.data.read('training-sessions');
     const root = orgs.find((o) => o.slug === rootSlug);
     if (!root) return [];
@@ -304,8 +304,8 @@ export class JsonSiteContent {
   async assets(rootSlug) {
     const root = await this.federation(rootSlug);
     if (!root) return [];
-    const under = new Set(this.orgs.publicDojos
-      ? (await this.orgs.publicDojos(rootSlug)).map((d) => d.id)
+    const under = new Set(this.orgs.publicClubs
+      ? (await this.orgs.publicClubs(rootSlug)).map((d) => d.id)
       : []);
     under.add(root.id);
     return this.data.read('assets')
@@ -313,7 +313,7 @@ export class JsonSiteContent {
       .map((a) => ({ ...a, bytes: Buffer.from(a.base64 ?? '', 'base64') }));
   }
 
-  async dojos(rootSlug) { return this.orgs.publicDojos(rootSlug); }
+  async clubs(rootSlug) { return this.orgs.publicClubs(rootSlug); }
 
   /** The files store has no galleries; a federation that wants them runs a database. */
   async galleryFor() { return []; }

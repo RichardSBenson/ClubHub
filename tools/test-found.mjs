@@ -4,7 +4,7 @@
  * Starts from a database with NOTHING in it — schema only, no seed, no MOKNZ
  * — and checks that what comes out is theirs and contains no trace of anybody
  * else's. That last part is the whole test: the reason this work exists is
- * that a new customer used to find seventeen karate dojo and a man called
+ * that a new customer used to find seventeen karate club and a man called
  * Hanshi Doug already in their database.
  */
 
@@ -89,7 +89,7 @@ console.log('\nNOTHING OF ANYBODY ELSE\'S IS IN THERE');
   for (const [table, what] of [
     ['organisation', 'organisations'], ['person', 'people'],
     ['grade', 'grades'], ['title', 'titles'], ['event', 'events'],
-    ['article', 'articles'], ['dojo_profile', 'club profiles'],
+    ['article', 'articles'], ['club_profile', 'club profiles'],
     ['qualification', 'qualifications'], ['brand', 'brands'],
   ]) {
     const rows = await q(`select * from ${table}`); /* security-ok: table comes from a literal list in this test */
@@ -134,7 +134,7 @@ console.log('\nTHEIR WEBSITE IS NOT AN EMPTY SHELL');
   ok('it is a draft, not published without them asking',
     page.status === 'draft', page.status);
   ok('and it pulls their clubs and events in once they have some',
-    JSON.stringify(page.body).includes('dojoList')
+    JSON.stringify(page.body).includes('clubList')
     && JSON.stringify(page.body).includes('eventList'));
 }
 
@@ -187,7 +187,7 @@ console.log('\nOTHER ARTS GET THEIR OWN WORDS');
     ['Brazilian Jiu-Jitsu', 'Academy'], ['BJJ', 'Academy'],
     ['Muay Thai', 'Gym'],
     // The one that was wrong: "brazilian jiu-jitsu" contains "jiu-jitsu",
-    // which is Japanese, so list order put a BJJ academy in a dojo.
+    // which is Japanese, so list order put a BJJ academy in a club.
     ['Japanese Jiu-Jitsu', 'Dojo'],
     ['Capoeira', 'Group'], ['Pencak Silat', 'School'],
   ]) {

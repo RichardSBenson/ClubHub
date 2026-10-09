@@ -64,9 +64,9 @@ export const events = {
   },
 
   /**
-   * A dojo asks for its event to appear on the parent calendar.
+   * A club asks for its event to appear on the parent calendar.
    *
-   * Same rule as an article: it has to be live on the dojo's own calendar
+   * Same rule as an article: it has to be live on the club's own calendar
    * first, because what is being asked for is the federation's endorsement of
    * something that already exists, not a place to draft it.
    */
@@ -93,7 +93,7 @@ export const events = {
   /**
    * The federation decides.
    *
-   * Declining leaves the event on the dojo's own calendar and page; what is
+   * Declining leaves the event on the club's own calendar and page; what is
    * refused is a place on the federation's.
    */
   async decidePublishUp(actor, eventId, approve, { decidedBy = null } = {}) {
@@ -105,7 +105,7 @@ export const events = {
     const by = decidedBy ?? ev.parent_id;
     await assertRole(actor, by, MANAGE);
 
-    // Strictly above the event's own organisation, or a dojo would approve
+    // Strictly above the event's own organisation, or a club would approve
     // itself.
     const beneath = await one(`
       select 1 from organisation mine, organisation theirs
@@ -340,7 +340,7 @@ export const competition = {
       enteredForOrg = open.home_org;
     } else {
       // A club enters its own people, so the role is checked where they are
-      // being entered FROM, not at the host organisation — a dojo sensei has no
+      // being entered FROM, not at the host organisation — a club sensei has no
       // grant at the federation running the tournament.
       await assertRole(actor, enteredForOrg ?? ev.organisation_id, REGISTER);
     }

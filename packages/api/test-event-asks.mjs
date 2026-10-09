@@ -160,7 +160,7 @@ console.log('\nITS OWN PAGE CARRIES IT WITHOUT ANYBODY\'S SAY-SO');
 {
   await pool.query(`update event set publish_up=false, publish_up_state='none' where id=$1`,
     [(await ev(slug)).id]);
-  await pool.query(`insert into dojo_profile (organisation_id, published) values ($1, true)
+  await pool.query(`insert into club_profile (organisation_id, published) values ($1, true)
     on conflict (organisation_id) do update set published = true`, [wh.id]);
   await build();
   const page = site('whanganui/index.html') ?? '';

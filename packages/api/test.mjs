@@ -90,7 +90,7 @@ console.log('\nGRADING AUTHORITY IS ENFORCED');
   const DOUG_P = '22222222-0000-0000-0000-000000000001';  // Hanshi, 8th dan
   const TANE_P = '22222222-0000-0000-0000-000000000003';  // 2nd dan
 
-  // MOKNZ's actual bands: the dojo grades to 3rd kyu, 2nd and 1st kyu need a
+  // MOKNZ's actual bands: the club grades to 3rd kyu, 2nd and 1st kyu need a
   // 5th dan on the panel, and 1st dan upwards is a national grading.
   await throws('a dojo cannot award a dan grade',
     () => rank.award(DOUG, {
@@ -110,7 +110,7 @@ console.log('\nGRADING AUTHORITY IS ENFORCED');
       awardedOn: '2026-10-17', panel: [DOUG_P, TANE_P, TANE_P],
     }), Invalid);
 
-  // 3rd kyu is the dojo's own grading, and Whanganui is where she trains.
+  // 3rd kyu is the club's own grading, and Whanganui is where she trains.
   const awarded = await rank.award(DOUG, {
     personId: AROHA, gradeId: thirdKyu.id, awardedByOrg: whanganui.id,
     awardedOn: '2026-10-17', panel: [DOUG_P],
@@ -192,9 +192,9 @@ console.log('\nINVOICING FROM THE REGISTER');
 
 console.log('\nPUBLIC WEBSITE QUERY (no auth)');
 {
-  const dojos = await orgs.publicDojos('moknz');
-  ok('seventeen dojo returned for the site', dojos.length === 17, dojos.length);
-  ok('includes the Japan branch', dojos.some(d => d.slug === 'japan'));
+  const clubs = await orgs.publicClubs('moknz');
+  ok('seventeen dojo returned for the site', clubs.length === 17, clubs.length);
+  ok('includes the Japan branch', clubs.some(d => d.slug === 'japan'));
 }
 
 console.log(`\n${pass} passed, ${fail} failed\n`);

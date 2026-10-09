@@ -37,7 +37,7 @@ const EVERYTHING = { blocks: [
   { type: 'callout', tone: 'warning', text: rich('No entry after 9am.') },
   { type: 'divider' },
   { type: 'embed', provider: 'youtube', id: 'dQw4w9WgXcQ', caption: 'The kata' },
-  { type: 'dojoList', heading: 'Where we train' },
+  { type: 'clubList', heading: 'Where we train' },
   { type: 'eventList', heading: 'Coming up', kind: 'grading', limit: 3 },
   { type: 'honours', heading: 'Honours', award: 'Kokoro' },
   { type: 'faq', heading: 'Questions', items: [
@@ -104,7 +104,7 @@ console.log('\nTHE DETAILS SURVIVE, NOT JUST THE SHAPES');
     video.provider === 'youtube' && video.id === 'dQw4w9WgXcQ');
 
   ok('the live club list keeps its heading',
-    of('dojoList').heading === 'Where we train');
+    of('clubList').heading === 'Where we train');
   ok('the live event list keeps its settings',
     of('eventList').kind === 'grading' && of('eventList').limit === 3);
   ok('and the honours board keeps its award',

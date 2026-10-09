@@ -1,7 +1,7 @@
 /**
  * DOMAIN — API tokens and webhooks
  *
- * Lets a federation or dojo connect Honbu to other systems (an accounting package, a website, a spreadsheet) without
+ * Lets a federation or club connect Honbu to other systems (an accounting package, a website, a spreadsheet) without
  * giving anybody a login. Nothing here touches a database or the network.
  *
  *  - An API token is read-only, belongs to one organisation, and sees that organisation and what is beneath it.

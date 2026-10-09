@@ -3,7 +3,7 @@
  *
  *   1. One profile for everybody; "instructor" is a tick, and only somebody above them can make it.
  *   2. One photograph on the person's record, with consent, used on the card and the website.
- *   3. One instructor card, the same on a dojo's page and the Instructors page.
+ *   3. One instructor card, the same on a club's page and the Instructors page.
  */
 import './reset.mjs';
 import http from 'node:http';
@@ -160,12 +160,12 @@ let year = new Date().getFullYear() - 25;
   ok('with the year and the checks choice kept', row.published && row.started_year === year && row.show_checks === true);
 
   await build();
-  const dojo = fs.readFileSync(path.join(OUT, 'whanganui/index.html'), 'utf8');
+  const club = fs.readFileSync(path.join(OUT, 'whanganui/index.html'), 'utf8');
   fs.copyFileSync(path.join(OUT, 'whanganui/index.html'), '/tmp/dbg-dojo.html'); fs.copyFileSync(path.join(OUT, 'instructors/index.html'), '/tmp/dbg-inst.html');
-  ok('the dojo page has "Your instructor"', /Your instructor<\/h2>/.test(dojo) && /Hana Sensei/.test(dojo));
-  ok('in the fixed format', ['class="icard"', 'class="iphoto"', 'Teaches</b> Juniors', `Training since</b> ${year}`, 'Hana has taught children'].every((t) => dojo.includes(t)));
-  ok('with her photograph from her record', /<img class="iphoto" src="\/images\/[^"]+"/.test(dojo));
-  ok('and only the checks that are current', /<li>Police vetting<\/li>/.test(dojo) && !/First aid/.test(dojo));
+  ok('the dojo page has "Your instructor"', /Your instructor<\/h2>/.test(club) && /Hana Sensei/.test(club));
+  ok('in the fixed format', ['class="icard"', 'class="iphoto"', 'Teaches</b> Juniors', `Training since</b> ${year}`, 'Hana has taught children'].every((t) => club.includes(t)));
+  ok('with her photograph from her record', /<img class="iphoto" src="\/images\/[^"]+"/.test(club));
+  ok('and only the checks that are current', /<li>Police vetting<\/li>/.test(club) && !/First aid/.test(club));
   const all = fs.readFileSync(path.join(OUT, 'instructors/index.html'), 'utf8');
   ok('the Instructors page uses the same card', /class="icard"/.test(all) && /Hana Sensei/.test(all) && /She grades regularly/.test(all));
   ok('and says where she teaches', /href="\/whanganui"/.test(all));

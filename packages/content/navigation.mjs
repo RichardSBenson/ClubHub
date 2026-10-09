@@ -30,7 +30,7 @@ export const MAX_ITEMS = 5;
  */
 export const BUILT_IN = [
   { href: '/', label: 'Home', always: true },
-  { href: '/find-a-dojo', label: null, club: true },
+  { href: '/find-a-club', label: null, club: true },
   { href: '/events', label: 'Events' },
   { href: '/news', label: 'News' },
   { href: '/instructors', label: 'Instructors' },

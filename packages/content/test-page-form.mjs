@@ -19,7 +19,7 @@ const DOC = { blocks: [
     { text: ' in 1965.' }] },
   { type: 'list', ordered: false, items: [
     [{ text: 'Tuesdays 6pm' }], [{ text: 'Thursdays 6pm' }]] },
-  { type: 'dojoList', heading: 'Where to train' },
+  { type: 'clubList', heading: 'Where to train' },
 ]};
 
 console.log('\nA DOCUMENT FILLS THE FORM');
@@ -41,7 +41,7 @@ console.log('\nAND THE FORM REBUILDS THE DOCUMENT');
   const back = documentFromForm(formFromDocument(DOC));
   ok('the same number of blocks', back.blocks.length === 4);
   ok('in the same order',
-    back.blocks.map((b) => b.type).join(',') === 'heading,paragraph,list,dojoList');
+    back.blocks.map((b) => b.type).join(',') === 'heading,paragraph,list,clubList');
   ok('the bold survives the round trip',
     JSON.stringify(back.blocks[1].text) === JSON.stringify(DOC.blocks[1].text),
     JSON.stringify(back.blocks[1].text));
@@ -55,13 +55,13 @@ console.log('\nWHAT THE BUTTONS DO');
   const order = (d) => d.blocks.map((b) => b.type).join(',');
 
   ok('move up', order(applyOperation(DOC, 'up:1'))
-    === 'paragraph,heading,list,dojoList');
+    === 'paragraph,heading,list,clubList');
   ok('move down', order(applyOperation(DOC, 'down:0'))
-    === 'paragraph,heading,list,dojoList');
+    === 'paragraph,heading,list,clubList');
   ok('remove', order(applyOperation(DOC, 'remove:2'))
-    === 'heading,paragraph,dojoList');
+    === 'heading,paragraph,clubList');
   ok('add one at the end', order(applyOperation(DOC, 'add:quote'))
-    === 'heading,paragraph,list,dojoList,quote');
+    === 'heading,paragraph,list,clubList,quote');
 
   ok('the first block cannot move up', order(applyOperation(DOC, 'up:0'))
     === order(DOC));
@@ -75,7 +75,7 @@ console.log('\nWHAT THE BUTTONS DO');
     order(applyOperation(DOC, 'save')) === order(DOC));
 
   ok('the original is never mutated', order(DOC)
-    === 'heading,paragraph,list,dojoList');
+    === 'heading,paragraph,list,clubList');
 }
 
 console.log('\nA NEW BLOCK OF EVERY KIND THE MENU OFFERS');
@@ -100,7 +100,7 @@ console.log('\nWHAT A HALF-FINISHED PAGE LOOKS LIKE');
   ok('but one word is not',
     !looksEmpty({ blocks: [{ type: 'heading', text: 'Hi', level: 2 }] }));
   ok('and a live block on its own is a page — it pulls the clubs in',
-    !looksEmpty({ blocks: [emptyBlock('dojoList')] }));
+    !looksEmpty({ blocks: [emptyBlock('clubList')] }));
 }
 
 console.log('\nWHAT A SUBMITTED FORM ACTUALLY LOOKS LIKE');

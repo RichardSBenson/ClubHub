@@ -123,7 +123,7 @@ console.log('\nAN IMPORTED FILE IS CHECKED BEFORE ANYTHING CHANGES');
     JSON.stringify({ ...good, colours: { ...good.colours, ink: '#FFFFFF', canvas: '#FFFFFF' } }),
     /Colours:/);
   await bad('a club page without its facts',
-    JSON.stringify({ ...good, dojoPage: { sections: ['hero'] } }), /facts/);
+    JSON.stringify({ ...good, clubPage: { sections: ['hero'] } }), /facts/);
   await bad('an enormous file', ' '.repeat(30 * 1024), /KB|too large/);
 }
 

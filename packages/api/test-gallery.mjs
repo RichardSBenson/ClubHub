@@ -1,5 +1,5 @@
 /**
- * The dojo gallery: many pictures at once, filed by year and event, shown by year and event.
+ * The club gallery: many pictures at once, filed by year and event, shown by year and event.
  */
 import './reset.mjs';
 import http from 'node:http';
@@ -166,11 +166,11 @@ console.log('\nFILING AND TIDYING');
 console.log('\nWHAT THE PUBLIC SEES');
 {
   await build();
-  const dojo = fs.readFileSync(path.join(OUT, 'whanganui/index.html'), 'utf8');
-  const stripCount = (dojo.match(/<ul class="gallery">[\s\S]*?<\/ul>/)?.[0].match(/<li>/g) ?? []).length;
+  const club = fs.readFileSync(path.join(OUT, 'whanganui/index.html'), 'utf8');
+  const stripCount = (club.match(/<ul class="gallery">[\s\S]*?<\/ul>/)?.[0].match(/<li>/g) ?? []).length;
   const total = (await rows()).length;
   ok('the dojo page shows a short strip, not all of them', total > 8 ? stripCount === 8 : stripCount === total, `${stripCount}/${total}`);
-  ok('with a link to the full gallery', (total > 8 ? new RegExp(`href="/whanganui/gallery">See all ${total} photos`) : /href="\/whanganui\/gallery">Photos by year and event/).test(dojo));
+  ok('with a link to the full gallery', (total > 8 ? new RegExp(`href="/whanganui/gallery">See all ${total} photos`) : /href="\/whanganui\/gallery">Photos by year and event/).test(club));
   const file = path.join(OUT, 'whanganui/gallery/index.html');
   ok('the dojo has a gallery page of its own', fs.existsSync(file));
   const html = fs.readFileSync(file, 'utf8');
@@ -181,7 +181,7 @@ console.log('\nWHAT THE PUBLIC SEES');
   ok('every picture is a file on the site', (html.match(/<img src="\/images\/[^"]+"/g) ?? []).length === total);
   ok('a dojo with no pictures has no gallery page', !fs.existsSync(path.join(OUT, 'wellington/gallery/index.html')) && !fs.existsSync(path.join(OUT, 'wellington/gallery')));
   ok('each picture links to its full-size file, so it opens large even without scripts', (html.match(/<a class="glink" href="\/images\/[^"]+"><img/g) ?? []).length === total);
-  ok('the page loads the photo viewer from this site', /<script src="\/vendor\/lightbox\.js" defer><\/script>/.test(html) && /<script src="\/vendor\/lightbox\.js"/.test(dojo));
+  ok('the page loads the photo viewer from this site', /<script src="\/vendor\/lightbox\.js" defer><\/script>/.test(html) && /<script src="\/vendor\/lightbox\.js"/.test(club));
   ok('the viewer script is part of the site', fs.existsSync(path.join(OUT, 'vendor/lightbox.js')) && /ArrowRight/.test(fs.readFileSync(path.join(OUT, 'vendor/lightbox.js'), 'utf8')));
   ok('the uploader script is part of the site', fs.existsSync(path.join(OUT, 'vendor/gallery-upload.js')) && /createImageBitmap/.test(fs.readFileSync(path.join(OUT, 'vendor/gallery-upload.js'), 'utf8')));
 }

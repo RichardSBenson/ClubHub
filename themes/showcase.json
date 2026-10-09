@@ -1,8 +1,8 @@
 {
   "format": "honbu-theme",
   "version": 1,
-  "name": "Dojo Showcase",
-  "description": "A dark masthead with the crest and a belt stripe, a hero that helps a newcomer find their nearest dojo, then the pathway, the dojo by region and event cards.",
+  "name": "Showcase",
+  "description": "A dark masthead with the crest and a belt stripe, a hero that helps a newcomer find their nearest club, then the pathway, the clubs by region and event cards.",
   "author": "Honbu",
   "layout": "showcase",
   "colours": {
@@ -24,7 +24,7 @@
       "pathway",
       "quotes",
       "photoBand",
-      "dojoGrid",
+      "clubGrid",
       "lineage",
       "events",
       "spotlight",
@@ -32,7 +32,7 @@
       "news"
     ]
   },
-  "dojoPage": {
+  "clubPage": {
     "sections": [
       "hero",
       "facts",

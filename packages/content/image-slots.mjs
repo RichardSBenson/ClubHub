@@ -17,7 +17,7 @@ export const SLOTS = Object.freeze({
     width: 2400, height: 1000, minWidth: 1600,
     ratio: '12:5 (wide)',
     safe: 'Keep faces and the main action in the middle 60%. On a phone the sides are cropped away.',
-    where: 'Full width behind the heading on the home page and on each dojo page.',
+    where: 'Full width behind the heading on the home page and on each club page.',
   },
   card: {
     label: 'News and event picture',
@@ -31,7 +31,7 @@ export const SLOTS = Object.freeze({
     width: 1200, height: 800, minWidth: 800,
     ratio: '3:2',
     safe: 'Landscape works best. Portrait pictures are cropped to landscape.',
-    where: 'The photo strip on a dojo page.',
+    where: 'The photo strip on a club page.',
   },
   portrait: {
     label: 'Instructor portrait',

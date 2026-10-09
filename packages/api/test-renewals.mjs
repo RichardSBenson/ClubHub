@@ -1,14 +1,14 @@
 /**
  * Renewing memberships.
  *
- *   1. Each dojo sets its own prices; one dojo's are not another's.
- *   2. Asking for a renewal charges at the dojo's price for that person, and
- *      pays the dojo.
+ *   1. Each club sets its own prices; one club's are not another's.
+ *   2. Asking for a renewal charges at the club's price for that person, and
+ *      pays the club.
  *   3. However it is paid — card, bank, cash, transfer — paying moves
  *      "fees run to" on from the later of today and where it already runs to.
- *   4. Cash is recorded by the dojo, numbered, attributed and in the history;
+ *   4. Cash is recorded by the club, numbered, attributed and in the history;
  *      a member cannot record their own cash.
- *   5. Somebody the dojo does not charge is never asked, and still renews.
+ *   5. Somebody the club does not charge is never asked, and still renews.
  */
 import './reset.mjs';
 import http from 'node:http';

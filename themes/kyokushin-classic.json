@@ -1,7 +1,7 @@
 {
   "format": "honbu-theme",
   "version": 1,
-  "name": "Classic dojo",
+  "name": "Classic",
   "description": "Red and gold on near-black, with type that carries kanji. A traditional, high-contrast look.",
   "author": "Honbu",
   "layout": "classic",
@@ -19,12 +19,12 @@
   "homePage": {
     "sections": [
       "hero",
-      "dojoGrid",
+      "clubGrid",
       "events",
       "news"
     ]
   },
-  "dojoPage": {
+  "clubPage": {
     "sections": [
       "hero",
       "facts",

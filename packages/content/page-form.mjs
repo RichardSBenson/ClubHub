@@ -27,7 +27,7 @@ const RICH = new Set(['rich', 'rich[]']);
 
 /**
  * The editor offers these, in this order, with words rather than type names.
- * `dojoList`, `eventList` and `honours` pull live data into an authored page,
+ * `clubList`, `eventList` and `honours` pull live data into an authored page,
  * which is the whole point of the register and the website being one system.
  */
 export const BLOCK_MENU = [
@@ -39,7 +39,7 @@ export const BLOCK_MENU = [
   ['image', 'Image'],
   ['embed', 'Video'],
   ['divider', 'Divider'],
-  ['dojoList', 'List of clubs (live)'],
+  ['clubList', 'List of clubs (live)'],
   ['eventList', 'Upcoming events (live)'],
   ['honours', 'Honours board (live)'],
 ];
@@ -201,7 +201,7 @@ export function looksEmpty(doc) {
     if (b.type === 'divider') return false;
     // A live block is content even with nothing typed into it: it pulls the
     // clubs or the events in at render time.
-    if (b.type === 'dojoList' || b.type === 'eventList' || b.type === 'honours')
+    if (b.type === 'clubList' || b.type === 'eventList' || b.type === 'honours')
       return true;
     // `type` is skipped deliberately: it is always a non-empty string, so
     // counting it would make every block look like it had content in it.

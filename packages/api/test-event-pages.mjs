@@ -1,9 +1,9 @@
 /**
- * How events are announced, and dojo galleries.
+ * How events are announced, and club galleries.
  *
  *   1. An event is picked from the federation's list, and its banner is text plus the crest.
  *   2. Contacts, cost and a map sit beside it on the event page.
- *   3. A dojo builds its own photo strip; the page shows it once it has pictures.
+ *   3. A club builds its own photo strip; the page shows it once it has pictures.
  */
 import './reset.mjs';
 import http from 'node:http';
@@ -139,10 +139,10 @@ console.log('\nTHE BANNER AND THE PAGE');
   ok('the federation\'s events list shows banners', /class="evbanner small"/.test(events) && /class="evcard"/.test(events));
   const imgs = [...events.matchAll(/<img [^>]*>/g)].map((m) => m[0]);
   ok('the only picture is the crest', imgs.length > 0 && imgs.every((i) => /class="(crest|crestmark)"/.test(i)));
-  const dojo0 = fs.readFileSync(path.join(OUT, 'whanganui/index.html'), 'utf8');
-  ok('a dojo\'s own event shows on its page as a banner', /<span class="evtop">South Island<\/span>/.test(dojo0) && /<span class="evmain">Shinsa<\/span>/.test(dojo0));
-  ok('the date is written out', /<span class="evwhen">\d+(–\d+)? \w+<\/span>/.test(dojo0));
-  ok('and links to a page under the dojo', new RegExp(`href="/whanganui/events/${eventSlug}"`).test(dojo0));
+  const club0 = fs.readFileSync(path.join(OUT, 'whanganui/index.html'), 'utf8');
+  ok('a dojo\'s own event shows on its page as a banner', /<span class="evtop">South Island<\/span>/.test(club0) && /<span class="evmain">Shinsa<\/span>/.test(club0));
+  ok('the date is written out', /<span class="evwhen">\d+(–\d+)? \w+<\/span>/.test(club0));
+  ok('and links to a page under the dojo', new RegExp(`href="/whanganui/events/${eventSlug}"`).test(club0));
   const html = fs.readFileSync(path.join(OUT, 'whanganui/events', eventSlug, 'index.html'), 'utf8');
   ok('without anybody at the federation approving it', !fs.existsSync(path.join(OUT, 'events', eventSlug)));
   ok('the event page has the big banner', /class="evbanner"/.test(html) && /Shinsa/.test(html));
@@ -155,9 +155,9 @@ console.log('\nTHE BANNER AND THE PAGE');
     && /Open in Google Maps/.test(html));
   ok('the crest sits in the header too', /class="crestmark"/.test(fs.readFileSync(path.join(OUT, 'index.html'), 'utf8')));
   ok('the banner font is requested the way Google accepts it', /family=Anton["&]/.test(html) && !/Anton:wght/.test(html));
-  const dojo = fs.readFileSync(path.join(OUT, 'whanganui/index.html'), 'utf8');
-  ok('a dojo page lists its events as banners', /class="evcard"/.test(dojo));
-  ok('and has no gallery until it has pictures', !/class="gallery"/.test(dojo));
+  const club = fs.readFileSync(path.join(OUT, 'whanganui/index.html'), 'utf8');
+  ok('a dojo page lists its events as banners', /class="evcard"/.test(club));
+  ok('and has no gallery until it has pictures', !/class="gallery"/.test(club));
 }
 
 console.log('\nA DOJO GALLERY');
@@ -189,9 +189,9 @@ console.log('\nA DOJO GALLERY');
   ok('captions can be changed', (await rows())[0].caption === 'Our hall');
 
   await build();
-  let dojo = fs.readFileSync(path.join(OUT, 'whanganui/index.html'), 'utf8');
-  ok('the page shows the strip, in order, with captions', /class="gallery"/.test(dojo) && dojo.indexOf('Our hall') < dojo.indexOf('Juniors after a grading'));
-  ok('the pictures are files on the site', (dojo.match(/<img src="\/images\/[^"]+" alt/g) ?? []).length === 2);
+  let club = fs.readFileSync(path.join(OUT, 'whanganui/index.html'), 'utf8');
+  ok('the page shows the strip, in order, with captions', /class="gallery"/.test(club) && club.indexOf('Our hall') < club.indexOf('Juniors after a grading'));
+  ok('the pictures are files on the site', (club.match(/<img src="\/images\/[^"]+" alt/g) ?? []).length === 2);
 
   await req(`/o/whanganui/gallery/${second.id}/remove`, { method: 'POST', form: {} });
   ok('removing takes it out and closes the gap', (await rows()).length === 1 && (await one(`select position from club_gallery where organisation_id=$1`, [wh.id])).position === 0);

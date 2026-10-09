@@ -26,10 +26,10 @@ const HEX = /^#[0-9a-fA-F]{6}$/;
 // Only what a renderer actually builds. photoBand, pathway and lineage were
 // accepted here for a long time and rendered nothing, so a site that listed one
 // looked exactly like a site that did not.
-const HOME_SECTIONS = ['hero','dojoGrid','events','news',
+const HOME_SECTIONS = ['hero','clubGrid','events','news',
   // The showcase layout's. The classic layout skips any it does not draw, so listing one there costs nothing.
   'proof','firstNight','pathway','quotes','photoBand','lineage','spotlight','memberBand'];
-const DOJO_SECTIONS = ['hero','facts','startAnyWeek','times','about','instructors','gallery','events','findUs',
+const CLUB_SECTIONS = ['hero','facts','startAnyWeek','times','about','instructors','gallery','events','findUs',
   'firstNight','enquire','federationBand'];
 
 /**
@@ -44,8 +44,8 @@ const DEFAULTS = {
   colours: { primary:'#15171A', accent:'#F2C94C', ink:'#15171A',
              canvas:'#FFFFFF', neutral:'#9AA5AC' },
   fonts: { display:'Georgia', body:'system-ui' },
-  homePage: { sections:['hero','dojoGrid','events','news'] },
-  dojoPage: { sections: DOJO_SECTIONS },
+  homePage: { sections:['hero','clubGrid','events','news'] },
+  clubPage: { sections: CLUB_SECTIONS },
   navigation: { items: [] },
 };
 
@@ -57,6 +57,8 @@ const clean = (o) => {
       .filter(([k]) => !k.startsWith('_')).map(([k, v]) => [k, clean(v)]));
   return o;
 };
+
+import { modernise } from './legacy.mjs';
 
 export function loadSettings(dir) {
   const file = path.join(dir, 'settings.json');
@@ -71,7 +73,7 @@ export function loadSettings(dir) {
       'a missing comma or a trailing one is the usual cause',
     ]);
   }
-  return complete(clean(raw));
+  return complete(clean(modernise(raw)));
 }
 
 /**
@@ -140,7 +142,7 @@ function complete(s) {
     tokens,
     fonts: { ...DEFAULTS.fonts, ...(s.fonts ?? {}) },
     homePage: { ...DEFAULTS.homePage, ...(s.homePage ?? {}) },
-    dojoPage: { ...DEFAULTS.dojoPage, ...(s.dojoPage ?? {}) },
+    clubPage: { ...DEFAULTS.clubPage, ...(s.clubPage ?? {}) },
     navigation: s.navigation?.items ?? [],
     seo: s.seo ?? {},
     layout: s.layout,
@@ -195,14 +197,14 @@ function checkSections(s, problems) {
       problems.push(`homePage.sections has "${name}" — choose from: ` +
         HOME_SECTIONS.join(', '));
   }
-  for (const name of s.dojoPage?.sections ?? []) {
-    if (!DOJO_SECTIONS.includes(name))
-      problems.push(`dojoPage.sections has "${name}" — choose from: ` +
-        DOJO_SECTIONS.join(', '));
+  for (const name of s.clubPage?.sections ?? []) {
+    if (!CLUB_SECTIONS.includes(name))
+      problems.push(`clubPage.sections has "${name}" — choose from: ` +
+        CLUB_SECTIONS.join(', '));
   }
-  if ((s.dojoPage?.sections ?? []).length
-      && !s.dojoPage.sections.includes('facts'))
-    problems.push('dojoPage.sections is missing "facts" — where, when and who ' +
+  if ((s.clubPage?.sections ?? []).length
+      && !s.clubPage.sections.includes('facts'))
+    problems.push('clubPage.sections is missing "facts" — where, when and who ' +
       'to ask is the reason a visitor is on that page');
 }
 
@@ -231,7 +233,7 @@ export function settingsFromCrest(pixels, { name, tagline } = {}) {
     },
     fonts: DEFAULTS.fonts,
     homePage: DEFAULTS.homePage,
-    dojoPage: DEFAULTS.dojoPage,
+    clubPage: DEFAULTS.clubPage,
   };
 }
 
@@ -246,4 +248,4 @@ function dedupe(notes) {
   });
 }
 
-export { HOME_SECTIONS, DOJO_SECTIONS };
+export { HOME_SECTIONS, CLUB_SECTIONS };

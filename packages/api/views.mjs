@@ -24,7 +24,7 @@ import { SHORTHAND_HELP } from '../content/marks.mjs';
 /**
  * What this federation calls things. Read from the same settings file the
  * public site uses, so the admin and the website never disagree about whether
- * a place is a Dojo, a Dojang, an Academy or a Gym.
+ * a place is a Club, a Dojang, an Academy or a Gym.
  *
  * Read once, and neutral if the file is missing or unreadable — the admin
  * failing to load because somebody mistyped a label would be a poor trade.
@@ -51,6 +51,7 @@ const VOCABULARY = (() => {
 import { esc } from '../core/domain/html.mjs';
 const clubWord = () => words().club.toLowerCase();
 const ClubWord = () => words().club;
+const clubsWord = () => words().clubPlural.toLowerCase();
 import { DEFAULT_TIMEZONE } from '../core/domain/defaults.mjs';
 import { money as cents, dollars as money } from '../core/domain/money.mjs';
 import { taxLine } from '../core/domain/tax.mjs';
@@ -455,7 +456,7 @@ export const dashboard = ({ me, csrf, orgs, parents = [], groups = [], platformO
 export const roster = ({ me, csrf, org, roster, total = null, canRegister = false, canManage = false, unlinked = [], waitingDocs = [],
                         filter = {}, ladder = [], dueCount = 0, declarationUnsigned = 0, done, error, rebuild }) => {
   const here = `/o/${esc(org.slug)}/roster`;
-  const withDojo = org.type !== 'club';
+  const withClub = org.type !== 'club';
   const q = (extra = {}) => new URLSearchParams(Object.entries({ grade: filter.grade !== 'all' ? filter.grade : '', band: filter.band, show: filter.show, ...extra })
     .filter(([, v]) => v)).toString();
   const filtered = filter.grade !== 'all' && filter.grade || filter.band || filter.show;
@@ -525,7 +526,7 @@ export const roster = ({ me, csrf, org, roster, total = null, canRegister = fals
       <a id="pickall-link" href="${here}?${esc(q({ all: '1' }))}">Select everyone shown (${roster.length})</a></p>` : ''}
   <table>
     <thead><tr>${canManage ? '<th></th>' : ''}<th>Name</th><th>Grade</th><th class="hide-sm">Next grading</th><th class="hide-sm">Age</th>
-      ${withDojo ? `<th class="hide-sm">${ClubWord()}</th>` : ''}<th>${canManage ? 'Instructor' : 'Role'}</th><th>Paid until</th></tr></thead>
+      ${withClub ? `<th class="hide-sm">${ClubWord()}</th>` : ''}<th>${canManage ? 'Instructor' : 'Role'}</th><th>Paid until</th></tr></thead>
     <tbody>${roster.map((p) => `<tr>
       ${canManage ? `<td>${p.is_dan || p.isInstructor ? `<input class="pick" type="checkbox" name="pick_${esc(p.id)}" aria-label="Choose ${esc(p.first_name)} ${esc(p.last_name)}"${filter.all ? ' checked' : ''}>` : ''}</td>` : ''}
       <td><a href="/p/${p.id}">${esc(p.first_name)} ${esc(p.last_name)}</a>
@@ -534,7 +535,7 @@ export const roster = ({ me, csrf, org, roster, total = null, canRegister = fals
         : '<span class="tag no">ungraded</span>'}</td>
       <td class="hide-sm">${nextCell(p.nextGrading)}</td>
       <td class="hide-sm">${p.age ?? ''}</td>
-      ${withDojo ? `<td class="hide-sm">${esc(p.dojo ?? '')}</td>` : ''}
+      ${withClub ? `<td class="hide-sm">${esc(p.club ?? '')}</td>` : ''}
       <td>${p.noGuardian ? '<span class="tag wait">No parent linked</span> ' : ''}${p.noDeclaration ? '<span class="tag wait">Declaration not signed</span> ' : ''}${canManage ? nowCell(p) : (p.isInstructor ? '<span class="tag">Instructor</span>' : '<span class="hide-sm">' + esc(p.role) + '</span>')}</td>
       <td>${p.paid_until ? String(new Date(p.paid_until).toISOString().slice(0,10)) : '—'}</td>
     </tr>`).join('')}</tbody></table>
@@ -1084,7 +1085,7 @@ export const grading = ({ me, csrf, org, candidates, ladder, done, error }) => {
  * Two lists, deliberately separate. Its own events, which it may change, and
  * events inherited from above, which it may not. Mixing them into one table
  * with some rows editable is how somebody ends up trying to cancel the
- * national grading from their dojo page.
+ * national grading from their club page.
  */
 export const events = ({ me, csrf, org, own = [], inherited = [], zone,
                          canSchedule = true, canAsk = false, waiting = [],
@@ -2397,11 +2398,11 @@ export const menuEditor = ({ me, csrf, org, items = [], destinations = [],
 };
 
 /**
- * A federation or dojo's news.
+ * A federation or club's news.
  *
  * Two lists, and the second one only exists for somebody who can decide:
  * articles from beneath this organisation whose authors have asked for them to
- * appear here. A dojo may say what it likes on its own site; putting it in the
+ * appear here. A club may say what it likes on its own site; putting it in the
  * federation's voice is the federation's call, because its name on a page
  * reads as an endorsement whether or not it was meant as one.
  */
@@ -2948,7 +2949,7 @@ export const appearanceEditor = ({ me, csrf, org, current, builtIn = [], home = 
     <label for="heroText">Line under the heading</label>
     <input id="heroText" name="heroText" maxlength="300" value="${esc(home.heroText ?? '')}">
     <label for="heroButton">Button</label>
-    <input id="heroButton" name="heroButton" maxlength="80" value="${esc(home.heroButton ?? '')}" placeholder="Find your dojo">
+    <input id="heroButton" name="heroButton" maxlength="80" value="${esc(home.heroButton ?? '')}" placeholder="Find your ${clubWord()}">
     <p class="hint">Leave a box empty to use the standard words.</p>
     <p><label>Big picture at the top${home.heroAssetId ? ' (one is set — choosing another replaces it)' : ''}<br>
       <input type="file" name="heroFile" accept="image/png,image/jpeg,image/webp"></label></p>
@@ -2994,14 +2995,14 @@ export const appearanceEditor = ({ me, csrf, org, current, builtIn = [], home = 
   </form>`, });
 };
 
-/** Load the dojo register's CSV files into a federation: paste, preview, confirm. */
+/** Load the club register's CSV files into a federation: paste, preview, confirm. */
 export const registerImportScreen = ({ me, csrf, org, files = {}, report = null, saved = false, error, bundled = false }) => {
   const box = (id, label, hint) => `<label for="${id}">${esc(label)}</label>
     <p class="muted">${hint}</p>
     <textarea id="${id}" name="${id}" rows="6" spellcheck="false" style="font-family:monospace">${esc(files[id] ?? '')}</textarea>`;
   const list = (rows) => rows.length ? `<ul>${rows.map((r) => `<li>${r}</li>`).join('')}</ul>` : '';
-  return page({ title: `Import ${clubWord()}s — ${org.name}`, me, csrf, body: `
-  <h1>Import ${clubWord()}s, class times and instructors</h1>
+  return page({ title: `Import ${clubsWord()} — ${org.name}`, me, csrf, body: `
+  <h1>Import ${clubsWord()}, class times and instructors</h1>
   <p class="sub">${esc(org.name)}</p>
   <p><a href="/o/${esc(org.slug)}/clubs">Back to clubs</a></p>
   ${error ? `<div class="bad">${esc(error)}</div>` : ''}
@@ -3012,14 +3013,14 @@ export const registerImportScreen = ({ me, csrf, org, files = {}, report = null,
     ${report.held.length ? `<p>Held back, not published, because something a visitor needs is missing:</p>${list(report.held.map((h) => `${esc(h.name)} needs ${esc(h.missing.join(', '))}`))}` : ''}
     ${list(report.notes.map(esc))}
   </div>` : ''}
-  ${report || error || (files.dojos ?? '') ? '' : `<p><a class="btn" href="/o/${esc(org.slug)}/register-import?use=bundled">Fill the boxes from the files that came with this version</a></p>`}
+  ${report || error || (files.clubs ?? '') ? '' : `<p><a class="btn" href="/o/${esc(org.slug)}/register-import?use=bundled">Fill the boxes from the files that came with this version</a></p>`}
   ${bundled ? '<div class="note">The boxes are filled from the files that came with this version. Press Preview to see what would happen. Nothing is saved yet.</div>' : ''}
   <p>Paste the contents of each CSV file, or use the button above. Blank means unknown and is never filled in for you.
   Importing twice does not duplicate anything. This puts instructors on their ${clubWord()}'s roll; showing them on the
   website still needs their own consent, a write-up and current checks.</p>
   <form method="post" action="/o/${esc(org.slug)}/register-import">
     <input type="hidden" name="_csrf" value="${esc(csrf ?? '')}">
-    ${box('dojos', ClubWord(), 'Columns: slug, name, venue_name, address_line, suburb, city, postcode, latitude, longitude, phone, email, directions, blurb, who_trains, instructor_name, instructor_grade, publish (and optionally country, timezone)')}
+    ${box('clubs', ClubWord(), 'Columns: slug, name, venue_name, address_line, suburb, city, postcode, latitude, longitude, phone, email, directions, blurb, who_trains, instructor_name, instructor_grade, publish (and optionally country, timezone)')}
     ${box('sessions', 'Class times', 'Columns: slug, label, weekday, starts, ends, min_age, max_age')}
     ${box('instructors', 'Instructors', 'Columns: slug, first_name, last_name, dan, distinct')}
     <div class="actions">
@@ -3053,7 +3054,7 @@ export const clubsScreen = ({ me, csrf, org, clubs = [], values = {}, error,
          minutes, and is not shown again):<br><code style="word-break:break-all">${esc(link)}</code>`
       : ''}` : ''}</div>` : ''}
 
-  <p><a href="/o/${esc(org.slug)}/register-import">Import ${clubWord()}s, class times and instructors from CSV files</a></p>
+  <p><a href="/o/${esc(org.slug)}/register-import">Import ${clubsWord()}, class times and instructors from CSV files</a></p>
   <h2>Add a club</h2>
   <form method="post" action="/o/${esc(org.slug)}/clubs/new">
     <input type="hidden" name="_csrf" value="${esc(csrf ?? '')}">
@@ -3233,7 +3234,7 @@ export const myPerson = ({ me, csrf, how, person, private: priv = {}, grade, mem
   <form method="post" action="/me/${esc(person.id)}">
     <label for="about">A few words about ${mine ? 'yourself' : esc(person.first_name)} <span class="muted">(up to 280 characters)</span></label>
     <textarea id="about" name="about" rows="3" maxlength="280">${v('about', person.about)}</textarea>
-    <p class="hint">Shown on ${mine ? 'your' : 'their'} instructor card if ${mine ? 'you are' : 'they are'} listed on the dojo's website: where ${mine ? 'you' : 'they'} trained, what ${mine ? 'you' : 'they'} enjoy teaching. Not shown anywhere else.</p>
+    <p class="hint">Shown on ${mine ? 'your' : 'their'} instructor card if ${mine ? 'you are' : 'they are'} listed on the ${clubWord()}'s website: where ${mine ? 'you' : 'they'} trained, what ${mine ? 'you' : 'they'} enjoy teaching. Not shown anywhere else.</p>
     <input type="hidden" name="_csrf" value="${esc(csrf ?? '')}">
     <div class="row">
       <div><label for="preferred_name">Preferred name</label>
@@ -4768,7 +4769,7 @@ export const myTerms = ({ me, csrf, groups = [], error, done }) => page({
   : '<div class="note">There are no school terms to enrol in. They appear here for children who are members of a club that follows school terms.</div>'}` });
 
 /**
- * A dojo's photo gallery: add many at once, file them by year and event, and tidy them in bulk.
+ * A club's photo gallery: add many at once, file them by year and event, and tidy them in bulk.
  * Works without a script; the script (served from this site) shrinks big photos and sends them one at a time.
  */
 export const galleryScreen = ({ me, csrf, org, items = [], total = 0, years = [], events = [], filter = {}, library = [], max = 300,
@@ -4966,7 +4967,7 @@ export const formStatus = ({ me, csrf, org, form: f, rows = [], counts = {}, fil
     <a href="${base}/status?filter=todo">Only those to chase</a> · <a href="${base}/status">Everyone</a> · <a href="${base}/status.csv">Download CSV</a></p>
   <table><thead><tr><th>Name</th><th>${ClubWord()}</th><th>Status</th><th>Signed by</th><th>Until</th></tr></thead><tbody>
   ${rows.filter((r) => filter !== 'todo' || r.standing !== 'current').map((r) => { const [w, c] = words[r.standing]; return `<tr>
-    <td><a href="/p/${esc(r.person_id)}">${esc(r.last_name)}, ${esc(r.first_name)}</a>${r.response ? ` <a class="muted" href="${base}/people/${esc(r.person_id)}">answers</a>` : ''}</td><td>${esc(r.dojo)}</td>
+    <td><a href="/p/${esc(r.person_id)}">${esc(r.last_name)}, ${esc(r.first_name)}</a>${r.response ? ` <a class="muted" href="${base}/people/${esc(r.person_id)}">answers</a>` : ''}</td><td>${esc(r.club)}</td>
     <td><span class="tag ${c}">${w}</span></td><td>${esc(r.response?.signed_name ?? '')}</td><td>${esc(r.response?.expires_on ?? '')}</td></tr>`; }).join('')}
   </tbody></table>` });
 };
@@ -5021,7 +5022,7 @@ export const autoRenewScreen = ({ me, csrf, person, memberships = [], test = fal
   <p class="sub">The ${clubWord()} charges your saved card or bank a few days before fees run out, so membership never lapses. You can stop it at any time with one press.</p>
   ${testBanner(test)}
   ${done ? `<div class="good">${esc(done)}</div>` : ''}${error ? `<div class="bad">${esc(error)}</div>` : ''}
-  ${memberships.length ? memberships.map((m) => `<div class="card"><h2>${esc(m.dojo)}</h2>
+  ${memberships.length ? memberships.map((m) => `<div class="card"><h2>${esc(m.club)}</h2>
     <p class="muted">Fees run to ${esc(m.paid_until ?? 'not paid yet')}</p>
     ${m.fee_exempt ? `<p>You are not charged by this ${clubWord()}.</p>`
     : m.agreement ? `<p><span class="tag ${m.agreement.status === 'paused' ? 'bad' : 'ok'}">${m.agreement.status === 'paused' ? 'Stopped' : 'On'}</span>
@@ -5033,7 +5034,7 @@ export const autoRenewScreen = ({ me, csrf, person, memberships = [], test = fal
       <p><label>Renew <select name="period">${Object.entries(m.prices).map(([k, f]) => `<option value="${esc(k)}">${esc(FEE_PERIODS[k]?.label ?? k)} — ${esc(cents(f.amount_cents, f.currency))}</option>`).join('')}</select></label></p>
       <p><label>Pay with <select name="method"><option value="card">Credit or debit card</option><option value="direct_debit">Bank direct debit</option></select></label></p>
       <p><label>Card number (we never keep it — the payment provider does)<br><input name="card" inputmode="numeric" autocomplete="cc-number" maxlength="23"></label></p>
-      <p><label><input type="checkbox" name="agreed"> I agree that ${esc(m.dojo)} may charge this automatically each time fees are due, at the price shown. I can stop it at any time.</label></p>
+      <p><label><input type="checkbox" name="agreed"> I agree that ${esc(m.club)} may charge this automatically each time fees are due, at the price shown. I can stop it at any time.</label></p>
       <button class="btn" type="submit">Turn on automatic renewal</button></form>`
     : `<p class="muted">This ${clubWord()} has not set prices for automatic renewal yet.</p>`}</div>`).join('') : '<p class="muted">No club memberships to renew.</p>'}` });
 };

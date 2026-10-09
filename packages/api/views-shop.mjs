@@ -18,7 +18,7 @@ import { CATEGORIES as SHOP_CATEGORIES, ORDER_STATUSES as SHOP_STATUSES, mayMove
 const plainAmount = (c) => c == null ? '' : (c / 100).toFixed(2).replace(/\.00$/, '');
 const shopLines = (o) => (o.lines ?? []).map((l) => `${esc(l.name)}${l.size ? ` (${esc(l.size)})` : ''} × ${esc(l.quantity)}`).join(', ');
 
-/** What a signed-in member sees: only their own dojo's range. */
+/** What a signed-in member sees: only their own club's range. */
 export const shopScreen = ({ me, csrf, person, clubs = [], done, error }) => {
   const tok = `<input type="hidden" name="_csrf" value="${esc(csrf ?? '')}">`;
   const base = `/me/${esc(person.id)}/shop`;
@@ -50,9 +50,9 @@ export const shopPublic = ({ me, csrf }) => page({ title: 'Shop', me, csrf, body
   <p class="lede">Gi, gloves, shin pads and tournament tee shirts, ordered through your own ${clubWord()}.</p>
   <p>Each ${clubWord()} has its own range and its own prices, so sign in and the shop shows you what <em>your</em> ${clubWord()} offers.</p>
   <p><a class="btn" href="/signin">Sign in to the shop</a></p>
-  <p class="muted">Not a member yet? <a href="/find-a-dojo">Find your nearest ${clubWord()}</a>.</p>` });
+  <p class="muted">Not a member yet? <a href="/find-a-club">Find your nearest ${clubWord()}</a>.</p>` });
 
-/** The dojo's (or federation's) side: orders, its own items, and the national range it can hide or reprice. */
+/** The club's (or federation's) side: orders, its own items, and the national range it can hide or reprice. */
 export const shopAdminScreen = ({ me, csrf, org, isClub, own = [], national = [], orders = [], done, error }) => {
   const tok = `<input type="hidden" name="_csrf" value="${esc(csrf ?? '')}">`;
   const base = `/o/${esc(org.slug)}/shop`;

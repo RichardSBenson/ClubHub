@@ -32,9 +32,9 @@ export const people = {
     await assertRole(actor, orgId, TEACH);
     if (includePrivate) await assertRole(actor, orgId, REGISTER);
 
-    // A national grading draws candidates from every dojo beneath it, not from
+    // A national grading draws candidates from every club beneath it, not from
     // the federation's own roll — which is empty, because members affiliate to
-    // a dojo.
+    // a club.
     const scope = subtree
       ? `a.organisation_id in (
            select o.id from organisation root
@@ -53,7 +53,7 @@ export const people = {
              p.date_of_birth, p.gender,
              cg.label as grade, cg.grade_id, cg.rank_order, cg.is_dan, cg.awarded_on as graded_on,
              a.role, a.status, a.paid_until,
-             o.name as dojo, o.slug as dojo_slug
+             o.name as club, o.slug as club_slug
              ${includePrivate ? `, pv.emergency_name, pv.emergency_phone` : ''}
       from affiliation a
       join person p on p.id = a.person_id
@@ -64,7 +64,7 @@ export const people = {
       order by cg.rank_order desc nulls last, p.last_name`, [orgId]);
   },
 
-  /** One person, with their whole grading history. Follows them between dojo. */
+  /** One person, with their whole grading history. Follows them between club. */
   async record(actor, personId) {
     // Any current affiliation, not just 'member' — instructors, officials and
     // supporters have records too, and they were invisible until this was fixed.
@@ -587,7 +587,7 @@ export const people = {
   },
 
   /**
-   * Move someone to another dojo. Closes the old affiliation, opens a new one.
+   * Move someone to another club. Closes the old affiliation, opens a new one.
    * The grading history is untouched — it belongs to the person.
    */
   async transfer(actor, personId, toOrgId, on = new Date()) {
@@ -625,7 +625,7 @@ export const people = {
 // ---------------------------------------------------------------------------
 
 /**
- * Load the dojo register's three CSV files (dojos, class times, instructors) into this federation.
+ * Load the club register's three CSV files (clubs, class times, instructors) into this federation.
  *
  * `confirm: false` runs the whole thing and rolls it back, so the preview is exactly what saving
  * would do. Owners and administrators of the federation only.
@@ -637,20 +637,20 @@ export const registerImport = {
     if (!parent) throw new NotFound('Organisation');
     if (parent.type === 'club') throw new Invalid('A club cannot import other clubs.');
     const read = (t) => (String(t ?? '').trim() ? parseCsv(String(t)) : []);
-    const dojos = read(files.dojos), sessions = read(files.sessions), instructors = read(files.instructors);
-    if (!dojos.length && !sessions.length && !instructors.length) throw new Invalid('Paste at least one file.');
-    for (const [name, rows, cols] of [['dojos', dojos, ['slug']], ['sessions', sessions, ['slug', 'weekday', 'starts', 'ends']],
+    const clubs = read(files.clubs), sessions = read(files.sessions), instructors = read(files.instructors);
+    if (!clubs.length && !sessions.length && !instructors.length) throw new Invalid('Paste at least one file.');
+    for (const [name, rows, cols] of [['clubs', clubs, ['slug']], ['sessions', sessions, ['slug', 'weekday', 'starts', 'ends']],
                                       ['instructors', instructors, ['slug', 'first_name', 'last_name', 'dan']]]) {
       if (rows.length) for (const c of cols) if (!(c in rows[0])) throw new Invalid(`The ${name} file has no "${c}" column. The first line must be the column names. I found: ${rows.columns.slice(0, 8).join(', ')}${rows.columns.length > 8 ? ', ...' : ''}.`);
     }
     const client = await pool.connect();
     try {
       await client.query('begin');
-      const report = await applyRegister(client, { dojos, sessions, instructors });
+      const report = await applyRegister(client, { clubs, sessions, instructors });
       if (confirm) {
         await client.query(`insert into audit_log (account_id, organisation_id, action, entity, entity_id, after)
           values ($1,$2,'register_import','organisation',$2,$3::jsonb)`,
-          [actor, orgId, JSON.stringify({ dojos: dojos.length, sessions: sessions.length, instructors: instructors.length,
+          [actor, orgId, JSON.stringify({ clubs: clubs.length, sessions: sessions.length, instructors: instructors.length,
                                           updated: report.updated, published: report.published, people: report.people })]);
         await client.query('commit');
       } else await client.query('rollback');
@@ -671,19 +671,19 @@ export const registerImport = {
 
 export const instructors = {
   /**
-   * Why somebody cannot be shown on their dojo's website yet, or an empty list if they can. Shown only when
+   * Why somebody cannot be shown on their club's website yet, or an empty list if they can. Shown only when
    * they are 18 or over, every check the federation requires of instructors is current, and they have written
    * their few words. `never` is set when the reason is one nothing can fix by waiting for paperwork (a minor).
    */
-  async readiness(dojoId, personId) {
+  async readiness(clubId, personId) {
     const who = await one(`select date_of_birth::text as dob, nullif(about, '') as about from person where id=$1`, [personId]);
-    const org = await one('select settings from organisation where id=$1', [dojoId]);
+    const org = await one('select settings from organisation where id=$1', [clubId]);
     const why = reasonNotToPublish({ person: { dateOfBirth: who?.dob }, isInstructor: true,
       on: new Date().toISOString().slice(0, 10), settings: org?.settings ?? {} });
     if (why) return { never: /under/.test(why) ? `under ${region().adultAge}` : 'no date of birth recorded', missing: [] };
-    const required = await q(`select q.id, q.label ${CATALOGUE_FROM} and 'instruct' = any(q.required_for) order by q.label`, [dojoId]);
+    const required = await q(`select q.id, q.label ${CATALOGUE_FROM} and 'instruct' = any(q.required_for) order by q.label`, [clubId]);
     const awards = await q(`${AWARD_SELECT} where qa.person_id = $1`, [personId]);
-    const c = clearance(required, awards, await qualToday(dojoId));
+    const c = clearance(required, awards, await qualToday(clubId));
     const missing = c.barred.map((b) => (b.state === 'expired' ? `${b.label} (expired)` : b.label));
     if (!who?.about) missing.push('a write-up about themselves');
     return { never: null, missing };
@@ -694,12 +694,12 @@ export const instructors = {
     const out = new Map();
     if (!personIds.length) return out;
     const rows = await q(`
-      select a.person_id, a.organisation_id as dojo_id, coalesce(ip.published, false) as published
+      select a.person_id, a.organisation_id as club_id, coalesce(ip.published, false) as published
       from affiliation a
       left join instructor_profile ip on ip.person_id = a.person_id and ip.organisation_id = a.organisation_id
       where a.person_id = any($1::uuid[]) and a.role = 'instructor' and a.ends is null and a.status = 'active'`, [personIds]);
     for (const r of rows) {
-      const ready = r.published ? { never: null, missing: [] } : await this.readiness(r.dojo_id, r.person_id);
+      const ready = r.published ? { never: null, missing: [] } : await this.readiness(r.club_id, r.person_id);
       out.set(r.person_id, { published: r.published, ...ready });
     }
     return out;
@@ -707,8 +707,8 @@ export const instructors = {
 
   /**
    * Make several people instructors in one go, optionally showing them on the website, or take the role away.
-   * `scopeOrgId` is where the actor is working (a dojo, a region or the federation): people must be on the roll
-   * of a dojo beneath it, and each is dealt with at their own dojo. Nobody is skipped silently.
+   * `scopeOrgId` is where the actor is working (a club, a region or the federation): people must be on the roll
+   * of a club beneath it, and each is dealt with at their own club. Nobody is skipped silently.
    */
   async bulk(actor, scopeOrgId, personIds, mode) {
     await assertRole(actor, scopeOrgId, MANAGE);
@@ -722,8 +722,8 @@ export const instructors = {
     const out = { changed: 0, shown: 0, skipped: [] };
     for (const id of ids) {
       const who = await one(`select first_name || ' ' || last_name as name from person where id=$1`, [id]);
-      const dojo = homes.get(id);
-      if (!who || !dojo) { out.skipped.push({ name: who?.name ?? 'Someone', reason: 'not on the roll here' }); continue; }
+      const club = homes.get(id);
+      if (!who || !club) { out.skipped.push({ name: who?.name ?? 'Someone', reason: 'not on the roll here' }); continue; }
       if (mode === 'off') {
         if ((await instructorRole.set(actor, id, false)).changed) out.changed += 1;
         continue;
@@ -732,20 +732,20 @@ export const instructors = {
       if (mode !== 'show') continue;
 
       // Shown only when ready; anything missing is named, not just refused.
-      const r = await this.readiness(dojo, id);
+      const r = await this.readiness(club, id);
       if (r.never) { out.skipped.push({ name: who.name, reason: `an instructor, but not shown on the website: ${r.never}` }); continue; }
       if (r.missing.length) { out.skipped.push({ name: who.name, reason: 'an instructor, not shown yet. Still needs ' + r.missing.join(', ') }); continue; }
 
       const cur = await one(`select bio, teaches, sort_order, started_year, show_checks, published from instructor_profile
-        where organisation_id=$1 and person_id=$2`, [dojo, id]);
-      await this.save(actor, dojo, id, { bio: cur?.bio ?? { blocks: [] }, teaches: cur?.teaches ?? null, published: true,
+        where organisation_id=$1 and person_id=$2`, [club, id]);
+      await this.save(actor, club, id, { bio: cur?.bio ?? { blocks: [] }, teaches: cur?.teaches ?? null, published: true,
         sortOrder: cur?.sort_order ?? 0, startedYear: cur?.started_year ?? null, showChecks: true });
       if (!cur?.published) out.shown += 1;
     }
     return out;
   },
 
-  /** Where this person is an instructor, and whether the dojo's website shows them yet. */
+  /** Where this person is an instructor, and whether the club's website shows them yet. */
   async siteStatus(personId) {
     return one(`select o.slug, o.name, coalesce(ip.published, false) as published
       from affiliation a join organisation o on o.id = a.organisation_id

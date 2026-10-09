@@ -27,12 +27,12 @@ write('organisations', await q(`
          timezone, founded, status
   from organisation order by path`));
 
-write('dojo-profiles', await q(`
+write('club-profiles', await q(`
   select organisation_id as "organisationId", venue_name as "venueName",
          address_line as "addressLine", suburb, city, postcode,
          latitude, longitude, directions, phone, email, blurb,
          who_trains as "whoTrains", first_class_free as "firstClassFree", published
-  from dojo_profile where published`));
+  from club_profile where published`));
 
 write('training-sessions', await q(`
   select organisation_id as "organisationId", label, weekday,

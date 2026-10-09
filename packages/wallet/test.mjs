@@ -42,7 +42,7 @@ console.log('\nISSUING FROM THE REGISTER');
   ok('a paid-up member gets a card', card.issued);
   ok('with their number, grade and dojo',
     card.member.memberNumber === 'NZ-0417' &&
-    card.member.grade === '4th kyu' && card.member.dojo === 'Whanganui');
+    card.member.grade === '4th kyu' && card.member.club === 'Whanganui');
   ok('and the whole grading history for the back of the card',
     card.member.history.length === 7);
   ok('expiry is a real ISO date, not a Date cast to string',

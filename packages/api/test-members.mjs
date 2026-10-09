@@ -1,5 +1,5 @@
 /**
- * Can somebody who runs a dojo put their club on this system?
+ * Can somebody who runs a club put their club on this system?
  *
  * Real HTTP, real forms, real database. Written as the sequence a club
  * actually goes through: sign in, paste the spreadsheet you already have,

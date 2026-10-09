@@ -5,12 +5,12 @@
  * card they use. Written down once, here, so a screen cannot decide it
  * differently from another.
  *
- *   dojo fees           → the member's dojo
- *   kyu grading         → the member's dojo
- *   tournament entry    → whoever runs the tournament (usually a local dojo)
+ *   club fees           → the member's club
+ *   kyu grading         → the member's club
+ *   tournament entry    → whoever runs the tournament (usually a local club)
  *   black belt grading  → the federation (national)
- *   uniforms            → the member's dojo
- *   all other equipment → the member's dojo
+ *   uniforms            → the member's club
+ *   all other equipment → the member's club
  *
  * Money never moves "through" a level. A charge has exactly one payee and is
  * paid to that organisation's own account — see docs/payments.md.
@@ -20,7 +20,7 @@ import { money } from './money.mjs';
 import { DEFAULT_CURRENCY, DEFAULT_LOCALE } from './defaults.mjs';
 
 export const KINDS = Object.freeze({
-  dojo_fee:         { label: 'Club fees',           payee: 'club' },
+  club_fee:         { label: 'Club fees',           payee: 'club' },
   tournament_entry: { label: 'Tournament entry',    payee: 'organiser' },
   kyu_grading:      { label: 'Kyu grading',         payee: 'club' },
   dan_grading:      { label: 'Black belt grading',  payee: 'federation' },

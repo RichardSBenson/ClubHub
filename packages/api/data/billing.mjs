@@ -277,7 +277,7 @@ export const payments = {
   },
 
   /**
-   * The dojo has been handed the money — cash, or a transfer into its account.
+   * The club has been handed the money — cash, or a transfer into its account.
    * Only somebody who looks after the organisation being paid can say so, and
    * it is numbered, attributed and in the history: a cash tin with no record is
    * the thing treasurers lose sleep over.
@@ -405,7 +405,7 @@ export const renewals = {
   },
 
   /**
-   * Ask a set of members to renew, at the dojo's own price for each. Nothing is
+   * Ask a set of members to renew, at the club's own price for each. Nothing is
    * charged by asking. Returns who was asked and who was not, and why.
    */
   async ask(actor, orgId, { affiliationIds, period, received = null }) {
@@ -431,12 +431,12 @@ export const renewals = {
             amount_cents, currency, status, requested_by) values ($1,$2,$3,$4,'pending',$5) returning id`,
           [orgId, r.person_id, fee.amount_cents, fee.currency ?? region().currency, actor]);
         await client.query(`insert into payment_line (payment_id, kind, description, amount_cents,
-            renews_affiliation_id, renews_months) values ($1,'dojo_fee',$2,$3,$4,$5)`,
+            renews_affiliation_id, renews_months) values ($1,'club_fee',$2,$3,$4,$5)`,
           [pay.id, `${fee.label} — membership ${PERIODS[period].label.toLowerCase()}`, fee.amount_cents,
            r.affiliation_id, PERIODS[period].months]);
         await client.query(`insert into audit_log (account_id, organisation_id, action, entity, entity_id, after)
           values ($1,$2,'payment_requested','payment',$3,$4)`, [actor, orgId, pay.id,
-          JSON.stringify({ kind: 'dojo_fee', amountCents: fee.amount_cents, person: r.name,
+          JSON.stringify({ kind: 'club_fee', amountCents: fee.amount_cents, person: r.name,
             description: `${fee.label} renewal` })]);
         await client.query('commit'); asked++;
         if (received) await payments.recordManual(actor, pay.id, received);
@@ -445,7 +445,7 @@ export const renewals = {
     return { asked, skipped };
   },
 
-  /** The dojo decides somebody does not pay — and says why. */
+  /** The club decides somebody does not pay — and says why. */
   async setExemption(actor, orgId, affiliationId, input) {
     await assertRole(actor, orgId, MANAGE);
     await clubOnly(orgId);
@@ -483,7 +483,7 @@ export const renewals = {
 };
 
 const AGREEMENT_SELECT = `select g.id, g.organisation_id, g.affiliation_id, g.person_id, g.period, g.method, g.label, g.status, g.failures,
-    g.next_attempt_on::text as next_attempt_on, g.last_error, g.agreed_at, o.name as dojo,
+    g.next_attempt_on::text as next_attempt_on, g.last_error, g.agreed_at, o.name as club,
     a.paid_until::text as paid_until, a.fee_exempt,
     nullif(trim(concat_ws(' ', p.first_name, p.last_name)), '') as person_name
   from payment_agreement g join organisation o on o.id = g.organisation_id
@@ -495,7 +495,7 @@ export const autoRenew = {
   /** Where this person stands: each club membership, whether it renews itself, and what it would cost. */
   async forPerson(actor, personId) {
     await family.assertMayActFor(actor, personId);
-    const mem = await q(`select a.id as affiliation_id, a.organisation_id, o.name as dojo, a.paid_until::text as paid_until, a.fee_exempt
+    const mem = await q(`select a.id as affiliation_id, a.organisation_id, o.name as club, a.paid_until::text as paid_until, a.fee_exempt
       from affiliation a join organisation o on o.id = a.organisation_id
       where a.person_id = $1 and a.ends is null and a.role in ('member','instructor','assistant') and o.type = 'club'
         and a.status in ('active','lapsed') order by o.name`, [personId]);
@@ -551,7 +551,7 @@ export const autoRenew = {
       [actor, g.organisation_id, personId]);
   },
 
-  /** A dojo's view: who renews themselves, who is failing. */
+  /** A club's view: who renews themselves, who is failing. */
   async forClub(actor, orgId) {
     await assertRole(actor, orgId, REGISTER);
     await clubOnly(orgId);
@@ -560,7 +560,7 @@ export const autoRenew = {
   },
 
   /**
-   * The daily run. For each agreement whose membership is about to run out: ask for the dojo's price, charge the saved
+   * The daily run. For each agreement whose membership is about to run out: ask for the club's price, charge the saved
    * method, and let the ordinary payment path extend the membership. Safe to run twice: the payment is claimed before
    * the provider is asked, and a second run finds the membership already extended or an attempt already waiting.
    */
@@ -586,7 +586,7 @@ export const autoRenew = {
           const { rows: [p] } = await client.query(`insert into payment (organisation_id, person_id, amount_cents, currency, status)
             values ($1,$2,$3,$4,'pending') returning id`, [g.organisation_id, g.person_id, fee.amount_cents, fee.currency ?? region().currency]);
           await client.query(`insert into payment_line (payment_id, kind, description, amount_cents, renews_affiliation_id, renews_months)
-            values ($1,'dojo_fee',$2,$3,$4,$5)`, [p.id, `${fee.label} — automatic renewal ${PERIODS[g.period].label.toLowerCase()}`, fee.amount_cents, g.affiliation_id, PERIODS[g.period].months]);
+            values ($1,'club_fee',$2,$3,$4,$5)`, [p.id, `${fee.label} — automatic renewal ${PERIODS[g.period].label.toLowerCase()}`, fee.amount_cents, g.affiliation_id, PERIODS[g.period].months]);
           await client.query('commit'); pay = p;
         } catch (e) { await client.query('rollback'); throw e; } finally { client.release(); }
       }
@@ -612,11 +612,11 @@ export const autoRenew = {
         report.failed++;
         if (next.status === 'paused') report.paused++;
         await push.toPerson(g.person_id, { title: next.status === 'paused' ? 'Automatic renewal has stopped' : 'Your membership payment did not go through',
-          body: `${g.dojo}: ${g.person_name}`, url: `/me/${g.person_id}/auto-renew` });
+          body: `${g.club}: ${g.person_name}`, url: `/me/${g.person_id}/auto-renew` });
         if (messenger) {
           const text = next.status === 'paused'
-            ? { subject: 'Automatic renewal has stopped', body: `We could not take your membership payment for ${g.person_name} at ${g.dojo} after several tries, so automatic renewal is paused. Please sign in, go to My payments, and pay or set up automatic renewal again.` }
-            : { subject: 'Your membership payment did not go through', body: `We tried to renew ${g.person_name}'s membership at ${g.dojo} and the payment did not go through (${result.detail ?? 'declined'}). We will try again on ${next.nextAttemptOn}. You can also pay now from My payments.` };
+            ? { subject: 'Automatic renewal has stopped', body: `We could not take your membership payment for ${g.person_name} at ${g.club} after several tries, so automatic renewal is paused. Please sign in, go to My payments, and pay or set up automatic renewal again.` }
+            : { subject: 'Your membership payment did not go through', body: `We tried to renew ${g.person_name}'s membership at ${g.club} and the payment did not go through (${result.detail ?? 'declined'}). We will try again on ${next.nextAttemptOn}. You can also pay now from My payments.` };
           try {
             const made = await messages.prepare(null, g.organisation_id, { audience: 'selected', kind: 'renewal', personIds: [g.person_id],
               subject: text.subject, body: text.body, eventId: null, personNumber: null }, { baseFrom, trusted: true });
@@ -711,9 +711,9 @@ async function becameMember(affiliationId) {
 }
 
 /**
- * The range a dojo offers: its own products, plus those of every organisation above it (the national range),
- * less what the dojo has hidden, at the dojo's own price where it set one. This is the ONLY query that decides what
- * a member sees, so a tee shirt owned by one dojo can never reach another dojo's members.
+ * The range a club offers: its own products, plus those of every organisation above it (the national range),
+ * less what the club has hidden, at the club's own price where it set one. This is the ONLY query that decides what
+ * a member sees, so a tee shirt owned by one club can never reach another club's members.
  */
 const RANGE = `
   select p.id, p.organisation_id, p.category, p.name, p.description, p.sizes, p.currency,
@@ -740,7 +740,7 @@ const mayShopFor = (personId, clubId) => one(
 export const shop = {
   ORDER_STATUSES,
 
-  /** The member's side: for each dojo they belong to, what they may order and what they have ordered. */
+  /** The member's side: for each club they belong to, what they may order and what they have ordered. */
   async forPerson(actor, personId) {
     await family.assertMayActFor(actor, personId);
     const person = await one('select id, first_name, last_name from person where id=$1', [personId]);
@@ -756,7 +756,7 @@ export const shop = {
     return { person, clubs: out };
   },
 
-  /** Place an order. Prices, sizes and what is on offer are all decided here, from the dojo's range, never from the form. */
+  /** Place an order. Prices, sizes and what is on offer are all decided here, from the club's range, never from the form. */
   async place(actor, personId, clubId, form) {
     await family.assertMayActFor(actor, personId);
     if (!await mayShopFor(personId, clubId)) throw new NotFound(words().club);
@@ -778,14 +778,14 @@ export const shop = {
     } catch (e) { await client.query('rollback'); throw e; } finally { client.release(); }
   },
 
-  /** A member can take back an order the dojo has not yet touched. */
+  /** A member can take back an order the club has not yet touched. */
   async cancelMine(actor, personId, orderId) {
     await family.assertMayActFor(actor, personId);
     const r = await one(`update shop_order set status='cancelled', updated_at=now() where id=$1 and person_id=$2 and status='placed' returning id`, [orderId, personId]);
     if (!r) throw new Invalid(`That order can no longer be cancelled here. Please ask the ${clubWord()}.`);
   },
 
-  /** The dojo's (or the federation's) side. A dojo: orders, its own products, and the national range to hide or reprice. */
+  /** The club's (or the federation's) side. A club: orders, its own products, and the national range to hide or reprice. */
   async forOrg(actor, orgId) {
     const org = await one('select * from organisation where id=$1', [orgId]);
     if (!org) throw new NotFound('Organisation');
@@ -825,7 +825,7 @@ export const shop = {
     if (!r) throw new NotFound('Item');
   },
 
-  /** A dojo's say over a national item: hide it, or set its own price. Only for items owned above it. */
+  /** A club's say over a national item: hide it, or set its own price. Only for items owned above it. */
   async setListing(actor, clubId, productId, v) {
     await clubOnly(clubId);
     await assertRole(actor, clubId, REGISTER);

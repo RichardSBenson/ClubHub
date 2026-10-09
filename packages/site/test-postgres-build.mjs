@@ -130,7 +130,7 @@ console.log('\nTHE DESCRIPTION SEARCH ENGINES GET');
 
 console.log('\nAND THE REST OF THE SITE IS STILL THERE');
 {
-  for (const p of ['index.html', 'find-a-dojo/index.html', 'events/index.html',
+  for (const p of ['index.html', 'find-a-club/index.html', 'events/index.html',
                    'news/index.html', 'sitemap.xml', 'robots.txt', 'theme.css']) {
     ok(p, fs.existsSync(path.join(OUT, p)), 'missing');
   }
@@ -214,7 +214,7 @@ console.log('\nTHE SITE PROMISES ONLY WHAT THE DOJOS SAID');
   // has asked and been approved. Each says nothing about beginners or a free
   // first class — which is what "false" means in a column that cannot be null.
   await pool.query(`
-    insert into dojo_profile (organisation_id, published, accepts_beginners,
+    insert into club_profile (organisation_id, published, accepts_beginners,
                               first_class_free)
     select o.id, true, false, false from organisation o where o.type='club'
     on conflict (organisation_id) do update
@@ -223,36 +223,36 @@ console.log('\nTHE SITE PROMISES ONLY WHAT THE DOJOS SAID');
     { cwd: path.join(import.meta.dirname, '../..'), stdio: 'pipe' });
 
   const find = fs.readFileSync(
-    path.join(OUT, 'find-a-dojo', 'index.html'), 'utf8');
+    path.join(OUT, 'find-a-club', 'index.html'), 'utf8');
   ok('no blanket promise while most dojos have said nothing',
     !/Every one takes beginners/.test(find)
     && !/your first class is free/i.test(find),
     find.match(/<p style="font-size:19px[^<]*/)?.[0]);
   ok('it still says how many there are', /17 dojo/.test(find));
 
-  // And when every dojo really has said so, the claim comes back.
+  // And when every club really has said so, the claim comes back.
   await pool.query(`
-    insert into dojo_profile (organisation_id, accepts_beginners, first_class_free)
+    insert into club_profile (organisation_id, accepts_beginners, first_class_free)
     select o.id, true, true from organisation o where o.type='club'
     on conflict (organisation_id) do update
       set accepts_beginners = true, first_class_free = true`);
   execSync(`HONBU_STORE=postgres OUT=${OUT} node packages/site/build.mjs`,
     { cwd: path.join(import.meta.dirname, '../..'), stdio: 'pipe' });
   const now = fs.readFileSync(
-    path.join(OUT, 'find-a-dojo', 'index.html'), 'utf8');
+    path.join(OUT, 'find-a-club', 'index.html'), 'utf8');
   ok('once all of them have said so, it says so',
     /Every one takes beginners, and your first class is free/.test(now),
     now.match(/<p style="font-size:19px[^<]*/)?.[0]);
 
-  // One dojo that does not take beginners is enough to withdraw the claim.
+  // One club that does not take beginners is enough to withdraw the claim.
   await pool.query(`
-    update dojo_profile set accepts_beginners = false
+    update club_profile set accepts_beginners = false
     where organisation_id = (select id from organisation
                              where type='club' order by name limit 1)`);
   execSync(`HONBU_STORE=postgres OUT=${OUT} node packages/site/build.mjs`,
     { cwd: path.join(import.meta.dirname, '../..'), stdio: 'pipe' });
   const one = fs.readFileSync(
-    path.join(OUT, 'find-a-dojo', 'index.html'), 'utf8');
+    path.join(OUT, 'find-a-club', 'index.html'), 'utf8');
   ok('one dissenter withdraws the claim about beginners',
     !/Every one takes beginners/.test(one));
   ok('but the free first class still stands',

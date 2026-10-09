@@ -40,7 +40,7 @@ export const orgs = {
    *
    * The admin serves more than one federation from one deployment, so this
    * cannot come from a settings file. A taekwondo federation reading the word
-   * "Dojo" in its own register is the whole problem in one word.
+   * "Club" in its own register is the whole problem in one word.
    */
   async vocabulary(orgId) {
     if (!orgId) return {};
@@ -152,8 +152,8 @@ export const orgs = {
       order by o.path`, [actor]);
   },
 
-  /** Public dojo list for the website. No auth — this is the front page. */
-  async publicDojos(rootSlug) {
+  /** Public club list for the website. No auth — this is the front page. */
+  async publicClubs(rootSlug) {
     return q(`
       select o.id, o.name, o.slug, o.country_code,
              d.venue_name, d.city, d.suburb, d.latitude, d.longitude,
@@ -165,7 +165,7 @@ export const orgs = {
                filter (where t.id is not null), '[]') as sessions
       from organisation root
       join organisation o on o.path <@ root.path and o.type = 'club'
-      left join dojo_profile d on d.organisation_id = o.id
+      left join club_profile d on d.organisation_id = o.id
       left join training_session t on t.organisation_id = o.id
       where root.slug = $1 and o.status = 'active'
       group by o.id, o.name, o.slug, o.country_code, d.venue_name, d.city,
@@ -260,7 +260,7 @@ export const clubs = {
              coalesce(d.published, false) as page_live
       from organisation root
       join organisation o on o.path <@ root.path and o.type = 'club'
-      left join dojo_profile d on d.organisation_id = o.id
+      left join club_profile d on d.organisation_id = o.id
       where root.id = $1
       order by o.name`, [orgId]);
     return rows;
@@ -311,7 +311,7 @@ export const clubs = {
 
       if (input.city)
         await client.query(`
-          insert into dojo_profile (organisation_id, city) values ($1,$2)`,
+          insert into club_profile (organisation_id, city) values ($1,$2)`,
           [club.id, input.city]);
 
       await client.query(`
@@ -380,7 +380,7 @@ export const clubProfile = {
           where organisation_id=$1 and status='published'
             and starts_at > now()) as upcoming`, [orgId]);
 
-    const page = await one(`select published, page_requested_at from dojo_profile
+    const page = await one(`select published, page_requested_at from club_profile
       where organisation_id=$1`, [orgId]);
     const parent = await one('select name, slug from organisation where id=$1', [club.parent_id]);
     return { club, parent, administrators, counts, page };
@@ -561,7 +561,7 @@ export const clubPages = {
     await assertRole(actor, clubId, WRITE_PAGES);
     const club = await this._club(clubId);
     const profile = await one(
-      `select * from dojo_profile where organisation_id = $1`, [clubId]) ?? {};
+      `select * from club_profile where organisation_id = $1`, [clubId]) ?? {};
     const sessions = await this._sessionsOf(clubId);
     return { club, profile, sessions, state: stateOf(profile),
              problems: readinessProblems(profile, sessions) };
@@ -587,7 +587,7 @@ export const clubPages = {
     }
 
     const was = await one(
-      `select * from dojo_profile where organisation_id = $1`, [clubId]);
+      `select * from club_profile where organisation_id = $1`, [clubId]);
     if (was?.published) {
       const problems = readinessProblems(profile, sessions);
       if (problems.length) throw new ClubPageNotReady(
@@ -598,7 +598,7 @@ export const clubPages = {
     try {
       await client.query('begin');
       await client.query(`
-        insert into dojo_profile (organisation_id, venue_name, address_line,
+        insert into club_profile (organisation_id, venue_name, address_line,
           suburb, city, postcode, directions, phone, email, blurb, who_trains,
           first_class_free, accepts_beginners, hero_asset_id, updated_at)
         values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14, now())
@@ -667,13 +667,13 @@ export const clubPages = {
     if (!club.parent_id) throw new Invalid('This club has no federation to ask.');
 
     const profile = await one(
-      `select * from dojo_profile where organisation_id = $1`, [clubId]) ?? {};
+      `select * from club_profile where organisation_id = $1`, [clubId]) ?? {};
     const problems = readinessProblems(profile, await this._sessionsOf(clubId));
     if (problems.length) throw new ClubPageNotReady(problems);
     if (profile.published) throw new Invalid('Your page is already live.');
 
     await pool.query(`
-      update dojo_profile set page_requested_at = now(), page_note = null
+      update club_profile set page_requested_at = now(), page_note = null
       where organisation_id = $1`, [clubId]);
     await this._audit(actor, clubId, clubId, 'club_page_requested', {}, { state: 'requested' });
     return this.forClub(actor, clubId);
@@ -687,10 +687,10 @@ export const clubPages = {
     await assertRole(actor, clubId, MANAGE);
     await this._club(clubId);
     const was = await one(
-      `select published, page_requested_at from dojo_profile
+      `select published, page_requested_at from club_profile
        where organisation_id = $1`, [clubId]);
     await pool.query(`
-      update dojo_profile set published = false, page_requested_at = null
+      update club_profile set published = false, page_requested_at = null
       where organisation_id = $1`, [clubId]);
     await this._audit(actor, clubId, clubId, 'club_page_taken_down',
       { state: stateOf(was) }, { state: 'off' });
@@ -717,18 +717,18 @@ export const clubPages = {
     if (!above) throw new Invalid('That club does not sit beneath this organisation.');
 
     const profile = await one(
-      `select * from dojo_profile where organisation_id = $1`, [clubId]) ?? {};
+      `select * from club_profile where organisation_id = $1`, [clubId]) ?? {};
 
     if (approve) {
       const problems = readinessProblems(profile, await this._sessionsOf(clubId));
       if (problems.length) throw new ClubPageNotReady(problems);
       await pool.query(`
-        update dojo_profile set published = true, page_requested_at = null,
+        update club_profile set published = true, page_requested_at = null,
           page_note = null, published_by = $2, published_at = now()
         where organisation_id = $1`, [clubId, actor]);
     } else {
       await pool.query(`
-        update dojo_profile set published = false, page_requested_at = null,
+        update club_profile set published = false, page_requested_at = null,
           page_note = $2
         where organisation_id = $1`, [clubId, (note ?? '').trim().slice(0, 400) || null]);
     }
@@ -754,7 +754,7 @@ export const clubPages = {
       from organisation root
       join organisation o on o.path <@ root.path and o.id <> root.id
                           and o.type = 'club' and o.status = 'active'
-      left join dojo_profile d on d.organisation_id = o.id
+      left join club_profile d on d.organisation_id = o.id
       where root.id = $1
       order by (d.page_requested_at is not null and not coalesce(d.published, false)) desc,
                o.name`, [orgId]);
@@ -922,7 +922,7 @@ export const terms = {
       if (cents > 0) {
         const { rows: [pay] } = await client.query(`insert into payment (organisation_id, person_id, amount_cents, currency, status, requested_by)
           values ($1,$2,$3,$4,'pending',$5) returning id`, [home.id, personId, cents, info.fee?.currency ?? region().currency, actor]);
-        await client.query(`insert into payment_line (payment_id, kind, description, amount_cents, term_enrolment_id) values ($1,'dojo_fee',$2,$3,$4)`,
+        await client.query(`insert into payment_line (payment_id, kind, description, amount_cents, term_enrolment_id) values ($1,'club_fee',$2,$3,$4)`,
           [pay.id, `${item.term.name} ${item.term.year} classes — ${info.person.first_name}${item.price.kind === 'full' ? '' : ` (${item.price.note})`}`, cents, e.id]);
         paymentId = pay.id;
       }
