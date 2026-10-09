@@ -1,4 +1,4 @@
--- applied-when: select exists (select 1 from information_schema.columns where table_name = 'dojo_profile' and column_name = 'hero_asset_id')
+-- applied-when: select exists (select 1 from information_schema.columns where table_name in ('dojo_profile','club_profile') and column_name = 'hero_asset_id')
 --
 -- How tools/migrate.mjs tells whether this migration is already in a database.
 

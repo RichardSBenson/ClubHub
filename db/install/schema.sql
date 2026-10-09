@@ -2297,3 +2297,9 @@ alter table payment_line add constraint payment_line_kind_check check (kind in (
   'dan_grading','uniform','equipment'));
 alter table fee_schedule add constraint fee_schedule_applies_to_check check (applies_to in ('member','junior','adult','family','club'));
 alter table publication add constraint publication_entry_kind_check check (entry_kind in ('page','article','club','event'));
+-- 059 — the temporary dojo_profile view (058) is no longer needed: nothing deployed refers to it.
+-- 'dojo_fee' stops being accepted as a payment line kind.
+drop view if exists dojo_profile;
+alter table payment_line drop constraint if exists payment_line_kind_check;
+alter table payment_line add constraint payment_line_kind_check check (kind in ('club_fee','tournament_entry','kyu_grading',
+  'dan_grading','uniform','equipment'));
