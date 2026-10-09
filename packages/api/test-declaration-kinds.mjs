@@ -1,0 +1,11 @@
+import { DECLARATION_KINDS, problemWithDeclaration } from '../core/domain/calendar.mjs';
+let pass = 0, fail = 0;
+const ok = (n, c) => c ? (pass++, console.log(`  ✓ ${n}`)) : (fail++, console.log(`  ✗ ${n}`));
+console.log('\nWHICH EVENTS CARRY A DECLARATION');
+ok('tournament, camp and fight night do', ['tournament', 'camp', 'fight_night'].every((k) => DECLARATION_KINDS.includes(k)));
+ok('a tournament or camp with one is fine', problemWithDeclaration('tournament', '2026.1') === null && problemWithDeclaration('camp', '1') === null);
+ok('a seminar with one is refused, in words', /not on a seminar/.test(problemWithDeclaration('seminar', '2026.1')));
+ok('a grading with one is refused', /not on a grading/.test(problemWithDeclaration('grading', 'v1')));
+ok('no declaration is fine on any kind', problemWithDeclaration('seminar', null) === null && problemWithDeclaration('grading', '') === null);
+console.log(`\n${pass} passed, ${fail} failed`);
+process.exit(fail ? 1 : 0);

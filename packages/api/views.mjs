@@ -1396,8 +1396,9 @@ export const eventForm = ({ me, csrf, org, values = {}, zone, error,
 
     <fieldset>
       <legend>Entries and the declaration</legend>
-      <p class="hint">Only needed for an event people enter — a tournament or
-        a grading. Leave blank otherwise.</p>
+      <p class="hint">The declaration (a waiver or consent) is for tournaments,
+        camps and fight nights. Seminars and gradings do not carry one, so leave
+        the declaration blank for them.</p>
       <div class="row">
         <div>
           <label for="guardianUnder">A parent or guardian signs for anyone under

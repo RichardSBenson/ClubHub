@@ -30,6 +30,7 @@
  * green. The local listener lives in dev.mjs now. Keep it there.
  */
 
+import { problemWithDeclaration } from '../core/domain/calendar.mjs';
 import { nextGrading } from '../core/domain/next-grading.mjs';
 import crypto from 'node:crypto';
 import { readFileSync } from 'node:fs';
@@ -4371,6 +4372,8 @@ post('/o/:slug/events/new', async (ctx) => {
   try {
     const detail = eventDetails.read(form);
     if (detail.problems.length) throw Object.assign(new Error(detail.problems.join(' ')), { status: 422 });
+    const declared = problemWithDeclaration(eventFieldsFrom(form, org.timezone).kind, form.consentVersion?.trim());
+    if (declared) throw Object.assign(new Error(declared), { status: 422 });
     const saved = await schedule.execute({
       actorId: ctx.me.accountId, organisationId: org.id,
       ...eventFieldsFrom(form, org.timezone),
@@ -4416,6 +4419,8 @@ post('/o/:slug/events/:eventSlug/edit', async (ctx) => {
   try {
     const detail = eventDetails.read(form);
     if (detail.problems.length) throw Object.assign(new Error(detail.problems.join(' ')), { status: 422 });
+    const declared = problemWithDeclaration(eventFieldsFrom(form, org.timezone).kind, form.consentVersion?.trim());
+    if (declared) throw Object.assign(new Error(declared), { status: 422 });
     const saved = await revise.execute({
       actorId: ctx.me.accountId, eventId: existing.id,
       ...eventFieldsFrom(form, org.timezone),

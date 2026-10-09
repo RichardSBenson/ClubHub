@@ -33,6 +33,15 @@ import { Slug } from './publishing.mjs';
  * federation adds 'fight_night' or 'instructor_course' and the platform does
  * not need to learn what either means.
  */
+/** The events where entering means signing a waiver. A seminar or a grading does not carry one. */
+export const DECLARATION_KINDS = Object.freeze(['tournament', 'camp', 'fight_night']);
+
+/** Said when somebody saves a seminar or grading with a declaration on it. Applied on save only, so events already stored still load. */
+export const problemWithDeclaration = (kind, version) =>
+  version && !DECLARATION_KINDS.includes(kind)
+    ? `A declaration (waiver) belongs on a tournament, camp or fight night, not on a ${String(kind).replace('_', ' ')}. Clear the declaration, or change the kind of event.`
+    : null;
+
 export const EventKind = Object.freeze({
   all: ['grading', 'tournament', 'camp', 'seminar', 'fight_night',
         'training', 'social', 'other'],
