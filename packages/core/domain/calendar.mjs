@@ -62,6 +62,18 @@ export const Visibility = Object.freeze({
   isValid(v) { return Visibility.all.includes(v); },
 });
 
+/** Why an event cannot be put forward for the parent organisation's calendar, or null when it can. */
+export function whyNotPublishUp({ visibility, status, hasParent }) {
+  if (visibility === 'own_org') return 'A club-only event cannot be published upward';
+  if (status !== 'published')
+    return 'Publish it on your own calendar before asking for it to appear on the federation\'s.';
+  if (!hasParent) return 'There is no federation above this organisation to ask.';
+  return null;
+}
+
+/** Why a request to list an event cannot be decided now, or null when somebody is asking. */
+export const whyNotDecide = (state) => state === 'requested' ? null : 'Nobody is asking for that event to be listed.';
+
 /**
  * draft → published → cancelled
  *                  ↘ completed

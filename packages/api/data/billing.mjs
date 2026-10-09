@@ -10,7 +10,7 @@ import { region, words } from '../../infrastructure/region-context.mjs';
 const clubWord = () => words().club.toLowerCase();
 import { payeeFor, problemsWithPaymentRequest, problemsWithPayment, KINDS as PAY_KINDS } from '../../core/domain/payments.mjs';
 import { isTestProvider } from '../../infrastructure/payments/providers.mjs';
-import { dueForReminder, reminderText, PERIODS, extendedUntil, standing, feeFor, problemsWithFee, problemsWithExemption, MANUAL_METHODS } from '../../core/domain/membership.mjs';
+import { dueForReminder, reminderText, PERIODS, extendedUntil, standing, feeFor, problemsWithFee, problemsWithExemption, MANUAL_METHODS, whyNotMethod, mayRecordByHand } from '../../core/domain/membership.mjs';
 import { centsFrom } from '../../core/domain/payments.mjs';
 import { chargeDue, afterFailure, problemsWithSetup, cardLabel, METHODS as AUTO_METHODS, PERIOD_CHOICES, CHARGE_LEAD_DAYS, MAX_FAILURES } from '../../core/domain/autorenew.mjs';
 import { readBasket, readNote, mayMoveOrder, ORDER_STATUSES } from '../../core/domain/shop.mjs';
@@ -251,7 +251,7 @@ export const payments = {
     catch (e) { throw new Invalid(e.message); }
 
     if (input.received) {
-      if (!MANUAL_METHODS[input.received]) throw new Invalid('Choose how it was paid.');
+      if (whyNotMethod(input.received)) throw new Invalid(whyNotMethod(input.received));
       const may = await one('select has_role_at($1,$2,$3) as ok', [actor, payeeId, REGISTER]);
       if (!may?.ok) throw new Invalid(`This money belongs to the federation, so a ${clubWord()} cannot record it as received. Ask for it instead.`);
     }
@@ -283,11 +283,11 @@ export const payments = {
    * the thing treasurers lose sleep over.
    */
   async recordManual(actor, paymentId, method) {
-    if (!MANUAL_METHODS[method]) throw new Invalid('Choose how it was paid.');
+    if (whyNotMethod(method)) throw new Invalid(whyNotMethod(method));
     const pay = await one('select organisation_id, status from payment where id=$1', [paymentId]);
     if (!pay) throw new NotFound('Payment');
     await assertRole(actor, pay.organisation_id, REGISTER);
-    if (!['pending', 'failed'].includes(pay.status)) throw new Invalid('This has already been dealt with.');
+    if (!mayRecordByHand(pay.status)) throw new Invalid('This has already been dealt with.');
     const receiptNo = await nextReceipt(pay.organisation_id);
     const done = await settle(paymentId, true, `${MANUAL_METHODS[method]} received.`,
       { actor, manual: { method, receiptNo } });
@@ -413,7 +413,7 @@ export const renewals = {
     await clubOnly(orgId);
     if (!PERIODS[period] || !PERIODS[period].months) throw new Invalid('Choose how long to renew for.');
     if (!affiliationIds?.length) throw new Invalid('Tick the people to ask.');
-    if (received && !MANUAL_METHODS[received]) throw new Invalid('Choose how it was paid.');
+    if (received && whyNotMethod(received)) throw new Invalid(whyNotMethod(received));
 
     const { today, rows } = await renewals.roster(actor, orgId);
     const schedule = await feeRows(orgId);

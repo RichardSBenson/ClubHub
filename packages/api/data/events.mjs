@@ -9,6 +9,7 @@ import { pool } from '../../infrastructure/postgres/pool.mjs';
 import { DEFAULT_TIMEZONE } from '../../core/domain/defaults.mjs';
 import { region, eventTypes } from '../../infrastructure/region-context.mjs';
 import { normaliseGender } from '../../core/domain/people.mjs';
+import { whyNotPublishUp, whyNotDecide } from '../../core/domain/calendar.mjs';
 import { readType, problemsWithDetail } from '../../core/domain/event-types.mjs';
 import { MANAGE, REGISTER, TEACH } from '../../core/domain/access.mjs';
 import { family } from './people.mjs';
@@ -73,14 +74,9 @@ export const events = {
     const ev = await one('select * from event where id = $1', [eventId]);
     if (!ev) throw new NotFound('Event');
     await assertRole(actor, ev.organisation_id, MANAGE);
-    if (ev.visibility === 'own_org')
-      throw new Invalid('A dojo-only event cannot be published upward');
-    if (ev.status !== 'published')
-      throw new Invalid('Publish it on your own calendar before asking for it to '
-        + 'appear on the federation\'s.');
-    const up = await one(`select 1 from organisation where id = $1 and parent_id is not null`,
-      [ev.organisation_id]);
-    if (!up) throw new Invalid('There is no federation above this organisation to ask.');
+    const up = await one(`select 1 from organisation where id = $1 and parent_id is not null`, [ev.organisation_id]);
+    const why = whyNotPublishUp({ visibility: ev.visibility, status: ev.status, hasParent: !!up });
+    if (why) throw new Invalid(why);
     const row = await one(`
       update event set publish_up = true, publish_up_state = 'requested'
       where id = $1 returning *`, [eventId]);
@@ -118,8 +114,7 @@ export const events = {
       [by, ev.organisation_id]);
     if (!beneath)
       throw new Invalid('That event does not sit beneath this organisation.');
-    if (ev.publish_up_state !== 'requested')
-      throw new Invalid('Nobody is asking for that event to be listed.');
+    if (whyNotDecide(ev.publish_up_state)) throw new Invalid(whyNotDecide(ev.publish_up_state));
 
     const row = await one(`
       update event set publish_up_state = $2, publish_up = $3

@@ -39,6 +39,12 @@ export const EXEMPT_REASONS = Object.freeze({
 });
 
 /** How a person who is not charged online has paid. */
+/** Money recorded by hand needs to say how it arrived. Returns a reason, or null when the method is one we know. */
+export const whyNotMethod = (method) => Object.hasOwn(MANUAL_METHODS, method) ? null : 'Choose how it was paid.';
+
+/** Only a payment still waiting (or one that failed) can be marked as received by hand. */
+export const mayRecordByHand = (status) => ['pending', 'failed'].includes(status);
+
 export const MANUAL_METHODS = Object.freeze({
   cash:     'Cash',
   transfer: 'Bank transfer to the club',
