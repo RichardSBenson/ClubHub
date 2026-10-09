@@ -22,10 +22,10 @@ const SHOWCASE_CLUB = ['hero', 'facts', 'startAnyWeek', 'times', 'about', 'instr
   'gallery', 'findUs', 'enquire', 'federationBand'];
 
 export const BUILT_IN = Object.freeze({
-  // The look MOKNZ launched with, as a theme: the crest's red and gold on
+  // The look the first federation launched with, as a theme: the crest's red and gold on
   // near-black, with Japanese-rooted type. Another federation may use it, but
   // it is not a neutral choice and is not the default.
-  'kyokushin-classic': {
+  'classic': {
     format: 'honbu-theme', version: 1,
     name: 'Classic',
     description: 'Red and gold on near-black, with type that carries kanji. '
