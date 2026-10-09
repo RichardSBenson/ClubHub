@@ -195,6 +195,17 @@ console.log('\nTHE 280-CHARACTER WRITE-UP');
   ok('Ben, now cleared, has a card', /Ben 1st dan/.test(html));
 }
 
+console.log('\nTHE ROLL: WHO IS DUE TO GRADE');
+{
+  const r = await req('/o/whanganui/roster');
+  ok('the roll has a Next grading column', /<th class="hide-sm">Next grading<\/th>/.test(r.html));
+  ok('Cal (3rd kyu since 2015) is marked due now, with the grade he is going for', /Cal Kyu[\s\S]*?due now<\/span> <span class="muted">2nd kyu/.test(r.html));
+  ok('Aroha (3rd dan) is due for 4th dan, by invitation', /Aroha 3rd dan[\s\S]*?4th dan[^<]*by invitation/.test(r.html));
+  const d = await req('/o/whanganui/roster?show=due');
+  ok('"Due to grade" lists those who are due', /Cal Kyu/.test(d.html) && /Aroha 3rd dan/.test(d.html));
+  ok('and leaves out the ungraded and those not yet due', !/Nan Newbie/.test(d.html) && !/Tia Teen/.test(d.html));
+}
+
 server.close();
 await pool.end();
 console.log(`\n${pass} passed, ${fail} failed`);

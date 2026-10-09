@@ -30,6 +30,7 @@
  * green. The local listener lives in dev.mjs now. Keep it there.
  */
 
+import { nextGrading } from '../core/domain/next-grading.mjs';
 import crypto from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { URL } from 'node:url';
@@ -350,7 +351,7 @@ get('/o/:slug/roster', async (ctx) => {
   if (!org) throw new NotFound('Organisation');
   const q = ctx.url.searchParams;
   const filter = { grade: q.get('grade') || 'all', band: ['junior', 'senior'].includes(q.get('band')) ? q.get('band') : '',
-                   show: q.get('show') === 'instructors' ? 'instructors' : '', all: q.get('all') === '1' };
+                   show: ['instructors', 'due'].includes(q.get('show')) ? q.get('show') : '', all: q.get('all') === '1' };
   const rows = await people.roster(ctx.me.accountId, org.id, { subtree: org.type !== 'club' });
   // One line per person: the roster has a row per affiliation, and somebody who is a member and an instructor has two.
   const byId = new Map();
@@ -365,22 +366,29 @@ get('/o/:slug/roster', async (ctx) => {
   const canManage = await mayPublishAt(ctx, org.id).catch(() => false);
   const all = [...byId.values()];
   const states = await instructors.stateFor(all.filter((r) => r.isInstructor).map((r) => r.id));
+  const ladderOwner = await orgs.ladderOwnerOf(org.id);
+  const ladder = ladderOwner ? await rank.ladder(ladderOwner.id) : [];
+  const today = new Date().toLocaleDateString('en-CA', { timeZone: org.timezone || 'Pacific/Auckland' });
+  for (const r of all) {
+    const above = r.rank_order != null ? ladder.find((g) => g.rank_order === r.rank_order + 1) : null;
+    r.nextGrading = r.grade ? nextGrading({ held: { label: r.grade, awardedOn: r.graded_on }, next: above ? { label: above.label } : null, today }) : null;
+  }
   const shown = all.filter((r) => {
     if (filter.grade === 'dan' && !r.is_dan) return false;
     if (filter.grade !== 'all' && filter.grade !== 'dan' && r.grade_id !== filter.grade) return false;
     if (filter.band === 'junior' && !(r.age != null && r.age < 18)) return false;
     if (filter.band === 'senior' && !(r.age == null || r.age >= 18)) return false;
     if (filter.show === 'instructors' && !r.isInstructor) return false;
+    if (filter.show === 'due' && !r.nextGrading?.due) return false;
     return true;
   }).map((r) => ({ ...r, instructor: states.get(r.id) ?? null }));
   const unlinked = await family.withoutGuardian(all.filter((r) => r.age != null && r.age < 18).map((r) => r.id));
   for (const r of shown) r.noGuardian = unlinked.has(r.id);
   const waitingDocs = await memberDocuments.waiting(ctx.me.accountId, org.id).catch(() => []);
-  const ladderOwner = await orgs.ladderOwnerOf(org.id);
   return ctx.send(200, V.roster({
     me: ctx.me, org, roster: shown, total: all.length, unlinked: all.filter((r) => unlinked.has(r.id)), waitingDocs, csrf: ctx.csrf,
     canRegister: await mayRegisterAt(ctx, org.id), canManage, filter,
-    ladder: ladderOwner ? await rank.ladder(ladderOwner.id) : [],
+    ladder, dueCount: all.filter((r) => r.nextGrading?.due).length,
     done: q.get('done'), error: q.get('error'), rebuild: q.get('rebuild'),
   }));
 });

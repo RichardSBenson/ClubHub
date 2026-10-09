@@ -444,12 +444,15 @@ export const dashboard = ({ me, csrf, orgs, parents = [], groups = [], platformO
 };
 
 export const roster = ({ me, csrf, org, roster, total = null, canRegister = false, canManage = false, unlinked = [], waitingDocs = [],
-                        filter = {}, ladder = [], done, error, rebuild }) => {
+                        filter = {}, ladder = [], dueCount = 0, done, error, rebuild }) => {
   const here = `/o/${esc(org.slug)}/roster`;
   const withDojo = org.type !== 'club';
   const q = (extra = {}) => new URLSearchParams(Object.entries({ grade: filter.grade !== 'all' ? filter.grade : '', band: filter.band, show: filter.show, ...extra })
     .filter(([, v]) => v)).toString();
   const filtered = filter.grade !== 'all' && filter.grade || filter.band || filter.show;
+  const nextCell = (n) => !n ? '<span class="muted">—</span>'
+    : !n.dueFrom ? `<span class="muted">${esc(n.rhythm)}</span>`
+    : `${n.due ? '<span class="tag wait">due now</span> ' : ''}<span class="muted">${esc(n.nextLabel)}${n.due ? '' : ` · ${esc(n.dueFrom)}`}${n.byInvitation ? ' · by invitation' : ''}</span>`;
   const nowCell = (p) => {
     if (!p.isInstructor) return '';
     const i = p.instructor;
@@ -495,6 +498,7 @@ export const roster = ({ me, csrf, org, roster, total = null, canRegister = fals
       <div><label for="f-show">Show</label><select id="f-show" name="show">
         <option value=""${!filter.show ? ' selected' : ''}>Everyone</option>
         <option value="instructors"${filter.show === 'instructors' ? ' selected' : ''}>Instructors only</option>
+        <option value="due"${filter.show === 'due' ? ' selected' : ''}>Due to grade (${dueCount})</option>
       </select></div>
     </div>
     <p style="margin-bottom:0"><button class="btn quiet" type="submit">Filter</button>
@@ -508,7 +512,7 @@ export const roster = ({ me, csrf, org, roster, total = null, canRegister = fals
     <p><input type="checkbox" id="pickall" hidden> <label for="pickall" hidden style="display:inline">Select all ${roster.length} shown</label>
       <a id="pickall-link" href="${here}?${esc(q({ all: '1' }))}">Select everyone shown (${roster.length})</a></p>` : ''}
   <table>
-    <thead><tr>${canManage ? '<th></th>' : ''}<th>Name</th><th>Grade</th><th class="hide-sm">Age</th>
+    <thead><tr>${canManage ? '<th></th>' : ''}<th>Name</th><th>Grade</th><th class="hide-sm">Next grading</th><th class="hide-sm">Age</th>
       ${withDojo ? '<th class="hide-sm">Dojo</th>' : ''}<th>${canManage ? 'Instructor' : 'Role'}</th><th>Paid until</th></tr></thead>
     <tbody>${roster.map((p) => `<tr>
       ${canManage ? `<td>${p.is_dan || p.isInstructor ? `<input class="pick" type="checkbox" name="pick_${esc(p.id)}" aria-label="Choose ${esc(p.first_name)} ${esc(p.last_name)}"${filter.all ? ' checked' : ''}>` : ''}</td>` : ''}
@@ -516,6 +520,7 @@ export const roster = ({ me, csrf, org, roster, total = null, canRegister = fals
         <span class="muted">${esc(p.display_number ?? '')}</span>${p.age != null && p.age < 18 ? ' <span class="tag">junior</span>' : ''}</td>
       <td>${p.grade ? `<span class="tag ${p.is_dan ? 'dan' : 'ok'}">${esc(p.grade)}</span>`
         : '<span class="tag no">ungraded</span>'}</td>
+      <td class="hide-sm">${nextCell(p.nextGrading)}</td>
       <td class="hide-sm">${p.age ?? ''}</td>
       ${withDojo ? `<td class="hide-sm">${esc(p.dojo ?? '')}</td>` : ''}
       <td>${p.noGuardian ? '<span class="tag wait">No parent linked</span> ' : ''}${canManage ? nowCell(p) : (p.isInstructor ? '<span class="tag">Instructor</span>' : '<span class="hide-sm">' + esc(p.role) + '</span>')}</td>
