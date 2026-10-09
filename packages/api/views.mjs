@@ -1406,7 +1406,7 @@ export const eventForm = ({ me, csrf, org, values = {}, zone, error,
       <div class="row">
         <div>
           <label for="guardianUnder">A parent or guardian signs for anyone under
-            <span class="hint">16 at the Kokoro Cup. 18 at plenty of others.
+            <span class="hint">Usually 18, or younger if you prefer.
               Blank asks for nobody's guardian.</span></label>
           <input id="guardianUnder" name="guardianUnder" type="number" min="1"
             max="30" value="${esc(v('guardianUnder'))}" style="max-width:140px">
