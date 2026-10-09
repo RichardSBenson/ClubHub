@@ -36,7 +36,7 @@ import { nextGrading } from '../core/domain/next-grading.mjs';
 import crypto from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { URL } from 'node:url';
-import { declarations, photos, instructorRole, eventDetails, gallery, MAX_GALLERY, pool, orgs, people, rank, events, competition, pages, assets, news,
+import { lookups, declarations, photos, instructorRole, eventDetails, gallery, MAX_GALLERY, orgs, people, rank, events, competition, pages, assets, news,
          instructors, memberDocuments, navigation, audit, cards, checkin, search, clubPages, appearance, clubs, registerImport, clubProfile, family, myself, memberEvents, messages, emailPreferences, payments, fees, renewals, reminders, attendance, newcomers, reports, gradings, qualifications, forms, autoRenew, booking, shop, push, apiTokens, api, webhooks, platform, portal, enquiries, scheduledPublishing, TooMany, outsiders, trials, referrals, growth, clubMailer, terms,
          Forbidden, NotFound, Invalid } from './data.mjs';
 import * as auth from './auth.mjs';
@@ -93,6 +93,9 @@ import { readClubPage, problemsWithClubPage, ClubPageNotReady }
   from '../core/domain/club-page.mjs';
 import * as R from '../site/render.mjs';
 import { requestRebuild } from '../infrastructure/publishing/rebuild.mjs';
+import { esc } from '../core/domain/html.mjs';
+import { MANAGE, REGISTER, TEACH, WRITE } from '../core/domain/access.mjs';
+import { DEFAULT_TIMEZONE } from '../core/domain/time.mjs';
 
 const SESSION_COOKIE = 'honbu_session';
 const CSRF_COOKIE = 'honbu_csrf';
@@ -304,14 +307,7 @@ get('/dashboard', async (ctx) => {
   // home is their own details, not an empty list of organisations.
   if (ctx.me.grants.length && ctx.me.grants.every((g) => g.role === 'member') && ctx.me.personId)
     return ctx.redirect('/me');
-  const { rows } = await pool.query(`
-    select o.id, o.name, o.slug, o.type, o.path::text as path,
-           (select count(*) from affiliation a
-             where a.organisation_id = o.id and a.ends is null
-               and a.role = 'member' and a.status = 'active') as members
-    from visible_orgs($1) v
-    join organisation o on o.id = v.organisation_id
-    order by o.type, o.name`, [ctx.me.accountId]);
+  const rows = await lookups.visibleOrgs(ctx.me.accountId);
 
   // Every other screen looks at one federation, so one vocabulary does. This
   // one does not: an account can span federations in different arts, and a
@@ -340,7 +336,7 @@ get('/dashboard', async (ctx) => {
   groups.sort((a, b) =>
     (a.federation?.name ?? a.key).localeCompare(b.federation?.name ?? b.key));
 
-  const platformOwner = !!(await pool.query(`select 1 from organisation o where o.parent_id is null and has_role_at($1::uuid, o.id, array['owner']::role_name[])`, [ctx.me.accountId])).rows[0];
+  const platformOwner = await lookups.isPlatformOwner(ctx.me.accountId);
   return ctx.send(200,
     V.dashboard({ me: ctx.me, orgs: rows, parents, groups, csrf: ctx.csrf, platformOwner }));
 });
@@ -398,7 +394,7 @@ get('/o/:slug/roster', async (ctx) => {
   const states = await instructors.stateFor(all.filter((r) => r.isInstructor).map((r) => r.id));
   const ladderOwner = await orgs.ladderOwnerOf(org.id);
   const ladder = ladderOwner ? await rank.ladder(ladderOwner.id) : [];
-  const today = new Date().toLocaleDateString('en-CA', { timeZone: org.timezone || 'Pacific/Auckland' });
+  const today = new Date().toLocaleDateString('en-CA', { timeZone: org.timezone || DEFAULT_TIMEZONE });
   for (const r of all) {
     const above = r.rank_order != null ? ladder.find((g) => g.rank_order === r.rank_order + 1) : null;
     r.nextGrading = r.grade ? nextGrading({ held: { label: r.grade, awardedOn: r.graded_on }, next: above ? { label: above.label } : null, today }) : null;
@@ -449,10 +445,10 @@ get('/p/:id', async (ctx) => {
 
   return ctx.send(200, V.person({
     me: ctx.me, ...record, eligibility, csrf: ctx.csrf, canEdit,
-    about: (await pool.query('select about from person where id = $1', [record.person.id])).rows[0]?.about ?? '',
+    about: await lookups.aboutOf(record.person.id),
     isInstructor: await instructorRole.is(record.person.id), canManage: mayManage,
     documents: await memberDocuments.list(ctx.me.accountId, record.person.id).then((d) => d.rows).catch(() => []),
-    mayInstruct: !!(await pool.query('select 1 from person_current_grade where person_id = $1 and is_dan', [record.person.id])).rows.length,
+    mayInstruct: await lookups.holdsDan(record.person.id),
     done: ctx.url.searchParams.get('done'), photoError: ctx.url.searchParams.get('error'),
     titles: await people.titlesOf(ctx.me.accountId, ctx.params.id),
     recognisable: (await rank.recognisable(ctx.me.accountId, ctx.params.id)).grades,
@@ -554,7 +550,7 @@ post('/p/:id/guardians', async (ctx) => {
     // differently.
     await family.guardiansOf(ctx.me.accountId, ctx.params.id);
     const guardian = number
-      ? (await pool.query('select id from person where upper(display_number)=$1', [number])).rows[0]
+      ? await lookups.personByNumber(number)
       : null;
     if (!guardian) throw new Invalid(`There is nobody with the member number "${number}". `
       + 'Add them to the register first.');
@@ -1455,7 +1451,7 @@ post('/me/:personId', async (ctx) => {
  * because they need to know who is in the hall; adding somebody to it, or
  * changing what it says, is the registrar's.
  */
-const MAY_REGISTER = ['owner', 'administrator', 'registrar'];
+const MAY_REGISTER = REGISTER;
 
 async function mayRegisterAt(ctx, orgId) {
   const { authz } = await calendar();
@@ -1514,7 +1510,7 @@ post('/o/:slug/members/new', async (ctx) => {
  * trusted to write and correct; deciding what the organisation says publicly
  * is the organisation's.
  */
-const MAY_PUBLISH = ['owner', 'administrator'];
+const MAY_PUBLISH = MANAGE;
 
 const mayPublishAt = async (ctx, orgId) => {
   const { authz } = await calendar();
@@ -1710,9 +1706,7 @@ get('/o/:slug/pages/:pageId/preview', async (ctx) => {
 
   // The federation whose site this page belongs to, and its own words for
   // things — a taekwondo club's preview must not say "dojo".
-  const root = await one_(`
-    select o.* from organisation o join organisation me on me.path <@ o.path
-    where me.id = $1 and o.parent_id is null`, [org.id]);
+  const root = await lookups.rootOf(org.id);
   const federation = root ?? org;
 
   const [brand, dojos, evs] = await Promise.all([
@@ -2644,8 +2638,7 @@ const ipHash = (ip) => crypto.createHmac('sha256', process.env.ENQUIRY_SALT ?? p
   .update(String(ip ?? '')).digest('hex').slice(0, 32);
 
 async function enquiryClub(slug) {
-  const { rows: [org] } = await pool.query(
-    `select name, slug from organisation where slug = $1 and status = 'active'`, [slug]);
+  const org = await lookups.activeClub(slug);
   if (!org) throw new NotFound('Organisation');
   return org;
 }
@@ -3129,9 +3122,7 @@ get('/o/:slug/club-page/preview', async (ctx) => {
 
   const { repositories } = await import('../infrastructure/factory.mjs');
   const { site } = await repositories();
-  const federation = await one_(`
-    select o.* from organisation o join organisation me on me.path <@ o.path
-    where me.id = $1 and o.parent_id is null`, [club.id]) ?? club;
+  const federation = await lookups.rootOf(club.id) ?? club;
   const brand = await site.brand(federation.id);
   const vocabulary = await orgs.vocabulary(club.id);
 
@@ -3161,10 +3152,10 @@ get('/o/:slug/club-page/preview', async (ctx) => {
   return ctx.res.end(`<div style="position:sticky;top:0;z-index:99;background:#161617;
     color:#F5F5F5;font:14px/1.5 system-ui,sans-serif;padding:10px 18px;display:flex;
     gap:16px;align-items:center;flex-wrap:wrap"><strong>Preview</strong>
-    <span style="color:#BDBDBF">How ${esc_(federation.name)}'s website will show
-    ${esc_(club.name)} — ${profile.published
+    <span style="color:#BDBDBF">How ${esc(federation.name)}'s website will show
+    ${esc(club.name)} — ${profile.published
       ? 'this page is live.' : 'nobody else can see this yet.'}</span>
-    <a href="/o/${esc_(club.slug)}/club-page"
+    <a href="/o/${esc(club.slug)}/club-page"
       style="margin-left:auto;color:#F0CE41">Back to editing</a></div>` + html);
 });
 
@@ -3826,10 +3817,7 @@ post('/o/:slug/events/:eventSlug/setup/price', async (ctx) => {
  */
 async function entryContextFor(ctx) {
   const org = await organisationFor(ctx, { toRegister: true });
-  const host = await one_(`
-    select o.* from event e join organisation o on o.id = e.organisation_id
-    join organisation me on me.id = $1
-    where e.slug = $2 and me.path <@ o.path`, [org.id, ctx.params.eventSlug]);
+  const host = await lookups.eventHost(org.id, ctx.params.eventSlug);
   if (!host) throw new NotFound('Event');
 
   const { repo } = await calendar();
@@ -3838,9 +3826,6 @@ async function entryContextFor(ctx) {
   return { org, host, event };
 }
 
-const esc_ = (s = '') => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;')
-  .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
-const one_ = async (text, params) => (await pool.query(text, params)).rows[0] ?? null;
 
 get('/o/:slug/events/:eventSlug/enter', async (ctx) => {
   const { org, host, event } = await entryContextFor(ctx);
@@ -3999,7 +3984,7 @@ get('/o/:slug/events/:eventSlug/entries.csv', async (ctx) => {
   const { host, event } = await entryContextFor(ctx);
   const entries = await competition.entriesFor(ctx.me.accountId, event.id);
   const start = event.startsAt ?? event.starts_at;
-  const zone = host.timezone || 'Pacific/Auckland';
+  const zone = host.timezone || DEFAULT_TIMEZONE;
   const eventDay = start
     ? new Intl.DateTimeFormat('en-CA', { timeZone: zone, year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date(start))
     : null;
@@ -4318,9 +4303,7 @@ async function organisationFor(ctx, { toSchedule = false,
     mayRegisterAt(ctx, org.id),
     mayWriteAt(ctx, org.id),
     mayPublishAt(ctx, org.id),
-    pool.query('select has_role_at($1,$2,$3) as ok',
-      [ctx.me.accountId, org.id, ['owner', 'administrator', 'registrar', 'instructor']])
-      .then((r) => !!r.rows[0]?.ok),
+    lookups.hasRole(ctx.me.accountId, org.id, TEACH),
   ]);
   ctx.rail = { org, vocabulary, path: ctx.url.pathname,
                can: { register, write, manage, teach } };
@@ -4338,7 +4321,7 @@ async function organisationFor(ctx, { toSchedule = false,
  * the same signature.
  */
 /** Who may write the website. Publishing is a separate question. */
-const MAY_WRITE = ['owner', 'administrator', 'contributor'];
+const MAY_WRITE = WRITE;
 
 async function mayWriteAt(ctx, orgId) {
   const { authz } = await calendar();
@@ -4347,7 +4330,7 @@ async function mayWriteAt(ctx, orgId) {
 
 async function mayManageAt(ctx, orgId) {
   const { authz } = await calendar();
-  return authz.hasRoleAt(ctx.me.accountId, orgId, ['owner', 'administrator']);
+  return authz.hasRoleAt(ctx.me.accountId, orgId, MANAGE);
 }
 
 async function mayScheduleAt(ctx, orgId) {
@@ -4416,10 +4399,8 @@ function readEntryFee(form) {
 }
 /** Competitions are priced by division, so only the other kinds of event take one flat fee. */
 const takesFlatFee = (kind) => !['tournament', 'fight_night'].includes(kind);
-const flatFeeOf = async (eventId) => {
-  const row = (await pool.query(`select amount_cents from entry_price where event_id=$1 and for_count=1 and not members_only`, [eventId])).rows[0];
-  return row ? (row.amount_cents / 100).toFixed(2).replace(/\.00$/, '') : '0';
-};
+const flatFeeOf = async (eventId) =>
+  ((await lookups.flatEntryFeeCents(eventId)) / 100).toFixed(2).replace(/\.00$/, '');
 
 const detailAsForm = (d) => d ? { eventType: d.type_key ?? '', contactName: d.contact_name ?? '', contactEmail: d.contact_email ?? '',
   contactPhone: d.contact_phone ?? '', costNote: d.cost_note ?? '', infoUrl: d.info_url ?? '', description: d.description ?? '',
@@ -4789,9 +4770,7 @@ export async function handler(req, res) {
 
     // A moved page is a redirect, not a 404. Held in the register, so renaming
     // a dojo slug does not break every link that points at it.
-    const { rows: [moved] } = await pool.query(
-      `select to_path, permanent from redirect where from_path = $1`,
-      [url.pathname]).catch(() => ({ rows: [] }));
+    const moved = await lookups.redirectFor(url.pathname);
     if (moved) {
       res.writeHead(moved.permanent ? 301 : 302, { location: moved.to_path });
       return res.end();

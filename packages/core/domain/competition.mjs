@@ -333,10 +333,8 @@ export function priceFor(count, prices = [], { isMember = true } = {}) {
   };
 }
 
-export const money = (cents, currency = 'NZD') =>
-  cents == null ? '—'
-    : new Intl.NumberFormat('en-NZ', { style: 'currency', currency })
-        .format(cents / 100);
+import { money } from './money.mjs';
+export { money };
 
 // ---------------------------------------------------------------------------
 // consent

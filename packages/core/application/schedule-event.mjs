@@ -11,6 +11,7 @@
  */
 
 import { Event } from '../domain/calendar.mjs';
+import { REGISTER } from '../domain/access.mjs';
 import { requirePort, Refused, NotPermitted,
          EVENT_REPOSITORY, ORGANISATION_REPOSITORY, AUTHORISATION,
          CLOCK } from './ports.mjs';
@@ -22,7 +23,7 @@ import { requirePort, Refused, NotPermitted,
  * and then not allowed to submit is a worse experience than not being offered
  * it, and two copies of this list would eventually disagree about which.
  */
-export const MAY_SCHEDULE = ['owner', 'administrator', 'registrar'];
+export const MAY_SCHEDULE = REGISTER;
 
 /** The local calendar day of an instant, as 2026-11-14, in the organisation's own time zone. */
 function dayIn(date, zone) {

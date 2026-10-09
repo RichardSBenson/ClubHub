@@ -84,8 +84,8 @@ export function readListing(f) {
 /** The price a member pays at a dojo: the dojo's own price for the item if it set one, otherwise the item's. */
 export const priceAt = (product, listing) => listing?.price_cents ?? product.price_cents;
 
-export const money = (cents, currency = 'NZD') =>
-  new Intl.NumberFormat('en-NZ', { style: 'currency', currency }).format((cents ?? 0) / 100);
+import { money } from './money.mjs';
+export { money };
 
 /**
  * The basket from the shop form: fields `qty_<productId>` and `size_<productId>`. `visible` is the range this member is

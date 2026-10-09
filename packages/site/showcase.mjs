@@ -25,6 +25,7 @@ const SAFE_PATH = /^\/[A-Za-z0-9._~\-/]*$/;
 const MEDIA_PATH = /^\/media\/[A-Za-z0-9._-]+$/;
 
 import { titledName, gradeMarkup } from './honorifics.mjs';
+import { DEFAULT_TIMEZONE } from '../core/domain/time.mjs';
 
 /**
  * Where a link may point: this site, or an https address. Never javascript:, data: or a
@@ -331,7 +332,7 @@ export function makeShowcase(h) {
   // ---- the shared pieces ---------------------------------------------------
 
   // In the timezone of the place the event is held, never the server's own: a Saturday event must not read as Friday.
-  const day = (d, tz = 'Pacific/Auckland') => new Date(d).toLocaleDateString('en-NZ', { weekday: 'long', day: 'numeric', month: 'long', timeZone: tz });
+  const day = (d, tz = DEFAULT_TIMEZONE) => new Date(d).toLocaleDateString('en-NZ', { weekday: 'long', day: 'numeric', month: 'long', timeZone: tz });
 
   /** An event as a card: the federation's text banner, then what, when and where. */
   function eventCard(e, { at, federation, logoUrl, vocabulary, dojoSlug = null }) {

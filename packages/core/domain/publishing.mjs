@@ -195,10 +195,10 @@ export class Publication {
  * adapter's business.
  */
 export class DomainEvent {
-  constructor(name, payload = {}) {
+  constructor(name, payload = {}, at = new Date().toISOString()) {
     this.name = name;
     this.payload = payload;
-    this.at = new Date().toISOString();
+    this.at = at;
   }
 }
 

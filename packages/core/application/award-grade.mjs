@@ -9,12 +9,13 @@
 
 import { GradingRecord } from '../domain/rank.mjs';
 import { CheckEligibility } from './check-eligibility.mjs';
+import { REGISTER } from '../domain/access.mjs';
 import { requirePort, Refused, NotPermitted,
          LADDER_REPOSITORY, RANK_REPOSITORY, MEMBER_REPOSITORY,
          ORGANISATION_REPOSITORY, TITLE_REPOSITORY, AUTHORISATION,
          CLOCK } from './ports.mjs';
 
-const MAY_RECORD = ['owner', 'administrator', 'registrar'];
+const MAY_RECORD = REGISTER;
 
 export class AwardGrade {
   constructor({ ladder, ranks, members, organisations, titles, auth, clock }) {

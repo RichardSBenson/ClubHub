@@ -10,6 +10,8 @@
  *   nidan–yondan   about 4 years each, by invitation (depends on training and teaching)
  *   godan and up   no timetable: time and contribution
  */
+import { addMonths } from './membership.mjs';
+
 const DAN = { shodan: 1, nidan: 2, sandan: 3, yondan: 4, godan: 5 };
 const ORDINAL = /(\d+)\s*(?:st|nd|rd|th)?\s*(kyu|dan)/i;
 
@@ -21,14 +23,6 @@ export function readGrade(label) {
   if (m) return { kind: m[2].toLowerCase(), n: Number(m[1]) };
   if (/^(shihan|renshi|kyoshi|hanshi)/.test(s)) return { kind: 'dan', n: 6 };
   return null;
-}
-
-function addMonths(isoDay, months) {
-  const [y, m, d] = isoDay.slice(0, 10).split('-').map(Number);
-  const t = new Date(Date.UTC(y, m - 1 + months, 1));
-  const last = new Date(Date.UTC(t.getUTCFullYear(), t.getUTCMonth() + 1, 0)).getUTCDate();
-  t.setUTCDate(Math.min(d, last));
-  return t.toISOString().slice(0, 10);
 }
 
 /**
@@ -55,7 +49,7 @@ export function nextGrading({ held, next, today }) {
     return { nextLabel, dueFrom: null, due: false, byInvitation: true, rhythm: 'by time and contribution' };
   }
   if (!nextLabel) return null;
-  const dueFrom = held.awardedOn ? addMonths(held.awardedOn, months) : null;
+  const dueFrom = held.awardedOn ? addMonths(String(held.awardedOn).slice(0, 10), months) : null;
   return { nextLabel, dueFrom, due: !!dueFrom && dueFrom <= today, byInvitation, rhythm };
 }
 

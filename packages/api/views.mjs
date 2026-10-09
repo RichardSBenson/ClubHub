@@ -48,11 +48,12 @@ const VOCABULARY = (() => {
   }
 })();
 
+import { esc } from '../core/domain/html.mjs';
+import { DEFAULT_TIMEZONE } from '../core/domain/time.mjs';
+import { money as cents, dollars as money } from '../core/domain/money.mjs';
+
 const V = VOCABULARY;
 
-const esc = (s = '') => String(s)
-  .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
-  .replace(/"/g, '&quot;');
 
 const CSS = `
 :root{
@@ -1482,8 +1483,6 @@ export const eventForm = ({ me, csrf, org, values = {}, zone, error,
 // competition
 // ---------------------------------------------------------------------------
 
-const cents = (c, currency = 'NZD') => c == null ? '—'
-  : new Intl.NumberFormat('en-NZ', { style: 'currency', currency }).format(c / 100);
 
 /** A division's bounds, in words rather than a row of nullable numbers. */
 function boundsOf(d, gradeLabels = {}) {
@@ -3260,7 +3259,7 @@ export const myPerson = ({ me, csrf, how, person, private: priv = {}, grade, mem
 };
 
 const when = (instant, zone) => new Intl.DateTimeFormat('en-NZ', {
-  timeZone: zone || 'Pacific/Auckland', weekday: 'short', day: 'numeric', month: 'short',
+  timeZone: zone || DEFAULT_TIMEZONE, weekday: 'short', day: 'numeric', month: 'short',
   year: 'numeric', hour: 'numeric', minute: '2-digit' }).format(new Date(instant));
 
 /** What is open to enter, and what has been entered, for me and my children. */
@@ -3915,8 +3914,7 @@ export const reportScreen = ({ me, csrf, org, report }) => {
 // grading events
 // ---------------------------------------------------------------------------
 
-const money = (c) => `$${(c / 100).toFixed(2)}`;
-const nz = (iso, tz = 'Pacific/Auckland') => iso
+const nz = (iso, tz = DEFAULT_TIMEZONE) => iso
   ? new Date(iso).toLocaleString('en-NZ', { timeZone: tz, dateStyle: 'medium', timeStyle: 'short' }) : '';
 
 export const gradingEventsScreen = ({ me, csrf, org, events = [] }) => page({
@@ -5159,7 +5157,7 @@ export const platformScreen = ({ me, csrf, root, orgs = [], members = [], stats 
 
 import { CATEGORIES as SHOP_CATEGORIES, ORDER_STATUSES as SHOP_STATUSES, mayMoveOrder as shopMayMove } from '../core/domain/shop.mjs';
 
-const dollars = (c) => c == null ? '' : (c / 100).toFixed(2).replace(/\.00$/, '');
+const plainAmount = (c) => c == null ? '' : (c / 100).toFixed(2).replace(/\.00$/, '');
 const shopLines = (o) => (o.lines ?? []).map((l) => `${esc(l.name)}${l.size ? ` (${esc(l.size)})` : ''} × ${esc(l.quantity)}`).join(', ');
 
 /** What a signed-in member sees: only their own dojo's range. */
@@ -5202,7 +5200,7 @@ export const shopAdminScreen = ({ me, csrf, org, isClub, own = [], national = []
   const base = `/o/${esc(org.slug)}/shop`;
   const fields = (p = {}) => `<label>Name <input name="name" maxlength="100" required value="${esc(p.name ?? '')}"></label>
     <label>Kind <select name="category">${Object.entries(SHOP_CATEGORIES).map(([k, v]) => `<option value="${k}"${p.category === k ? ' selected' : ''}>${esc(v)}</option>`).join('')}</select></label>
-    <label>Price <input name="price" inputmode="decimal" size="7" required value="${esc(dollars(p.price_cents))}"></label>
+    <label>Price <input name="price" inputmode="decimal" size="7" required value="${esc(plainAmount(p.price_cents))}"></label>
     <label>Sizes <input name="sizes" size="30" placeholder="S, M, L  — leave blank if it has none" value="${esc((p.sizes ?? []).join(', '))}"></label>
     <label>Description <input name="description" maxlength="500" size="50" value="${esc(p.description ?? '')}"></label>`;
   return page({ title: `${org.name} — shop`, me, csrf, body: `
@@ -5220,7 +5218,7 @@ export const shopAdminScreen = ({ me, csrf, org, isClub, own = [], national = []
   ${isClub ? `<h2>The national range</h2>${national.length ? `<table><thead><tr><th>Item</th><th>National price</th><th>Your price</th><th></th></tr></thead><tbody>${national.map((p) => `<tr>
     <td>${esc(p.name)} <span class="muted">${esc(SHOP_CATEGORIES[p.category] ?? '')}</span></td><td>${esc(cents(p.price_cents, p.currency))}</td>
     <td colspan="2"><form method="post" action="${base}/listing/${esc(p.id)}" style="display:inline">${tok}
-      <input name="price" inputmode="decimal" size="7" placeholder="${esc(dollars(p.price_cents))}" value="${esc(dollars(p.own_price_cents))}" aria-label="Your price for ${esc(p.name)}">
+      <input name="price" inputmode="decimal" size="7" placeholder="${esc(plainAmount(p.price_cents))}" value="${esc(plainAmount(p.own_price_cents))}" aria-label="Your price for ${esc(p.name)}">
       <label><input type="checkbox" name="hidden"${p.hidden ? ' checked' : ''}> Hide from my members</label>
       <button class="btn quiet" type="submit">Save</button></form></td></tr>`).join('')}</tbody></table>`
     : '<p class="muted">The federation has not set up a national range yet.</p>'}` : ''}

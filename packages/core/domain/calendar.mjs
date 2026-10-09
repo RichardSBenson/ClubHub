@@ -234,10 +234,11 @@ export class Event {
   }
 
   get isPublic() { return this.visibility === 'public' && this.status === 'published'; }
-  get isOpenForEntries() {
+  /** Whether entries are open at `now` (passed in, so the answer does not depend on the clock). */
+  isOpenForEntriesAt(now) {
     if (this.status !== 'published') return false;
-    if (this.entriesClose && this.entriesClose < new Date()) return false;
-    if (this.entriesOpen && this.entriesOpen > new Date()) return false;
+    if (this.entriesClose && this.entriesClose < now) return false;
+    if (this.entriesOpen && this.entriesOpen > now) return false;
     return this.entriesOpen != null || this.entriesClose != null;
   }
 

@@ -10,11 +10,12 @@
 
 import { ContentEntry } from '../domain/content-types.mjs';
 import { Slug } from '../domain/publishing.mjs';
+import { WRITE } from '../domain/access.mjs';
 import { requirePort, Refused, NotPermitted,
          CONTENT_TYPE_REPOSITORY, CONTENT_ENTRY_REPOSITORY,
          AUTHORISATION, CLOCK } from './ports.mjs';
 
-const MAY_WRITE = ['owner', 'administrator', 'contributor'];
+const MAY_WRITE = WRITE;
 
 export class SaveEntry {
   constructor({ types, entries, auth, clock }) {

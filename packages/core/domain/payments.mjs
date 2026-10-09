@@ -16,6 +16,8 @@
  * paid to that organisation's own account — see docs/payments.md.
  */
 
+import { money } from './money.mjs';
+
 export const KINDS = Object.freeze({
   dojo_fee:         { label: 'Dojo fees',           payee: 'club' },
   tournament_entry: { label: 'Tournament entry',    payee: 'organiser' },
@@ -82,8 +84,7 @@ export function groupByPayee(lines) {
 
 // ---------------------------------------------------------------------------
 
-export const dollars = (cents, currency = 'NZD') =>
-  new Intl.NumberFormat('en-NZ', { style: 'currency', currency }).format((cents ?? 0) / 100);
+export const dollars = (cents, currency = 'NZD') => money(cents ?? 0, currency);
 
 /** "12.50" or "12" → 1250. Null when it is not a sensible amount. */
 export function centsFrom(text) {

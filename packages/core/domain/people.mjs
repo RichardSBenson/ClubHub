@@ -26,6 +26,8 @@
  * Blank is allowed (not everybody's roll has it). Anything else is not
  * guessed at: it is reported so a registrar can fix it.
  */
+import { todayIso } from './time.mjs';
+
 export const GENDERS = Object.freeze({ M: 'M', F: 'F' });
 export function normaliseGender(value) {
   const s = String(value ?? '').trim().toLowerCase();
@@ -37,7 +39,7 @@ export function normaliseGender(value) {
 
 export function problemsWithPerson(fields = {}, { today = null } = {}) {
   const out = [];
-  const now = today ?? new Date().toISOString().slice(0, 10);
+  const now = today ?? todayIso();
 
   if (!String(fields.firstName ?? '').trim()) out.push('a first name is required');
   if (!String(fields.lastName ?? '').trim()) out.push('a last name is required');
@@ -119,7 +121,7 @@ export const STATUSES = Object.freeze(
  */
 export function ageOn(dateOfBirth, on) {
   if (!dateOfBirth || !isRealDate(dateOfBirth)) return null;
-  const day = on ?? new Date().toISOString().slice(0, 10);
+  const day = on ?? todayIso();
   if (!isRealDate(day) || day < dateOfBirth) return null;
 
   let years = +day.slice(0, 4) - +dateOfBirth.slice(0, 4);

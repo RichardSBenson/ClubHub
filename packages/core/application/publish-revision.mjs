@@ -16,7 +16,9 @@ import { requirePort, Refused, NotPermitted,
          PUBLICATION_REPOSITORY, ENTRY_REPOSITORY, AUTHORISATION,
          EVENT_BUS, CLOCK } from './ports.mjs';
 
-const MAY_PUBLISH = ['owner', 'administrator'];
+import { MANAGE } from '../domain/access.mjs';
+
+const MAY_PUBLISH = MANAGE;
 
 export class PublishRevision {
   constructor({ publications, entries, auth, events, clock }) {

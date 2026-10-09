@@ -12,6 +12,7 @@ export { pool } from '../infrastructure/postgres/pool.mjs';
 import { applyRegister } from './register-import.mjs';
 import { parseCsv } from '../core/domain/register-csv.mjs';
 import { pool } from '../infrastructure/postgres/pool.mjs';
+import { DEFAULT_TIMEZONE } from '../core/domain/time.mjs';
 import { nextGrading } from '../core/domain/next-grading.mjs';
 import { problemsWithPerson, problemsWithMembership, normaliseGender, ageOn }
   from '../core/domain/people.mjs';
@@ -41,9 +42,6 @@ export class Invalid extends Error {
   constructor(msg) { super(msg); this.status = 422; }
 }
 
-const MANAGE = ['owner', 'administrator'];
-const REGISTER = ['owner', 'administrator', 'registrar'];
-const TEACH = ['owner', 'administrator', 'registrar', 'instructor'];
 
 /** Throws unless `actor` holds one of `roles` at or above `orgId`. */
 export async function assertRole(actor, orgId, roles = MANAGE) {
@@ -155,9 +153,9 @@ export const orgs = {
     const path = `${parent.path}.${slug.replace(/-/g, '_')}`;
     return one(`
       insert into organisation (parent_id, type, name, slug, path, country_code, timezone)
-      values ($1,$2,$3,$4,$5,$6,coalesce($7,'Pacific/Auckland'))
+      values ($1,$2,$3,$4,$5,$6,$7)
       returning *`,
-      [parentId, type, name, slug, path, countryCode, timezone]);
+      [parentId, type, name, slug, path, countryCode, timezone ?? DEFAULT_TIMEZONE]);
   },
 };
 
@@ -1451,7 +1449,7 @@ import { readQuery, fold } from '../content/search.mjs';
  * somebody trusted to write; putting words in front of the public is the
  * organisation's decision.
  */
-const WRITE_PAGES = ['owner', 'administrator', 'contributor'];
+const WRITE_PAGES = WRITE;
 
 export const pages = {
   async published(orgId, slug) {
@@ -2531,7 +2529,7 @@ export const myself = {
            and n.rank_order = g.rank_order + 1 where g.id = cg.grade_id) as next_label
       from person_current_grade cg where cg.person_id=$1`, [personId]);
     if (grade) grade.next_grading = nextGrading({ held: { label: grade.label, awardedOn: grade.awarded_on },
-      next: grade.next_label ? { label: grade.next_label } : null, today: localNow('Pacific/Auckland').date });
+      next: grade.next_label ? { label: grade.next_label } : null, today: localNow(DEFAULT_TIMEZONE).date });
     const { rows: memberships } = await pool.query(`
       select o.name, o.slug, a.role, a.status, a.paid_until::text as paid_until
       from affiliation a join organisation o on o.id = a.organisation_id
@@ -2678,14 +2676,14 @@ export const memberEvents = {
   async lastEntry(personId) {
     const row = await one(`
       select x.weight_kg::float8 as weight_kg, x.height_cm, x.club_name, x.declared_grade,
-             to_char(x.created_at at time zone 'Pacific/Auckland','YYYY-MM-DD') as entered_on,
+             to_char(x.created_at at time zone $2,'YYYY-MM-DD') as entered_on,
              coalesce((select json_agg(json_build_object('discipline', d.name, 'division', v.label) order by d.sort_order)
                          from entry_selection s join event_discipline d on d.id = s.discipline_id
                          left join event_division v on v.id = s.division_id
                         where s.entry_id = x.id), '[]'::json) as picks
       from event_entry x
       where x.person_id = $1 and x.status in ('entered','confirmed') and x.weight_kg is not null
-      order by x.created_at desc limit 1`, [personId]);
+      order by x.created_at desc limit 1`, [personId, DEFAULT_TIMEZONE]);
     return row ? { weightKg: row.weight_kg, heightCm: row.height_cm, enteredOn: row.entered_on, picks: row.picks,
       clubName: row.club_name, declaredGrade: row.declared_grade } : null;
   },
@@ -4341,7 +4339,6 @@ export const reminders = {
 import { problemsWithSheet, classesOn, notSeenSince, perWeek, isDate, addDays, BACKFILL_DAYS }
   from '../core/domain/attendance.mjs';
 
-const TEACHERS = ['owner', 'administrator', 'registrar', 'instructor'];
 
 const todayAt = async (org) =>
   (await one(`select to_char((now() at time zone $1)::date,'YYYY-MM-DD') as d`, [org.timezone])).d;
@@ -4356,7 +4353,7 @@ async function attendanceClub(orgId) {
 export const attendance = {
   /** The classes that run on a day, how many came, and who has not been seen lately. */
   async overview(actor, orgId, { date = null, days = 30 } = {}) {
-    await assertRole(actor, orgId, TEACHERS);
+    await assertRole(actor, orgId, TEACH);
     const org = await attendanceClub(orgId);
     const today = await todayAt(org);
     const day = date && isDate(date) ? date : today;
@@ -4393,7 +4390,7 @@ export const attendance = {
 
   /** One class on one day: everybody the club might expect, and who is marked. */
   async sheet(actor, orgId, sessionId, date) {
-    await assertRole(actor, orgId, TEACHERS);
+    await assertRole(actor, orgId, TEACH);
     const org = await attendanceClub(orgId);
     const session = await one(`select id, label, weekday, to_char(starts,'HH24:MI') as starts,
         to_char(ends,'HH24:MI') as ends from training_session where id=$1 and organisation_id=$2`,
@@ -4488,7 +4485,7 @@ export const attendance = {
 
   /** How much one person has trained. For those who look after them. */
   async forPerson(actor, personId, orgId) {
-    await assertRole(actor, orgId, TEACHERS);
+    await assertRole(actor, orgId, TEACH);
     const org = await one('select timezone from organisation where id=$1', [orgId]);
     const today = await todayAt(org);
     return one(`select
@@ -4513,7 +4510,7 @@ import { readNewcomer, problemsWithNewcomer, isChild, timeToTalk, RETAIN_DAYS }
 
 export const newcomers = {
   async list(actor, orgId) {
-    await assertRole(actor, orgId, TEACHERS);
+    await assertRole(actor, orgId, TEACH);
     const org = await attendanceClub(orgId);
     const today = await todayAt(org);
     const rows = await q(`select n.id, n.first_name, n.last_name, n.email, n.phone, n.status,
@@ -4531,7 +4528,7 @@ export const newcomers = {
 
   /** Add a newcomer, and — if asked — mark them as at a class today. */
   async add(actor, orgId, input, { sessionId = null, date = null } = {}) {
-    await assertRole(actor, orgId, TEACHERS);
+    await assertRole(actor, orgId, TEACH);
     const org = await attendanceClub(orgId);
     const today = await todayAt(org);
     const problems = problemsWithNewcomer(input, today);
@@ -4607,7 +4604,7 @@ export const newcomers = {
 
   /** They are not coming back. Their details go now, not in six months. */
   async notContinuing(actor, orgId, newcomerId) {
-    await assertRole(actor, orgId, TEACHERS);
+    await assertRole(actor, orgId, TEACH);
     const n = await one('select status from newcomer where id=$1 and organisation_id=$2', [newcomerId, orgId]);
     if (!n) throw new NotFound('Newcomer');
     if (n.status !== 'trialling') throw new Invalid('They are not trialling.');
@@ -4639,7 +4636,7 @@ export const newcomers = {
 import { REPORTS, readRange, cents } from '../core/domain/csv.mjs';
 
 const IN_TREE = `(select o.id from organisation root join organisation o on o.path <@ root.path where root.id = $1)`;
-const REPORT_ROLES = { register: REGISTER, manage: ['owner', 'administrator'], teach: TEACHERS };
+const REPORT_ROLES = { register: REGISTER, manage: MANAGE, teach: TEACH };
 
 export const reports = {
   list: REPORTS,
@@ -5039,7 +5036,7 @@ const CATALOGUE_FROM = `from organisation me join organisation a on me.path <@ a
 
 const qualToday = async (orgId) => {
   const o = await one('select timezone from organisation where id=$1', [orgId]);
-  return (await one(`select to_char((now() at time zone $1)::date,'YYYY-MM-DD') as d`, [o?.timezone ?? 'Pacific/Auckland'])).d;
+  return (await one(`select to_char((now() at time zone $1)::date,'YYYY-MM-DD') as d`, [o?.timezone ?? DEFAULT_TIMEZONE])).d;
 };
 
 const AWARD_SELECT = `
@@ -5511,7 +5508,7 @@ export const outsiders = {
 import { nextSession, actionsFor, messageText } from '../core/domain/portal.mjs';
 
 const localNow = (tz) => {
-  const parts = Object.fromEntries(new Intl.DateTimeFormat('en-CA', { timeZone: tz || 'Pacific/Auckland',
+  const parts = Object.fromEntries(new Intl.DateTimeFormat('en-CA', { timeZone: tz || DEFAULT_TIMEZONE,
     year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' })
     .formatToParts(new Date()).map((x) => [x.type, x.value]));
   return { date: `${parts.year}-${parts.month}-${parts.day}`, time: `${parts.hour}:${parts.minute}` };
@@ -5535,7 +5532,7 @@ export const portal = {
       from affiliation a join organisation o on o.id = a.organisation_id
       where a.person_id = $1 and a.ends is null order by o.type, o.name`, [person.id]);
 
-    const tz = memberships[0]?.timezone ?? 'Pacific/Auckland';
+    const tz = memberships[0]?.timezone ?? DEFAULT_TIMEZONE;
     const now = localNow(tz);
     for (const m of memberships)
       m.standing = m.status === 'trial' ? 'trial'
@@ -5777,18 +5774,17 @@ export const cards = {
     // The signed rank must still be the real one; a grade changed since the code was made is worth a flag.
     const stale = row && signature.valid && (signature.rankOrder ?? null) !== (row.rank_order ?? null);
     let official = false;
-    if (actor && row) official = !!(await one('select has_role_at($1,$2,$3) as ok', [actor, row.org_id, TEACHERS_ROLES]))?.ok;
+    if (actor && row) official = !!(await one('select has_role_at($1,$2,$3) as ok', [actor, row.org_id, TEACH]))?.ok;
     return { verdict, official, stale, federation: row?.federation ?? null,
       member: official && row ? { name: row.name, number: row.display_number, club: row.club, grade: row.grade,
         paidUntil: row.paid_until, exempt: row.fee_exempt, hasPhoto: !!row.photo_asset_id, isInstructor: row.is_instructor, name: row.name, personId: row.id } : null };
   },
 };
-const TEACHERS_ROLES = ['owner', 'administrator', 'registrar', 'instructor'];
 
 export const checkin = {
   /** The code an instructor shows for one class today. */
   async code(actor, orgId, sessionId) {
-    await assertRole(actor, orgId, TEACHERS_ROLES);
+    await assertRole(actor, orgId, TEACH);
     const org = await attendanceClub(orgId);
     const date = await todayAt(org);
     const session = await one(`select id, label, weekday, to_char(starts,'HH24:MI') as starts,
@@ -6695,8 +6691,8 @@ export const declarations = {
     return (await orgs.ladderOwnerOf(orgId)) ?? (await one('select * from organisation where id = $1', [orgId]));
   },
   async current(federationId) {
-    return one(`select id, version, body, to_char(published_at at time zone 'Pacific/Auckland','YYYY-MM-DD') as published_on
-      from federation_declaration where organisation_id = $1 order by published_at desc limit 1`, [federationId]);
+    return one(`select id, version, body, to_char(published_at at time zone $2,'YYYY-MM-DD') as published_on
+      from federation_declaration where organisation_id = $1 order by published_at desc limit 1`, [federationId, DEFAULT_TIMEZONE]);
   },
   async publish(actor, orgId, { version, body }) {
     const owner = await this.ownerOf(orgId);
@@ -6718,8 +6714,8 @@ export const declarations = {
     const owner = await this.ownerOf(home);
     const current = owner ? await this.current(owner.id) : null;
     if (!current) return { state: 'none', owner };
-    const signed = await one(`select signed_name, guardian, to_char(signed_at at time zone 'Pacific/Auckland','YYYY-MM-DD') as signed_on
-      from declaration_signing where person_id = $1 and declaration_id = $2`, [personId, current.id]);
+    const signed = await one(`select signed_name, guardian, to_char(signed_at at time zone $3,'YYYY-MM-DD') as signed_on
+      from declaration_signing where person_id = $1 and declaration_id = $2`, [personId, current.id, DEFAULT_TIMEZONE]);
     return { state: declarationState({ current, signed }), owner, current, signed };
   },
   async sign(actor, personId, { accepted, name, ip = null }) {
@@ -7654,6 +7650,7 @@ export const platform = {
 // ---------------------------------------------------------------------------
 
 import { readBasket, readNote, mayMoveOrder, ORDER_STATUSES } from '../core/domain/shop.mjs';
+import { MANAGE, REGISTER, TEACH, WRITE } from '../core/domain/access.mjs';
 
 /**
  * The range a dojo offers: its own products, plus those of every organisation above it (the national range),
@@ -7789,5 +7786,64 @@ export const shop = {
     if (!o) throw new NotFound('Order');
     if (!Object.hasOwn(ORDER_STATUSES, status) || !mayMoveOrder(o.status, status)) throw new Invalid('That order cannot be moved there.');
     await pool.query(`update shop_order set status=$2, updated_at=now() where id=$1`, [orderId, status]);
+  },
+};
+
+// ---------------------------------------------------------------------------
+// lookups
+//
+// Small questions the routes ask. They live here, with the rest of the SQL, so a route never talks to the
+// database itself (tools/check-architecture.mjs holds it to that).
+// ---------------------------------------------------------------------------
+export const lookups = {
+  /** The organisations this account can see, with how many active members each has. */
+  async visibleOrgs(actor) {
+    return q(`
+      select o.id, o.name, o.slug, o.type, o.path::text as path,
+             (select count(*) from affiliation a
+               where a.organisation_id = o.id and a.ends is null
+                 and a.role = 'member' and a.status = 'active') as members
+      from visible_orgs($1) v
+      join organisation o on o.id = v.organisation_id
+      order by o.type, o.name`, [actor]);
+  },
+  async isPlatformOwner(actor) {
+    return !!(await one(`select 1 as ok from organisation o where o.parent_id is null
+      and has_role_at($1::uuid, o.id, array['owner']::role_name[])`, [actor]));
+  },
+  /** Somebody by their member number, as typed (any case). */
+  async personByNumber(number) {
+    return one('select id from person where upper(display_number)=$1', [String(number).toUpperCase()]);
+  },
+  async activeClub(slug) {
+    return one(`select name, slug from organisation where slug = $1 and status = 'active'`, [slug]);
+  },
+  async hasRole(actor, orgId, roles) {
+    return !!(await one('select has_role_at($1,$2,$3) as ok', [actor, orgId, roles]))?.ok;
+  },
+  /** The top of the tree an organisation belongs to: the federation whose site and words it uses. */
+  async rootOf(orgId) {
+    return one(`select o.* from organisation o join organisation me on me.path <@ o.path
+      where me.id = $1 and o.parent_id is null`, [orgId]);
+  },
+  /** The organisation that owns an event, as seen from `orgId` (the event's own or one above it). */
+  async eventHost(orgId, eventSlug) {
+    return one(`select o.* from event e join organisation o on o.id = e.organisation_id
+      join organisation me on me.id = $1
+      where e.slug = $2 and me.path <@ o.path`, [orgId, eventSlug]);
+  },
+  /** The flat entry fee in cents, or 0. */
+  async flatEntryFeeCents(eventId) {
+    return (await one(`select amount_cents from entry_price where event_id=$1 and for_count=1 and not members_only`, [eventId]))?.amount_cents ?? 0;
+  },
+  async aboutOf(personId) {
+    return (await one('select about from person where id = $1', [personId]))?.about ?? '';
+  },
+  async holdsDan(personId) {
+    return !!(await one('select 1 as ok from person_current_grade where person_id = $1 and is_dan', [personId]));
+  },
+  /** Where a moved page now lives, if it has moved. */
+  async redirectFor(path) {
+    return one('select to_path, permanent from redirect where from_path = $1', [path]).catch(() => null);
   },
 };

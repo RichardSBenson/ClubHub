@@ -12,10 +12,11 @@
  */
 
 import { ContentType } from '../domain/content-types.mjs';
+import { MANAGE } from '../domain/access.mjs';
 import { requirePort, Refused, NotPermitted,
          CONTENT_TYPE_REPOSITORY, AUTHORISATION } from './ports.mjs';
 
-const MAY_DEFINE = ['owner', 'administrator'];
+const MAY_DEFINE = MANAGE;
 
 export class DefineContentType {
   constructor({ types, auth }) {

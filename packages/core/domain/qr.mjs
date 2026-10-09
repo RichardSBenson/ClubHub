@@ -9,6 +9,8 @@
  */
 
 // [total codewords, ecc codewords per block, [[blocks, data codewords per block], …]] — level M
+import { esc } from './html.mjs';
+
 const VERSIONS = [
   null,
   [26, 10, [[1, 16]]], [44, 16, [[1, 28]]], [70, 26, [[1, 44]]], [100, 18, [[2, 32]]],
@@ -223,7 +225,7 @@ export function qrSvg(text, { label = 'QR code', dark = '#000', light = '#fff' }
       x = end;
     }
   }
-  const esc = String(label).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
-  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${size} ${size}" role="img" aria-label="${esc}" shape-rendering="crispEdges">`
+  const safeLabel = esc(label);
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${size} ${size}" role="img" aria-label="${safeLabel}" shape-rendering="crispEdges">`
     + `<rect width="${size}" height="${size}" fill="${light}"/><path d="${path}" fill="${dark}"/></svg>`;
 }
