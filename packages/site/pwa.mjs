@@ -5,7 +5,7 @@
  * valid, correctly sized PNGs. A federation can replace them by putting its own files in the output after the build.
  */
 import zlib from 'node:zlib';
-import { DEFAULT_LOCALE } from '../core/domain/defaults.mjs';
+import { region } from '../infrastructure/region-context.mjs';
 
 export const APP_COLOUR = '#3451D1';
 const hex = (h) => [1, 3, 5].map((i) => parseInt(h.slice(i, i + 2), 16));
@@ -123,7 +123,7 @@ function encode(size, raw) {
 
 export function manifest({ name, shortName = null, background = '#ffffff' }) {
   return {
-    id: '/me', name, short_name: (shortName ?? name).slice(0, 12), lang: DEFAULT_LOCALE, dir: 'ltr',
+    id: '/me', name, short_name: (shortName ?? name).slice(0, 12), lang: region().locale, dir: 'ltr',
     description: `${name} — your membership card, classes, events, payments and shop`,
     start_url: '/me', scope: '/', display: 'standalone', display_override: ['standalone', 'minimal-ui'], orientation: 'any',
     background_color: background, theme_color: APP_COLOUR, categories: ['sports', 'lifestyle', 'education'],
@@ -143,7 +143,7 @@ export function manifest({ name, shortName = null, background = '#ffffff' }) {
   };
 }
 
-export const offlinePage = (name) => `<!DOCTYPE html><html lang="${DEFAULT_LOCALE}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+export const offlinePage = (name) => `<!DOCTYPE html><html lang="${region().locale}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Offline — ${name.replace(/[<&>]/g, '')}</title><style>body{font:16px system-ui,sans-serif;margin:0;display:grid;place-items:center;min-height:100vh;background:#fff;color:#1c2333;text-align:center;padding:24px}
 h1{font-size:1.4rem}p{max-width:30em;color:#555}a{color:#263CA3}</style></head><body><main><h1>You are offline</h1>
 <p>${name.replace(/[<&>]/g, '')} needs a connection to show your details. Your information is not stored on this device, so nobody else can read it here.</p>

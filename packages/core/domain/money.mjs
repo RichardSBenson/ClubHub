@@ -1,14 +1,15 @@
 /** The one place an amount in cents becomes words. */
 import { DEFAULT_CURRENCY, DEFAULT_LOCALE } from './defaults.mjs';
 
-/** "$12.50", in the currency given ("—" when there is no amount). */
-export const money = (cents, currency = DEFAULT_CURRENCY) =>
+/** "$12.50", in the currency and language given ("—" when there is no amount). */
+export const money = (cents, currency = DEFAULT_CURRENCY, locale = DEFAULT_LOCALE) =>
   cents == null ? '—'
-    : new Intl.NumberFormat(DEFAULT_LOCALE, { style: 'currency', currency }).format(cents / 100);
+    : new Intl.NumberFormat(locale, { style: 'currency', currency }).format(cents / 100);
 
-/** "$12.00" — always two decimals, dollars only. For tables where amounts line up. */
-export const dollars = (cents) => `$${((cents ?? 0) / 100).toFixed(2)}`;
+/** "$12.00": always two decimals. For tables where amounts line up. */
+export const dollars = (cents, currency = DEFAULT_CURRENCY, locale = DEFAULT_LOCALE) =>
+  new Intl.NumberFormat(locale, { style: 'currency', currency, minimumFractionDigits: 2 }).format((cents ?? 0) / 100);
 
-/** "$12" or "$12.50": whole dollars without the noughts, for the public site. Other currencies are named. */
-export const tidyMoney = (cents, currency = DEFAULT_CURRENCY) =>
-  `$${(cents / 100) % 1 ? (cents / 100).toFixed(2) : String(cents / 100)}${currency === DEFAULT_CURRENCY ? '' : ` ${currency}`}`;
+/** "$12" or "$12.50": whole amounts without the noughts, for the public site. */
+export const tidyMoney = (cents, currency = DEFAULT_CURRENCY, locale = DEFAULT_LOCALE) =>
+  new Intl.NumberFormat(locale, { style: 'currency', currency, minimumFractionDigits: (cents / 100) % 1 ? 2 : 0 }).format(cents / 100);

@@ -17,7 +17,7 @@
  */
 
 import { money } from './money.mjs';
-import { DEFAULT_CURRENCY } from './defaults.mjs';
+import { DEFAULT_CURRENCY, DEFAULT_LOCALE } from './defaults.mjs';
 
 export const KINDS = Object.freeze({
   dojo_fee:         { label: 'Dojo fees',           payee: 'club' },
@@ -85,7 +85,7 @@ export function groupByPayee(lines) {
 
 // ---------------------------------------------------------------------------
 
-export const dollars = (cents, currency = DEFAULT_CURRENCY) => money(cents ?? 0, currency);
+export const dollars = (cents, currency = DEFAULT_CURRENCY, locale = DEFAULT_LOCALE) => money(cents ?? 0, currency, locale);
 
 /** "12.50" or "12" → 1250. Null when it is not a sensible amount. */
 export function centsFrom(text) {

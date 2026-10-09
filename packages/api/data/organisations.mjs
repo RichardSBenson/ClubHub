@@ -6,7 +6,8 @@
  */
 
 import { pool } from '../../infrastructure/postgres/pool.mjs';
-import { DEFAULT_TIMEZONE, DEFAULT_CURRENCY, ADULT_AGE } from '../../core/domain/defaults.mjs';
+import { DEFAULT_TIMEZONE } from '../../core/domain/defaults.mjs';
+import { region } from '../../infrastructure/region-context.mjs';
 import { feeFor } from '../../core/domain/membership.mjs';
 import { readTheme } from '../../site/theme.mjs';
 import { problemsWithClubProfile, changesTheSite } from '../../core/domain/club-profile.mjs';
@@ -16,6 +17,7 @@ import { readinessProblems, readinessGaps, ClubPageNotReady, stateOf } from '../
 import { cents } from '../../core/domain/csv.mjs';
 import { builtInFor, builtInYears, yearToOffer, termState, mayEnrol, holidays as termHolidays, inHoliday, termPrice, readMidTerm, problemsWithMidTerm, problemsWithTerm, offersDue, CALENDARS } from '../../core/domain/terms.mjs';
 import { MANAGE, REGISTER } from '../../core/domain/access.mjs';
+import { resolveRegion, problemsWithRegion } from '../../core/domain/region.mjs';
 import { family, people } from './people.mjs';
 import { Invalid, NotFound, PERSON_COLUMNS, WRITE_PAGES, ageOnDate, assertRole, clubMail, clubOnly, feeRows, one, q, todayAt } from './shared.mjs';
 
@@ -52,6 +54,33 @@ export const orgs = {
     const v = row?.vocabulary ?? {};
     return Object.fromEntries(Object.entries(v)
       .filter(([k, val]) => !k.startsWith('_') && typeof val === 'string' && val.trim()));
+  },
+
+  /** The currency, language and age of adulthood that apply here: the nearest organisation up the tree that has said. */
+  async regionOf(orgId) {
+    if (!orgId) return resolveRegion({});
+    const row = await one(`
+      select a.settings->'region' as region
+      from organisation target
+      join organisation a on target.path <@ a.path
+      where target.id = $1 and a.settings ? 'region'
+      order by nlevel(a.path) desc
+      limit 1`, [orgId]);
+    return resolveRegion(row?.region ?? {});
+  },
+  /** What this organisation itself has set (not inherited), or null. */
+  async ownRegion(orgId) {
+    const row = await one(`select settings->'region' as region from organisation where id = $1`, [orgId]);
+    return row?.region ?? null;
+  },
+  async saveRegion(actor, orgId, input) {
+    await assertRole(actor, orgId, MANAGE);
+    const problems = problemsWithRegion(input);
+    if (problems.length) throw new Invalid(problems.join(' '));
+    await pool.query(`update organisation set settings = jsonb_set(coalesce(settings,'{}'::jsonb), '{region}', $2::jsonb) where id = $1`,
+      [orgId, JSON.stringify({ currency: input.currency, locale: input.locale, adultAge: input.adultAge })]);
+    await pool.query(`insert into audit_log (account_id, organisation_id, action, entity, entity_id, after)
+      values ($1,$2,'region_changed','organisation',$2,$3::jsonb)`, [actor, orgId, JSON.stringify(input)]);
   },
 
   /**
@@ -822,13 +851,13 @@ export const terms = {
     if (!home) return { how, person, club: null, items: [] };
     const today = await todayAt(home);
     const age = ageOnDate(person.date_of_birth, today);
-    if (age == null || age >= ADULT_AGE) return { how, person, club: null, items: [] };
+    if (age == null || age >= region().adultAge) return { how, person, club: null, items: [] };
     const y = Number(today.slice(0, 4));
     const grade = await one('select rank_order from person_current_grade where person_id = $1', [personId]);
     const sessions = await q('select weekday, min_age, max_age, min_grade_id from training_session where organisation_id = $1', [home.id]);
     const weekdays = [...new Set(sessions.filter((s) => (s.min_age == null || age >= s.min_age) && (s.max_age == null || age <= s.max_age)).map((s) => s.weekday))];
     const schedule = await feeRows(home.id);
-    const fee = feeFor(schedule, { ageYears: age, period: 'term', today });
+    const fee = feeFor(schedule, { adultAge: region().adultAge, ageYears: age, period: 'term', today });
     const rule = midTermOf(home);
     const items = [];
     for (const year of [y, y + 1]) {
@@ -861,7 +890,7 @@ export const terms = {
       let paymentId = null;
       if (cents > 0) {
         const { rows: [pay] } = await client.query(`insert into payment (organisation_id, person_id, amount_cents, currency, status, requested_by)
-          values ($1,$2,$3,$4,'pending',$5) returning id`, [home.id, personId, cents, info.fee?.currency ?? DEFAULT_CURRENCY, actor]);
+          values ($1,$2,$3,$4,'pending',$5) returning id`, [home.id, personId, cents, info.fee?.currency ?? region().currency, actor]);
         await client.query(`insert into payment_line (payment_id, kind, description, amount_cents, term_enrolment_id) values ($1,'dojo_fee',$2,$3,$4)`,
           [pay.id, `${item.term.name} ${item.term.year} classes — ${info.person.first_name}${item.price.kind === 'full' ? '' : ` (${item.price.note})`}`, cents, e.id]);
         paymentId = pay.id;

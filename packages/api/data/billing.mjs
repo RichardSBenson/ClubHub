@@ -6,7 +6,7 @@
  */
 
 import { pool } from '../../infrastructure/postgres/pool.mjs';
-import { DEFAULT_CURRENCY, ADULT_AGE } from '../../core/domain/defaults.mjs';
+import { region } from '../../infrastructure/region-context.mjs';
 import { payeeFor, problemsWithPaymentRequest, problemsWithPayment, KINDS as PAY_KINDS } from '../../core/domain/payments.mjs';
 import { isTestProvider } from '../../infrastructure/payments/providers.mjs';
 import { dueForReminder, reminderText, PERIODS, extendedUntil, standing, feeFor, problemsWithFee, problemsWithExemption, MANUAL_METHODS } from '../../core/domain/membership.mjs';
@@ -26,7 +26,7 @@ export const billing = {
    * Every line names a person, so both sides can audit it.
    */
   async draftAffiliationInvoice(actor, { fromOrg, toOrg, periodStart, periodEnd,
-                                         unitCents, currency = DEFAULT_CURRENCY }) {
+                                         unitCents, currency = region().currency }) {
     await assertRole(actor, fromOrg, MANAGE);
 
     const members = await q(`
@@ -261,7 +261,7 @@ export const payments = {
       const { rows: [pay] } = await client.query(`
         insert into payment (organisation_id, person_id, amount_cents, currency, status, requested_by)
         values ($1,$2,$3,$5,'pending',$4) returning *`,
-        [payeeId, person.id, input.amountCents, actor, DEFAULT_CURRENCY]);
+        [payeeId, person.id, input.amountCents, actor, region().currency]);
       await client.query(`insert into payment_line (payment_id, kind, description, amount_cents)
         values ($1,$2,$3,$4)`, [pay.id, input.kind, description, input.amountCents]);
       await client.query(`
@@ -421,14 +421,14 @@ export const renewals = {
     for (const r of chosen) {
       if (r.fee_exempt) { skipped.push({ name: r.name, reason: 'not charged' }); continue; }
       if (r.asked) { skipped.push({ name: r.name, reason: 'already asked' }); continue; }
-      const fee = feeFor(schedule, { ageYears: r.age, period, today });
-      if (!fee) { skipped.push({ name: r.name, reason: `no ${r.age != null && r.age < ADULT_AGE ? 'junior' : 'adult'} price for “${PERIODS[period].label.toLowerCase()}”` }); continue; }
+      const fee = feeFor(schedule, { adultAge: region().adultAge, ageYears: r.age, period, today });
+      if (!fee) { skipped.push({ name: r.name, reason: `no ${r.age != null && r.age < region().adultAge ? 'junior' : 'adult'} price for “${PERIODS[period].label.toLowerCase()}”` }); continue; }
       const client = await pool.connect();
       try {
         await client.query('begin');
         const { rows: [pay] } = await client.query(`insert into payment (organisation_id, person_id,
             amount_cents, currency, status, requested_by) values ($1,$2,$3,$4,'pending',$5) returning id`,
-          [orgId, r.person_id, fee.amount_cents, fee.currency ?? DEFAULT_CURRENCY, actor]);
+          [orgId, r.person_id, fee.amount_cents, fee.currency ?? region().currency, actor]);
         await client.query(`insert into payment_line (payment_id, kind, description, amount_cents,
             renews_affiliation_id, renews_months) values ($1,'dojo_fee',$2,$3,$4,$5)`,
           [pay.id, `${fee.label} — membership ${PERIODS[period].label.toLowerCase()}`, fee.amount_cents,
@@ -505,7 +505,7 @@ export const autoRenew = {
       const today = await qualToday(m.organisation_id);
       const age = person.dob ? Math.floor((Date.parse(today) - Date.parse(person.dob)) / 31_557_600_000) : null;
       const schedule = await feeRows(m.organisation_id);
-      const prices = Object.fromEntries(PERIOD_CHOICES.map((pd) => [pd, feeFor(schedule, { ageYears: age, period: pd, today })]).filter(([, f]) => f));
+      const prices = Object.fromEntries(PERIOD_CHOICES.map((pd) => [pd, feeFor(schedule, { adultAge: region().adultAge, ageYears: age, period: pd, today })]).filter(([, f]) => f));
       out.push({ ...m, agreement: live.find((g) => g.affiliation_id === m.affiliation_id) ?? null, prices });
     }
     return { person, memberships: out };
@@ -523,7 +523,7 @@ export const autoRenew = {
     const today = await qualToday(a.organisation_id);
     const person = await one('select date_of_birth::text as dob from person where id=$1', [personId]);
     const age = person.dob ? Math.floor((Date.parse(today) - Date.parse(person.dob)) / 31_557_600_000) : null;
-    if (!feeFor(await feeRows(a.organisation_id), { ageYears: age, period: input.period, today }))
+    if (!feeFor(await feeRows(a.organisation_id), { adultAge: region().adultAge, ageYears: age, period: input.period, today }))
       throw new Invalid('The dojo has not set a price for that yet. Choose another, or ask the dojo.');
     if (await one(`select 1 x from payment_agreement where affiliation_id=$1 and status <> 'cancelled'`, [affiliationId]))
       throw new Invalid('Automatic renewal is already set up. Stop it first to change it.');
@@ -573,7 +573,7 @@ export const autoRenew = {
       if (!chargeDue({ status: g.status, nextAttemptOn: g.next_attempt_on, paidUntil: g.paid_until, exempt: g.fee_exempt }, today)) { report.skipped++; continue; }
       const person = await one('select date_of_birth::text as dob from person where id=$1', [g.person_id]);
       const age = person.dob ? Math.floor((Date.parse(today) - Date.parse(person.dob)) / 31_557_600_000) : null;
-      const fee = feeFor(await feeRows(g.organisation_id), { ageYears: age, period: g.period, today });
+      const fee = feeFor(await feeRows(g.organisation_id), { adultAge: region().adultAge, ageYears: age, period: g.period, today });
       if (!fee) { report.skipped++; continue; }
       // Reuse an attempt already waiting rather than asking twice.
       let pay = await one(`select py.id from payment py join payment_line l on l.payment_id = py.id
@@ -583,7 +583,7 @@ export const autoRenew = {
         try {
           await client.query('begin');
           const { rows: [p] } = await client.query(`insert into payment (organisation_id, person_id, amount_cents, currency, status)
-            values ($1,$2,$3,$4,'pending') returning id`, [g.organisation_id, g.person_id, fee.amount_cents, fee.currency ?? DEFAULT_CURRENCY]);
+            values ($1,$2,$3,$4,'pending') returning id`, [g.organisation_id, g.person_id, fee.amount_cents, fee.currency ?? region().currency]);
           await client.query(`insert into payment_line (payment_id, kind, description, amount_cents, renews_affiliation_id, renews_months)
             values ($1,'dojo_fee',$2,$3,$4,$5)`, [p.id, `${fee.label} — automatic renewal ${PERIODS[g.period].label.toLowerCase()}`, fee.amount_cents, g.affiliation_id, PERIODS[g.period].months]);
           await client.query('commit'); pay = p;
@@ -594,7 +594,7 @@ export const autoRenew = {
       if (!claimed) { report.skipped++; continue; }
       let result;
       try { result = await provider.charge({ ref: (await one('select provider_ref from payment_agreement where id=$1', [g.id])).provider_ref,
-        amountCents: fee.amount_cents, currency: fee.currency ?? DEFAULT_CURRENCY, reference: pay.id }); }
+        amountCents: fee.amount_cents, currency: fee.currency ?? region().currency, reference: pay.id }); }
       catch (e) { result = { status: 'failed', detail: 'The payment provider could not be reached.' }; }
       if (result.status === 'succeeded') {
         await settle(pay.id, true, result.detail, { ref: result.ref });
@@ -762,7 +762,7 @@ export const shop = {
     const range = await q(RANGE, [clubId]);
     const basket = readBasket(form ?? {}, range);
     if (basket.problem) throw new Invalid(basket.problem);
-    const currency = range[0]?.currency ?? DEFAULT_CURRENCY;
+    const currency = range[0]?.currency ?? region().currency;
     const client = await pool.connect();
     try {
       await client.query('begin');

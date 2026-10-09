@@ -44,6 +44,6 @@ export function problemsWithRoleAndGrade({ role, grade = null, hasGrade = !!grad
 }
 
 /** Rule 3. True if this person is a child with no current guardian link. */
-export function needsGuardianLink({ dateOfBirth, on = null, guardianCount = 0 }) {
-  return needsGuardian(dateOfBirth, on) && guardianCount === 0;
+export function needsGuardianLink({ dateOfBirth, on = null, guardianCount = 0, adultAge }) {
+  return needsGuardian(dateOfBirth, on, adultAge ? { adultAt: adultAge } : {}) && guardianCount === 0;
 }

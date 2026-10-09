@@ -6,7 +6,8 @@
  */
 
 import { pool } from '../../infrastructure/postgres/pool.mjs';
-import { DEFAULT_TIMEZONE, DEFAULT_CURRENCY } from '../../core/domain/defaults.mjs';
+import { DEFAULT_TIMEZONE } from '../../core/domain/defaults.mjs';
+import { region } from '../../infrastructure/region-context.mjs';
 import { nextGrading } from '../../core/domain/next-grading.mjs';
 import { standing } from '../../core/domain/membership.mjs';
 import { readQuery, fold } from '../../content/search.mjs';
@@ -467,7 +468,7 @@ export const portal = {
       details: { emergencyContact: !!(priv?.emergency_name && priv?.emergency_phone) } });
 
     return { person, how, memberships, grade, next, nextEvent, trial: trial ? { ...trial, left: trialLeft } : null, openCount: open.length, closing: closing.length,
-      owed, owedTotal: owed.reduce((n, p) => n + p.amount_cents, 0), currency: owed[0]?.currency ?? DEFAULT_CURRENCY,
+      owed, owedTotal: owed.reduce((n, p) => n + p.amount_cents, 0), currency: owed[0]?.currency ?? region().currency,
       counts, qualifications: quals, actions, declaration: declarationNow };
   },
 

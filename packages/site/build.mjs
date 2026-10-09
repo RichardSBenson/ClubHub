@@ -16,6 +16,7 @@ import { loadSettings, SettingsError } from './settings.mjs';
 import { readTheme, lookOf, LAYOUTS } from './theme.mjs';
 import * as R from './render.mjs';
 import * as PWA from './pwa.mjs';
+import { enterRegion } from '../infrastructure/region-context.mjs';
 import { eventToIcs } from '../core/domain/calendar-file.mjs';
 
 // Relative to the repository, not the working directory — so it lands in the
@@ -207,6 +208,8 @@ for (const target of SITES) {
     console.log(`  skipped ${target.slug}: not in the ${currentStore()} store`);
     continue;
   }
+  // This federation's currency, language and age of adulthood apply to everything built for it.
+  enterRegion(federation.settings?.region ?? {});
 
   const orgSettings = federation.settings ?? {};
   const atRoot = target.base === '';

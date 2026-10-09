@@ -95,7 +95,9 @@ import * as R from '../site/render.mjs';
 import { requestRebuild } from '../infrastructure/publishing/rebuild.mjs';
 import { esc } from '../core/domain/html.mjs';
 import { MANAGE, REGISTER, TEACH, WRITE } from '../core/domain/access.mjs';
-import { DEFAULT_TIMEZONE, DEFAULT_CURRENCY, ADULT_AGE } from '../core/domain/defaults.mjs';
+import { registerRegionRoutes } from './routes-region.mjs';
+import { DEFAULT_TIMEZONE } from '../core/domain/defaults.mjs';
+import { region, setRegion, withRegion } from '../infrastructure/region-context.mjs';
 
 const SESSION_COOKIE = 'honbu_session';
 const CSRF_COOKIE = 'honbu_csrf';
@@ -402,13 +404,13 @@ get('/o/:slug/roster', async (ctx) => {
   const shown = all.filter((r) => {
     if (filter.grade === 'dan' && !r.is_dan) return false;
     if (filter.grade !== 'all' && filter.grade !== 'dan' && r.grade_id !== filter.grade) return false;
-    if (filter.band === 'junior' && !(r.age != null && r.age < ADULT_AGE)) return false;
-    if (filter.band === 'senior' && !(r.age == null || r.age >= ADULT_AGE)) return false;
+    if (filter.band === 'junior' && !(r.age != null && r.age < region().adultAge)) return false;
+    if (filter.band === 'senior' && !(r.age == null || r.age >= region().adultAge)) return false;
     if (filter.show === 'instructors' && !r.isInstructor) return false;
     if (filter.show === 'due' && !r.nextGrading?.due) return false;
     return true;
   }).map((r) => ({ ...r, instructor: states.get(r.id) ?? null }));
-  const unlinked = await family.withoutGuardian(all.filter((r) => r.age != null && r.age < ADULT_AGE).map((r) => r.id));
+  const unlinked = await family.withoutGuardian(all.filter((r) => r.age != null && r.age < region().adultAge).map((r) => r.id));
   for (const r of shown) r.noGuardian = unlinked.has(r.id);
   const unsignedDecl = await declarations.unsignedAmong(org.id, all.filter((r) => r.role !== 'supporter').map((r) => r.id));
   for (const r of shown) r.noDeclaration = unsignedDecl.has(r.id);
@@ -1081,7 +1083,7 @@ async function memberEntryPlan(ctx, form = {}, { fromLast = false } = {}) {
 
   const plan = { how, open, event, setup, mine, eventDate, relationship, competitor, need,
            chosen, weightKg, heightCm, placements, amountCents, problems, form, last, repeat,
-           experience, outsider, grades, claimedGrade: outsider ? gradeBy(form.grade) : null, currency: setup.prices[0]?.currency ?? DEFAULT_CURRENCY };
+           experience, outsider, grades, claimedGrade: outsider ? gradeBy(form.grade) : null, currency: setup.prices[0]?.currency ?? region().currency };
   if (repeat) plan.quick = decideQuick({ repeat, last, placements, ready, problems });
   return plan;
 }
@@ -2888,6 +2890,8 @@ async function appearanceScreen(ctx, org, extra = {}) {
   }));
 }
 
+registerRegionRoutes({ get, post, organisationFor, mayPublishAt, requestRebuild });
+
 get('/o/:slug/appearance', async (ctx) => {
   const org = await organisationFor(ctx, { toWrite: true });
   if (org.type === 'club') return ctx.redirect(`/o/${org.slug}/club-page`);
@@ -3922,7 +3926,7 @@ post('/o/:slug/events/:eventSlug/enter', async (ctx) => {
       .filter(([k]) => k !== '_csrf' && k !== 'confirm'));
     return ctx.send(200, V.entryPreview({
       me: ctx.me, org, event, csrf: ctx.csrf, rows, text, total,
-      currency: setup.prices[0]?.currency ?? DEFAULT_CURRENCY }));
+      currency: setup.prices[0]?.currency ?? region().currency }));
   }
 
   if (!ready.length) return backToForm('Nobody is ready to enter yet.');
@@ -3935,7 +3939,7 @@ post('/o/:slug/events/:eventSlug/enter', async (ctx) => {
         personId: r.personId, enteredForOrg: org.id,
         weightKg: r.weightKg, heightCm: r.heightCm, clubName: org.name,
         amountCents: r.amountCents,
-        currency: setup.prices[0]?.currency ?? DEFAULT_CURRENCY,
+        currency: setup.prices[0]?.currency ?? region().currency,
         placements: r.placements.map((p) => ({
           disciplineId: p.discipline.id, divisionId: p.division?.id ?? null,
           placedBy: 'calculated',
@@ -4275,6 +4279,7 @@ async function organisationFor(ctx, { toSchedule = false,
 
   if (!ctx.me.scope?.some((o) => o.id === org.id))
     throw new Forbidden(`You do not have access to ${org.name}.`);
+  setRegion(await orgs.regionOf(org.id));
 
   if (toSchedule && !await mayScheduleAt(ctx, org.id)) {
     throw new Forbidden(
@@ -4609,7 +4614,10 @@ post('/o/:slug/event-requests/:eventId/decide', async (ctx) => {
 // the request
 // ---------------------------------------------------------------------------
 
-export async function handler(req, res) {
+/** Each request carries its own region (currency, language, age of adulthood), so two at once never mix. */
+export const handler = (req, res) => withRegion(() => handle(req, res));
+
+async function handle(req, res) {
   const url = new URL(req.url, `http://${req.headers.host ?? 'localhost'}`);
 
   // The admin needs to read and write member data. Running from files it can do
@@ -4747,6 +4755,8 @@ export async function handler(req, res) {
       }
     },
   };
+  if (ctx.me?.home?.id) // their own country applies until a page is about another organisation
+    setRegion(await orgs.regionOf(ctx.me.home.id));
 
   // A demonstration session may look at anything it can see and change
   // nothing. Enforced here rather than in each route, so a route written next

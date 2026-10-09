@@ -22,7 +22,8 @@
  * birth" is an audit entry. "Updated person" is a row in a table.
  */
 
-import { DEFAULT_LOCALE, DEFAULT_CURRENCY } from '../core/domain/defaults.mjs';
+
+import { region } from '../infrastructure/region-context.mjs';
 
 const quote = (s) => `"${s}"`;
 
@@ -150,18 +151,18 @@ export function describe(entry) {
         + `address${a.recipients === 1 ? '' : 'es'}${a.skipped ? `, ${a.skipped} skipped` : ''})`;
     }
     case 'payment_requested':
-      return `asked ${a.person ?? 'a member'} for ${(a.amountCents / 100).toLocaleString(DEFAULT_LOCALE, { style: 'currency', currency: DEFAULT_CURRENCY })}`
+      return `asked ${a.person ?? 'a member'} for ${(a.amountCents / 100).toLocaleString(region().locale, { style: 'currency', currency: region().currency })}`
         + ` — ${a.description ?? 'a payment'}`;
     case 'payment_made':
-      return `took a payment of ${((a.amountCents ?? 0) / 100).toLocaleString(DEFAULT_LOCALE, { style: 'currency', currency: DEFAULT_CURRENCY })}`;
+      return `took a payment of ${((a.amountCents ?? 0) / 100).toLocaleString(region().locale, { style: 'currency', currency: region().currency })}`;
     case 'payment_failed':
       return 'a payment did not go through';
     case 'payment_recorded':
-      return `recorded ${((a.amountCents ?? 0) / 100).toLocaleString(DEFAULT_LOCALE, { style: 'currency', currency: DEFAULT_CURRENCY })} received by ${
+      return `recorded ${((a.amountCents ?? 0) / 100).toLocaleString(region().locale, { style: 'currency', currency: region().currency })} received by ${
         a.method === 'cash' ? 'cash' : 'bank transfer'}${a.receipt ? ` (receipt ${a.receipt})` : ''}`
         + (a.paidUntil ? `, fees now paid to ${a.paidUntil}` : '');
     case 'fee_set':
-      return `set the price ${a.label ? quote(a.label) : ''} at ${((a.amountCents ?? 0) / 100).toLocaleString(DEFAULT_LOCALE, { style: 'currency', currency: DEFAULT_CURRENCY })}`.trim();
+      return `set the price ${a.label ? quote(a.label) : ''} at ${((a.amountCents ?? 0) / 100).toLocaleString(region().locale, { style: 'currency', currency: region().currency })}`.trim();
     case 'fee_removed':
       return `removed the price ${a.label ? quote(a.label) : ''}`.trim();
     case 'fee_exemption':
@@ -172,7 +173,7 @@ export function describe(entry) {
     case 'reminders_setting':
       return a.enabled ? 'switched automatic fees reminders on' : 'switched automatic fees reminders off';
     case 'newcomer_added':
-      return `added a newcomer${a.child ? ' (under 18)' : ''}; waiver accepted by ${a.consent_by ?? 'someone'}`;
+      return `added a newcomer${a.child ? ` (under ${region().adultAge})` : ''}; waiver accepted by ${a.consent_by ?? 'someone'}`;
     case 'newcomer_joined':
       return `made a newcomer a member${a.person ? ` (${a.person})` : ''}`;
     case 'newcomer_left':

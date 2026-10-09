@@ -8,7 +8,8 @@
 import { applyRegister } from '../register-import.mjs';
 import { parseCsv } from '../../core/domain/register-csv.mjs';
 import { pool } from '../../infrastructure/postgres/pool.mjs';
-import { DEFAULT_TIMEZONE, ADULT_AGE } from '../../core/domain/defaults.mjs';
+import { DEFAULT_TIMEZONE } from '../../core/domain/defaults.mjs';
+import { region } from '../../infrastructure/region-context.mjs';
 import { nextGrading } from '../../core/domain/next-grading.mjs';
 import { problemsWithPerson, problemsWithMembership, normaliseGender, ageOn } from '../../core/domain/people.mjs';
 import { seal, open as unseal, sealBytes, openBytes } from '../../infrastructure/crypto/vault.mjs';
@@ -681,7 +682,7 @@ export const instructors = {
     const org = await one('select settings from organisation where id=$1', [dojoId]);
     const why = reasonNotToPublish({ person: { dateOfBirth: who?.dob }, isInstructor: true,
       on: new Date().toISOString().slice(0, 10), settings: org?.settings ?? {} });
-    if (why) return { never: /under/.test(why) ? 'under 18' : 'no date of birth recorded', missing: [] };
+    if (why) return { never: /under/.test(why) ? `under ${region().adultAge}` : 'no date of birth recorded', missing: [] };
     const required = await q(`select q.id, q.label ${CATALOGUE_FROM} and 'instruct' = any(q.required_for) order by q.label`, [dojoId]);
     const awards = await q(`${AWARD_SELECT} where qa.person_id = $1`, [personId]);
     const c = clearance(required, awards, await qualToday(dojoId));
@@ -882,7 +883,7 @@ export const family = {
     const { rows } = await pool.query(`
       select p.id from person p
       where p.id = any($1::uuid[]) and p.date_of_birth > current_date - make_interval(years => $2)
-        and not exists (select 1 from guardian_link gl where gl.child_id = p.id and gl.ended_on is null)`, [ids, ADULT_AGE]);
+        and not exists (select 1 from guardian_link gl where gl.child_id = p.id and gl.ended_on is null)`, [ids, region().adultAge]);
     return new Set(rows.map((r) => r.id));
   },
 
@@ -898,7 +899,7 @@ export const family = {
       where gl.guardian_id = $1 and gl.ended_on is null
         and p.date_of_birth is not null
         and p.date_of_birth > current_date - make_interval(years => $2)
-      order by p.first_name`, [self.id, ADULT_AGE]);
+      order by p.first_name`, [self.id, region().adultAge]);
     return { self, dependants };
   },
 
@@ -943,7 +944,7 @@ export const family = {
     }
     if (!home) throw new Forbidden();
 
-    const problems = problemsWithGuardianLink({ guardian, child, relationship });
+    const problems = problemsWithGuardianLink({ guardian, child, relationship }, { adultAge: region().adultAge });
     if (problems.length) throw new Invalid(problems.join(' '));
 
     const row = await one(`
@@ -1143,7 +1144,7 @@ export const declarations = {
     if (st.state === 'none') throw new Invalid('There is no declaration to sign yet.');
     if (st.state === 'signed') return st;
     const age = (await one(`select date_part('year', age(date_of_birth))::int as age from person where id = $1`, [personId]))?.age ?? null;
-    const problems = problemsWithSigning({ accepted, name, isChild: needsGuardian(age), how });
+    const problems = problemsWithSigning({ accepted, name, isChild: needsGuardian(age, region().adultAge), how });
     if (problems.length) throw new Invalid(problems.join(' '));
     await pool.query(`insert into declaration_signing (person_id, declaration_id, signed_name, signed_by, guardian, ip)
       values ($1,$2,$3,$4,$5,$6) on conflict (person_id, declaration_id) do nothing`,
@@ -1277,7 +1278,7 @@ export const photos = {
   async set(actor, personId, { bytes, identified, filename }, { consent } = {}) {
     await this.assertMay(actor, personId);
     const kid = await one('select date_of_birth::text as dob from person where id = $1', [personId]);
-    if (photoNeedsConsent(ageOn(kid?.dob, null)) && !consent)
+    if (photoNeedsConsent(ageOn(kid?.dob, null), region().adultAge) && !consent)
       throw new Invalid('Please confirm that their parent or guardian agrees to this photograph being kept.');
     const home = await one(`select organisation_id from affiliation where person_id = $1 and ends is null
       order by (role = 'member') desc limit 1`, [personId]);

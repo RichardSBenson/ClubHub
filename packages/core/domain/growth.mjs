@@ -8,6 +8,8 @@ import { addDays } from './attendance.mjs';
 import { phoneKey } from './outsider.mjs';
 import { isRealDate } from './people.mjs';
 
+import { ADULT_AGE } from './defaults.mjs';
+
 const EMAIL = /^[^\s@<>,;"]+@[^\s@<>,;"]+\.[^\s@<>,;"]{2,}$/;
 const oneLine = (v, n) => String(v ?? '').replace(/[\u0000-\u001f]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, n);
 const int = (v, lo, hi, dflt) => { const n = Number.parseInt(v, 10); return Number.isFinite(n) ? Math.min(hi, Math.max(lo, n)) : dflt; };
@@ -28,7 +30,7 @@ export const AUTOMATIC = Object.freeze(['free_weeks']);
 const MONEY = ['credit', 'event_credit', 'grading_credit'];
 
 export const DEFAULTS = Object.freeze({
-  trial: { enabled: false, days: 30, minAge: 18 },
+  trial: { enabled: false, days: 30, minAge: ADULT_AGE },
   referral: { enabled: false, minClasses: 3, maxPerYear: 5,
     referrer: { kind: 'free_weeks', weeks: 4, cents: 0, note: '' },
     referred: { kind: 'none', weeks: 0, cents: 0, note: '' } },
@@ -99,7 +101,7 @@ export function readTrialSignup(f = {}) {
     accepted: f.accepted === '1', code: normaliseCode(f.code) };
 }
 
-export function problemsWithTrialSignup(i, { today, minAge = 18 }) {
+export function problemsWithTrialSignup(i, { today, minAge = ADULT_AGE }) {
   const out = [];
   if (!i.firstName) out.push('Please give your first name.');
   if (!i.lastName) out.push('Please give your last name.');

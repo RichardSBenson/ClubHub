@@ -49,7 +49,8 @@ const VOCABULARY = (() => {
 })();
 
 import { esc } from '../core/domain/html.mjs';
-import { DEFAULT_TIMEZONE, DEFAULT_LOCALE, DEFAULT_CURRENCY, ADULT_AGE } from '../core/domain/defaults.mjs';
+import { DEFAULT_TIMEZONE } from '../core/domain/defaults.mjs';
+import { region } from '../infrastructure/region-context.mjs';
 import { money as cents, dollars as money } from '../core/domain/money.mjs';
 
 const V = VOCABULARY;
@@ -265,7 +266,7 @@ function page({ title, me, body, csrf, query = '', wide = false, head = '' }) {
       <input type="hidden" name="_csrf" value="${esc(csrf ?? '')}">
       <button>Sign out</button></form></span>` : '';
 
-  return `<!DOCTYPE html><html lang="${DEFAULT_LOCALE}"><head>
+  return `<!DOCTYPE html><html lang="${region().locale}"><head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>${esc(title)} — Honbu</title><link rel="manifest" href="/manifest.webmanifest"><meta name="theme-color" content="#3451D1"><link rel="apple-touch-icon" href="/icons/icon-192.png">${head}<style>${CSS}</style></head><body>
 <a class="skip" href="#main">Skip to the content</a>
@@ -341,6 +342,7 @@ export function rail({ org, vocabulary = {}, can = {}, path = '' }) {
     isClub && link(`${base}/gallery`, 'Gallery'),
     link(`${base}/menu`, 'Menu'),
     !isClub && can.manage && link(`${base}/appearance`, 'Appearance'),
+    can.manage && link(`${base}/region`, 'Country settings'),
     link(`${base}/instructors`, 'Instructors'),
     isClub ? link(`${base}/club-page`, `${club} page`)
            : link(`${base}/club-pages`, `${club} pages`),
@@ -497,8 +499,8 @@ export const roster = ({ me, csrf, org, roster, total = null, canRegister = fals
       </select></div>
       <div><label for="f-band">Age</label><select id="f-band" name="band">
         <option value=""${!filter.band ? ' selected' : ''}>Juniors and seniors</option>
-        <option value="senior"${filter.band === 'senior' ? ' selected' : ''}>Seniors (18 and over)</option>
-        <option value="junior"${filter.band === 'junior' ? ' selected' : ''}>Juniors (under 18)</option>
+        <option value="senior"${filter.band === 'senior' ? ' selected' : ''}>Seniors (${region().adultAge} and over)</option>
+        <option value="junior"${filter.band === 'junior' ? ' selected' : ''}>Juniors (under ${region().adultAge})</option>
       </select></div>
       <div><label for="f-show">Show</label><select id="f-show" name="show">
         <option value=""${!filter.show ? ' selected' : ''}>Everyone</option>
@@ -522,7 +524,7 @@ export const roster = ({ me, csrf, org, roster, total = null, canRegister = fals
     <tbody>${roster.map((p) => `<tr>
       ${canManage ? `<td>${p.is_dan || p.isInstructor ? `<input class="pick" type="checkbox" name="pick_${esc(p.id)}" aria-label="Choose ${esc(p.first_name)} ${esc(p.last_name)}"${filter.all ? ' checked' : ''}>` : ''}</td>` : ''}
       <td><a href="/p/${p.id}">${esc(p.first_name)} ${esc(p.last_name)}</a>
-        <span class="muted">${esc(p.display_number ?? '')}</span>${p.age != null && p.age < ADULT_AGE ? ' <span class="tag">junior</span>' : ''}</td>
+        <span class="muted">${esc(p.display_number ?? '')}</span>${p.age != null && p.age < region().adultAge ? ' <span class="tag">junior</span>' : ''}</td>
       <td>${p.grade ? `<span class="tag ${p.is_dan ? 'dan' : 'ok'}">${esc(p.grade)}</span>`
         : '<span class="tag no">ungraded</span>'}</td>
       <td class="hide-sm">${nextCell(p.nextGrading)}</td>
@@ -534,7 +536,7 @@ export const roster = ({ me, csrf, org, roster, total = null, canRegister = fals
   ${canManage ? `<p style="margin-top:12px"><button class="btn" type="submit" name="action" value="show">Make instructors and show on the website</button>
       <button class="btn quiet" type="submit" name="action" value="role">Make instructors only</button>
       <button class="btn quiet" type="submit" name="action" value="off">Take off as instructors</button></p>
-    <p class="hint">Tick the people who teach. They are shown on their dojo's website once they are 18 or over, their first aid, police vetting and child
+    <p class="hint">Tick the people who teach. They are shown on their dojo's website once they are ${region().adultAge} or over, their first aid, police vetting and child
       protection are current, and they have written a few words about themselves (on their profile, in the <em>Write-up</em> box under the photograph); anyone not ready is made an instructor and
       the screen says what is missing. Showing puts their name, grade and photograph on a page anybody can read, so only do it for people who have agreed.</p>
   </form>
@@ -607,7 +609,7 @@ export const person = ({ me, csrf, person, history, affiliations, eligibility,
     <input type="file" name="photo" data-photo accept="image/png,image/jpeg,image/webp" hidden>
     <p>Tap the photograph at the top to ${person.photo_asset_id ? 'change it' : 'add one'}.</p>
     <p class="hint">${esc(slotHint('portrait'))} The same photograph is used on their membership card and, if they are shown on the website, on their instructor card.</p>
-    ${photoNeedsConsent(person.age) ? `<label class="check"><input type="checkbox" name="consent">
+    ${photoNeedsConsent(person.age, region().adultAge) ? `<label class="check"><input type="checkbox" name="consent">
       Their parent or guardian agrees to this photograph being kept on their record.</label>
     <p class="hint" id="photo-wait" hidden>Tick the box above and the photograph will be sent.</p>` : ''}
     <noscript><p><input type="file" name="photo" accept="image/png,image/jpeg,image/webp"></p><p><button class="btn" type="submit">Save photograph</button></p></noscript>
@@ -712,7 +714,7 @@ export const person = ({ me, csrf, person, history, affiliations, eligibility,
       whose address bounces or who is standing in front of you.</p>
   </form>` : ''}
 
-  ${canEdit && guardians && (guardians.length || (person.age != null && person.age < ADULT_AGE)) ? `
+  ${canEdit && guardians && (guardians.length || (person.age != null && person.age < region().adultAge)) ? `
   <h2>Parents and guardians</h2>
   ${guardians.length ? `<table><tbody>${guardians.map((g) => `<tr>
     <td><a href="/p/${esc(g.person_id)}">${esc(g.first_name)} ${esc(g.last_name)}</a></td>
@@ -1208,7 +1210,7 @@ const readable = (instant, zone, withTime = true) => {
   const d = instant instanceof Date ? instant : new Date(instant);
   if (Number.isNaN(d.getTime())) return '';
   try {
-    return new Intl.DateTimeFormat(DEFAULT_LOCALE, {
+    return new Intl.DateTimeFormat(region().locale, {
       weekday: 'short', day: 'numeric', month: 'short', year: 'numeric',
       ...(withTime ? { hour: 'numeric', minute: '2-digit', hour12: true } : {}),
       timeZone: zone || 'UTC',
@@ -1420,7 +1422,7 @@ export const eventForm = ({ me, csrf, org, values = {}, zone, error,
       <div class="row">
         <div>
           <label for="guardianUnder">A parent or guardian signs for anyone under
-            <span class="hint">Usually 18, or younger if you prefer.
+            <span class="hint">Usually ${region().adultAge}, or younger if you prefer.
               Blank asks for nobody's guardian.</span></label>
           <input id="guardianUnder" name="guardianUnder" type="number" min="1"
             max="30" value="${esc(v('guardianUnder'))}" style="max-width:140px">
@@ -1745,7 +1747,7 @@ export const enterCompetitors = ({ me, csrf, org, host, event, disciplines = [],
  * paper it replaces.
  */
 export const entryPreview = ({ me, csrf, org, event, rows = [], text,
-                               total = null, currency = DEFAULT_CURRENCY, error }) => {
+                               total = null, currency = region().currency, error }) => {
   const ready = rows.filter((r) => r.ready);
   const stuck = rows.filter((r) => !r.ready);
 
@@ -3210,7 +3212,7 @@ export const myPerson = ({ me, csrf, how, person, private: priv = {}, grade, mem
     <input type="file" name="photo" data-photo accept="image/png,image/jpeg,image/webp" hidden>
     <p>Tap ${mine ? 'your' : 'their'} photograph at the top to ${person.photo_asset_id ? 'change it' : 'add one'}.</p>
     <p class="hint">${esc(slotHint('portrait'))} It is used on ${mine ? 'your' : 'their'} membership card and, if ${mine ? 'you are' : 'they are'} shown on the website, on the instructor card.</p>
-    ${photoNeedsConsent(personAgeOn(person.date_of_birth, null)) ? `<label class="check"><input type="checkbox" name="consent">
+    ${photoNeedsConsent(personAgeOn(person.date_of_birth, null), region().adultAge) ? `<label class="check"><input type="checkbox" name="consent">
       ${mine ? 'My parent or guardian agrees' : 'I agree, as their parent or guardian,'} to this photograph being kept on the record.</label>
     <p class="hint" id="photo-wait" hidden>Tick the box above and the photograph will be sent.</p>` : ''}
     <noscript><p><input type="file" name="photo" accept="image/png,image/jpeg,image/webp"></p><p><button class="btn" type="submit">Save photograph</button></p></noscript>
@@ -3258,7 +3260,7 @@ export const myPerson = ({ me, csrf, how, person, private: priv = {}, grade, mem
   </form>` });
 };
 
-const when = (instant, zone) => new Intl.DateTimeFormat(DEFAULT_LOCALE, {
+const when = (instant, zone) => new Intl.DateTimeFormat(region().locale, {
   timeZone: zone || DEFAULT_TIMEZONE, weekday: 'short', day: 'numeric', month: 'short',
   year: 'numeric', hour: 'numeric', minute: '2-digit' }).format(new Date(instant));
 
@@ -3592,7 +3594,7 @@ export const paymentsScreen = ({ me, csrf, org, rows = [], totals = [], methods 
       <div><label for="kind">For</label>
         <select id="kind" name="kind">${PAY_ASKABLE.map((k) => `<option value="${k}"${values?.kind === k ? ' selected' : ''}>${
           esc(PAY_KINDS[k].label)}${PAY_KINDS[k].payee === 'federation' ? ' (paid to the federation)' : ''}</option>`).join('')}</select></div>
-      <div><label for="amount">Amount (${DEFAULT_CURRENCY})</label>
+      <div><label for="amount">Amount (${region().currency})</label>
         <input id="amount" name="amount" required inputmode="decimal" maxlength="12" value="${v('amountText')}"></div>
     </div>
     <label for="description">What it is <span class="muted">(optional, e.g. “Gi, size 150”)</span></label>
@@ -3654,7 +3656,7 @@ export const renewalsScreen = ({ me, csrf, org, today, rows = [], prices = [], a
 
   <h2>Prices</h2>
   ${prices.length ? `<table><thead><tr><th>Price</th><th>For</th><th>How often</th><th>Amount</th><th>From</th><th></th></tr></thead><tbody>${
-    prices.map((f) => `<tr><td>${esc(f.label)}</td><td>${esc(FEE_CATEGORIES[f.applies_to] ?? f.applies_to)}</td>
+    prices.map((f) => `<tr><td>${esc(f.label)}</td><td>${esc(feeCategories()[f.applies_to] ?? f.applies_to)}</td>
       <td>${esc(FEE_PERIODS[f.period]?.label ?? f.period)}</td><td>${esc(cents(f.amount_cents, f.currency))}</td>
       <td>${esc(f.effective_from)}${f.effective_to ? ` to ${esc(f.effective_to)}` : ''}</td>
       <td>${canSetPrices ? `<form method="post" action="/o/${esc(org.slug)}/renewals/fees/${esc(f.id)}/remove">
@@ -3664,11 +3666,11 @@ export const renewalsScreen = ({ me, csrf, org, today, rows = [], prices = [], a
     <input type="hidden" name="_csrf" value="${esc(csrf ?? '')}">
     <div class="row">
       <div><label for="label">Name</label><input id="label" name="label" required maxlength="80" placeholder="Adult annual" value="${v('label')}"></div>
-      <div><label for="appliesTo">For</label><select id="appliesTo" name="appliesTo">${Object.entries(FEE_CATEGORIES).map(([k, l]) =>
+      <div><label for="appliesTo">For</label><select id="appliesTo" name="appliesTo">${Object.entries(feeCategories()).map(([k, l]) =>
         `<option value="${k}"${values?.appliesTo === k ? ' selected' : ''}>${esc(l)}</option>`).join('')}</select></div>
       <div><label for="period">How often</label><select id="period" name="period">${Object.entries(FEE_PERIODS).map(([k, l]) =>
         `<option value="${k}"${values?.period === k ? ' selected' : ''}>${esc(l.label)}</option>`).join('')}</select></div>
-      <div><label for="amount">Amount (${DEFAULT_CURRENCY})</label><input id="amount" name="amount" required inputmode="decimal" maxlength="12" value="${v('amountText')}"></div>
+      <div><label for="amount">Amount (${region().currency})</label><input id="amount" name="amount" required inputmode="decimal" maxlength="12" value="${v('amountText')}"></div>
       <div><label for="effectiveFrom">From <span class="muted">(optional)</span></label><input id="effectiveFrom" name="effectiveFrom" maxlength="10" placeholder="${esc(today)}" value="${v('effectiveFrom')}"></div>
     </div>
     <p class="muted">A new price for the same people and period takes over from its start date; the old one ends the day before.</p>
@@ -3801,7 +3803,7 @@ export const rollScreen = ({ me, csrf, org, session, date, members = [], visitor
     <input type="hidden" name="date" value="${esc(date)}">
     <fieldset><legend>Who came?</legend>
       ${members.length ? members.map((m) => `<label class="check"><input type="checkbox" name="here_${esc(m.person_id)}" value="1"${m.present ? ' checked' : ''}>
-        ${esc(m.name)}${m.age != null && m.age < ADULT_AGE ? ` <span class="muted">(${m.age})</span>` : ''}</label>`).join('')
+        ${esc(m.name)}${m.age != null && m.age < region().adultAge ? ` <span class="muted">(${m.age})</span>` : ''}</label>`).join('')
         : '<p class="muted">Nobody is on the roll yet.</p>'}
     </fieldset>
     ${visitors.length ? `<fieldset><legend>Visitors already here</legend>${visitors.map((v) => `<label class="check">
@@ -3838,7 +3840,7 @@ export const newcomerForm = ({ me, csrf, org, values = {}, error, sessionId = ''
     ${f('dateOfBirth', 'Date of birth <span class="muted">(2015-03-14)</span>', 'required maxlength="10" inputmode="numeric"')}
     ${f('email', 'Email', 'type="email" maxlength="120"')}
     ${f('phone', 'Phone', 'maxlength="30"')}
-    <fieldset><legend>Under 18? A parent or guardian</legend>
+    <fieldset><legend>Under ${region().adultAge}? A parent or guardian</legend>
       ${f('guardianName', 'Name', 'maxlength="100"')}
       ${f('guardianPhone', 'Phone', 'maxlength="30"')}
     </fieldset>
@@ -3866,7 +3868,7 @@ export const newcomersScreen = ({ me, csrf, org, today, newcomers = [], error, d
   <p><a class="btn" href="/o/${esc(org.slug)}/newcomers/new">Add somebody</a></p>
   ${newcomers.length ? `<table><thead><tr><th>Name</th><th>Classes</th><th>Contact</th><th></th></tr></thead><tbody>
   ${newcomers.map((n) => `<tr>
-    <td>${esc(n.first_name)} ${esc(n.last_name)}${n.child ? ' <span class="muted">(under 18)</span>' : ''}
+    <td>${esc(n.first_name)} ${esc(n.last_name)}${n.child ? ` <span class="muted">(under ${region().adultAge})</span>` : ''}
       ${n.medical_notes ? `<br><span class="muted">Medical: ${esc(n.medical_notes)}</span>` : ''}</td>
     <td>${n.status === 'trialling' ? `${n.visits}${n.last_visit ? ` · last ${esc(n.last_visit)}` : ''}${n.readyToTalk ? ' <strong>— ask about joining</strong>' : ''}`
       : n.status === 'joined' ? 'Joined' : 'Not continuing'}</td>
@@ -3915,7 +3917,7 @@ export const reportScreen = ({ me, csrf, org, report }) => {
 // ---------------------------------------------------------------------------
 
 const nz = (iso, tz = DEFAULT_TIMEZONE) => iso
-  ? new Date(iso).toLocaleString(DEFAULT_LOCALE, { timeZone: tz, dateStyle: 'medium', timeStyle: 'short' }) : '';
+  ? new Date(iso).toLocaleString(region().locale, { timeZone: tz, dateStyle: 'medium', timeStyle: 'short' }) : '';
 
 export const gradingEventsScreen = ({ me, csrf, org, events = [] }) => page({
   title: `${org.name} — grading events`, me, csrf, body: `
@@ -4657,7 +4659,7 @@ export const growthScreen = ({ me, csrf, org, settings, trials = [], referrals =
     <div><strong>${report.referrals}</strong> referrals</div>
     <div><strong>${report.referralMembers}</strong> became members</div>
     <div><strong>${report.rewarded}</strong> rewards earned</div>
-    <div><strong>${esc(cents(report.revenueCents, DEFAULT_CURRENCY))}</strong> paid by referred members</div>
+    <div><strong>${esc(cents(report.revenueCents, region().currency))}</strong> paid by referred members</div>
   </div>
   ${top.length ? `<p class="muted">Top referrers: ${top.map((t) => `${esc(t.name)} (${t.n})`).join(', ')}.</p>` : ''}
 
@@ -4743,7 +4745,7 @@ export const termRoster = ({ me, csrf, org, term, rows = [] }) => page({
   <h1>${esc(term.name)} ${esc(term.year)}</h1><p class="sub">${esc(term.starts)} to ${esc(term.ends)}</p>
   ${rows.length ? `<table><thead><tr><th>Child</th><th>Age</th><th>Enrolled</th><th>Price</th><th></th></tr></thead><tbody>${rows.map((r) => `<tr>
     <td><a href="/p/${esc(r.person_id)}">${esc(r.name)}</a></td><td>${r.age ?? ''}</td><td>${esc(r.enrolled_on)}</td>
-    <td>${esc(cents(r.fee_cents, DEFAULT_CURRENCY))}${r.price_note && r.price_note !== 'The full term' ? ` <span class="muted">${esc(r.price_note)}</span>` : ''}</td>
+    <td>${esc(cents(r.fee_cents, region().currency))}${r.price_note && r.price_note !== 'The full term' ? ` <span class="muted">${esc(r.price_note)}</span>` : ''}</td>
     <td>${r.status === 'withdrawn' ? 'Withdrawn' : r.paid ? '<span class="tag ok">Paid</span>' : '<span class="tag wait">Not paid</span>'}</td></tr>`).join('')}</tbody></table>`
     : '<p class="muted">Nobody is enrolled yet.</p>'}` });
 
@@ -4754,7 +4756,7 @@ export const myTerms = ({ me, csrf, groups = [], error, done }) => page({
   ${groups.some((g) => g.items.length) ? groups.filter((g) => g.items.length).map((g) => `<h2>${esc(g.person.first_name)} <span class="muted">· ${esc(g.club)}</span></h2>
     <table><tbody>${g.items.map((i) => `<tr><td><strong>${esc(i.term.name)}</strong> ${esc(i.term.year)}<div class="muted">${esc(i.term.starts)} to ${esc(i.term.ends)}</div></td>
       <td>${i.enrolment?.status === 'enrolled' ? `<span class="tag ok">Enrolled</span>${i.enrolment.paid ? '' : ' <span class="tag wait">Not paid</span>'}`
-        : i.mayEnrol ? `${i.price.cents ? esc(cents(i.price.cents, DEFAULT_CURRENCY)) : 'Free'} <span class="muted">${esc(i.price.note)}</span>`
+        : i.mayEnrol ? `${i.price.cents ? esc(cents(i.price.cents, region().currency)) : 'Free'} <span class="muted">${esc(i.price.note)}</span>`
         : i.state === 'upcoming' ? '<span class="muted">Opens soon</span>' : '<span class="muted">Not available</span>'}</td>
       <td>${i.mayEnrol ? `<form method="post" action="/me/terms/${esc(i.term.id)}/${esc(g.person.id)}"><input type="hidden" name="_csrf" value="${esc(csrf ?? '')}"><button class="btn" type="submit">Enrol</button></form>`
         : i.enrolment?.status === 'enrolled' && i.state !== 'current' ? `<form method="post" action="/me/terms/${esc(i.term.id)}/${esc(g.person.id)}/withdraw"><input type="hidden" name="_csrf" value="${esc(csrf ?? '')}"><button class="btn quiet" type="submit">Withdraw</button></form>` : ''}</td></tr>`).join('')}</tbody></table>`).join('')
@@ -4768,7 +4770,7 @@ export const galleryScreen = ({ me, csrf, org, items = [], total = 0, years = []
                                 done, error, rebuild }) => {
   const base = `/o/${esc(org.slug)}/gallery`;
   const nowYear = new Date().getFullYear();
-  const day = (d) => new Date(d).toLocaleDateString(DEFAULT_LOCALE, { day: 'numeric', month: 'short', year: 'numeric' });
+  const day = (d) => new Date(d).toLocaleDateString(region().locale, { day: 'numeric', month: 'short', year: 'numeric' });
   const eventOptions = (selected, { keep = false } = {}) =>
     (keep ? '<option value="">— leave as it is —</option>' : '<option value="">No event</option>')
     + (keep ? '<option value="none">Take out of its event</option>' : '')
@@ -4909,7 +4911,9 @@ export const formList = ({ me, csrf, org, rows = [], inherited = [], starters = 
 const EVENT_KIND_WORDS = { grading: 'Grading', tournament: 'Tournament', camp: 'Training camp', seminar: 'Seminar', fight_night: 'Fight night', training: 'Training', social: 'Social', other: 'Event' };
 const KIND_WORDS = { waiver: 'Waiver', consent: 'Consent', medical: 'Medical', other: 'Other' };
 const TYPE_WORDS = { agree: 'A statement to agree to (a tick)', text: 'Short answer', longtext: 'Long answer', choice: 'Pick one', checkboxes: 'Pick any', date: 'Date' };
-const AUD_WORDS = { all: 'Everyone on the roll', juniors: 'Juniors (under 18)', seniors: 'Seniors (18 and over)' };
+/** The fee categories, with the age of adulthood that applies here in the junior label. */
+const feeCategories = () => ({ ...FEE_CATEGORIES, junior: `Juniors (under ${region().adultAge})` });
+const audWords = () => ({ all: 'Everyone on the roll', juniors: `Juniors (under ${region().adultAge})`, seniors: `Seniors (${region().adultAge} and over)` });
 const sel = (name, words, cur) => `<select name="${/* security-ok: name is a developer-chosen field name, never request data */ name}">${Object.entries(words).map(([k, w]) => `<option value="${esc(k)}"${k === cur ? ' selected' : ''}>${esc(w)}</option>`).join('')}</select>`;
 
 export const formEditor = ({ me, csrf, org, form: f, canManage = false, done, error }) => {
@@ -4927,7 +4931,7 @@ export const formEditor = ({ me, csrf, org, form: f, canManage = false, done, er
   <p><a href="${base}/status">Who has signed</a></p>
   ${canManage ? `<form method="post" action="${base}">${tok}
     <p><label>Title <input name="title" value="${esc(f.title)}" maxlength="120" required></label></p>
-    <p><label>Kind ${sel('kind', KIND_WORDS, f.kind)}</label> <label>Asked of ${sel('audience', AUD_WORDS, f.audience)}</label>
+    <p><label>Kind ${sel('kind', KIND_WORDS, f.kind)}</label> <label>Asked of ${sel('audience', audWords(), f.audience)}</label>
        <label>Ask again every <input name="renewMonths" type="number" min="1" max="60" value="${esc(f.renew_months ?? '')}" style="width:4em"> months (blank = once)</label></p>
     <p><label>Introduction<br><textarea name="intro" rows="3" maxlength="3000">${esc(f.intro ?? '')}</textarea></label></p>
     <button class="btn" type="submit">Save details</button></form>` : ''}
@@ -4966,7 +4970,7 @@ export const myForms = ({ me, csrf, person, todo = [], done = [], minor = false,
   title: `Forms — ${person.first_name}`, me, csrf, body: `
   <p><a href="/me">&larr; Home</a></p>
   <h1>Forms for ${esc(person.first_name)}</h1>
-  ${minor && how === 'self' ? '<p class="muted">A parent or guardian signs these for anyone under 18.</p>' : ''}
+  ${minor && how === 'self' ? `<p class="muted">A parent or guardian signs these for anyone under ${region().adultAge}.</p>` : ''}
   <h2>To do</h2>
   ${todo.length ? `<ul>${todo.map((i) => `<li><a href="/me/forms/${esc(i.form.id)}/${esc(person.id)}">${esc(i.form.title)}</a>${i.standing === 'expired' ? ' <span class="tag bad">run out</span>' : ''}</li>`).join('')}</ul>` : '<p class="muted">Nothing to sign.</p>'}
   <h2>Signed</h2>
@@ -5229,4 +5233,31 @@ export const shopAdminScreen = ({ me, csrf, org, isClub, own = [], national = []
     : '<p class="muted">Nothing here yet.</p>'}
   <h3>Add an item</h3>
   <form method="post" action="${base}/products">${tok}${fields()}<button class="btn" type="submit">Add</button></form>` });
+};
+
+/** Currency, language and the age of adulthood: set once for a federation, inherited by its clubs. */
+export const regionSettings = ({ me, csrf, org, own, inherited, values = null, done, error }) => {
+  const v = values ?? own ?? inherited;
+  return page({ title: `Country settings — ${org.name}`, me, csrf, body: `
+  <h1>Country settings</h1>
+  <p class="sub">${esc(org.name)} · what money, dates and "under age" mean here.
+    ${org.type === 'club' ? 'A club normally uses its federation\'s settings; set these only if this club differs.'
+      : 'Every club beneath this organisation uses these unless it sets its own.'}</p>
+  ${done ? `<div class="good">${esc(done)}</div>` : ''}
+  ${error ? `<div class="bad">${esc(error)}</div>` : ''}
+  <form method="post" class="card">
+    <input type="hidden" name="_csrf" value="${esc(csrf ?? '')}">
+    <div class="row">
+      <div><label for="currency">Currency</label>
+        <input id="currency" name="currency" maxlength="3" size="4" required value="${esc(v.currency)}">
+        <span class="hint">A three-letter code: NZD, AUD, USD, GBP, EUR, CAD…</span></div>
+      <div><label for="locale">Language and date style</label>
+        <input id="locale" name="locale" maxlength="20" size="8" required value="${esc(v.locale)}">
+        <span class="hint">en-NZ, en-AU, en-US, en-GB, fr-CA, ja…</span></div>
+      <div><label for="adultAge">Age of adulthood</label>
+        <input id="adultAge" name="adultAge" type="number" min="16" max="21" required value="${esc(v.adultAge)}">
+        <span class="hint">Under this age a parent or guardian signs for a person, and photographs need their consent.</span></div>
+    </div>
+    <p><button class="btn" type="submit">Save</button></p>
+  </form>` });
 };

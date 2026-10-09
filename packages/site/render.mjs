@@ -20,7 +20,8 @@ import { CalendarDay } from '../core/domain/values.mjs';
 import { makeShowcase, SHOWCASE_CSS } from './showcase.mjs';
 import { esc } from '../core/domain/html.mjs';
 import { tidyMoney } from '../core/domain/money.mjs';
-import { DEFAULT_TIMEZONE, DEFAULT_LOCALE, DEFAULT_CURRENCY, DEFAULT_COUNTRY } from '../core/domain/defaults.mjs';
+import { DEFAULT_TIMEZONE, DEFAULT_COUNTRY } from '../core/domain/defaults.mjs';
+import { region } from '../infrastructure/region-context.mjs';
 
 
 const DAYS = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
@@ -33,19 +34,19 @@ const time = (t) => {
   return m ? `${hr}.${String(m).padStart(2,'0')}${ampm}` : `${hr}${ampm}`;
 };
 
-const date = (d, tz = DEFAULT_TIMEZONE) => new Date(d).toLocaleDateString(DEFAULT_LOCALE,
+const date = (d, tz = DEFAULT_TIMEZONE) => new Date(d).toLocaleDateString(region().locale,
   { weekday:'long', day:'numeric', month:'long', timeZone: tz });
 
 /** The day of the month and the short month, as people read them where the event is: never the server's own clock. */
-const dayNum = (d, tz = DEFAULT_TIMEZONE) => new Date(d).toLocaleDateString(DEFAULT_LOCALE, { day: 'numeric', timeZone: tz });
-const monthShort = (d, tz = DEFAULT_TIMEZONE) => new Date(d).toLocaleDateString(DEFAULT_LOCALE, { month: 'short', timeZone: tz });
+const dayNum = (d, tz = DEFAULT_TIMEZONE) => new Date(d).toLocaleDateString(region().locale, { day: 'numeric', timeZone: tz });
+const monthShort = (d, tz = DEFAULT_TIMEZONE) => new Date(d).toLocaleDateString(region().locale, { month: 'short', timeZone: tz });
 
-const clock = (d, tz = DEFAULT_TIMEZONE) => new Date(d).toLocaleTimeString(DEFAULT_LOCALE,
+const clock = (d, tz = DEFAULT_TIMEZONE) => new Date(d).toLocaleTimeString(region().locale,
   { hour: 'numeric', minute: '2-digit', hour12: true, timeZone: tz }).replace(/\s/g, '').toLowerCase();
 
 /** "3 October", or "3–5 October" across days, or "30 Oct – 2 Nov" across months. */
 function shortRange(starts, ends, tz = DEFAULT_TIMEZONE) {
-  const f = (d, o) => new Date(d).toLocaleDateString(DEFAULT_LOCALE, { timeZone: tz, ...o });
+  const f = (d, o) => new Date(d).toLocaleDateString(region().locale, { timeZone: tz, ...o });
   const a = new Date(starts);
   if (!ends || f(starts, { dateStyle: 'short' }) === f(ends, { dateStyle: 'short' })) return `${f(a, { day: 'numeric' })} ${f(a, { month: 'long' })}`;
   if (f(starts, { month: 'long' }) === f(ends, { month: 'long' }))
@@ -429,7 +430,7 @@ export function layout({ title, description, canonical, body, jsonLd = [],
     .map((f) => `family=${f.replace(/ /g, '+')}:wght@400;500;700`), 'family=Anton'].join('&');
 
   return `<!DOCTYPE html>
-<html lang="${DEFAULT_LOCALE}">
+<html lang="${region().locale}">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -877,7 +878,7 @@ export function findADojoPage({ dojos, federation, origin, fonts, nav,
  * order goes to the member's own dojo, which collects the money and may add its own items (a tournament tee).
  */
 export function shopPage({ products = [], federation, origin, fonts, nav, base = '', vocabulary = {} }) {
-  const shopPrice = (c, cur = DEFAULT_CURRENCY) => tidyMoney(c, esc(cur));
+  const shopPrice = (c, cur = region().currency) => tidyMoney(c, esc(cur));
   const html = `
 <p class="shoplead">Gear for training and grading, ordered through your dojo. You pay your dojo when you collect it.</p>
 ${products.length ? `<ul class="shopgrid">${products.map((p) => `<li>

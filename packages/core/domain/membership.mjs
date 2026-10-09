@@ -26,7 +26,7 @@ export const PERIODS = Object.freeze({
 });
 
 export const CATEGORIES = Object.freeze({
-  junior: 'Juniors (under 18)',
+  junior: 'Juniors',
   adult:  'Adults',
   member: 'Everyone',
 });
@@ -84,8 +84,8 @@ export const STANDING_WORDS = Object.freeze({
 });
 
 /** Which of the dojo's prices applies to this person for this period. */
-export function feeFor(schedules, { ageYears, period, today }) {
-  const wanted = ageYears != null && ageYears < ADULT_AGE ? 'junior' : 'adult';
+export function feeFor(schedules, { ageYears, period, today, adultAge = ADULT_AGE }) {
+  const wanted = ageYears != null && ageYears < adultAge ? 'junior' : 'adult';
   const live = schedules.filter((f) => f.period === period
     && f.effective_from <= today && (!f.effective_to || f.effective_to >= today));
   for (const category of [wanted, 'member']) {

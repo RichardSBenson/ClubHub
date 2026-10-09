@@ -27,4 +27,4 @@ export function problemsWithDocument({ title, awardedOn, expiresOn, hasQualifica
 }
 
 /** Photographs on a record need somebody's yes only for a child: an adult speaks for themselves. */
-export const photoNeedsConsent = (age) => age == null || age < ADULT_AGE;
+export const photoNeedsConsent = (age, adultAge = ADULT_AGE) => age == null || age < adultAge;

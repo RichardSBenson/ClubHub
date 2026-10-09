@@ -6,7 +6,8 @@
  */
 
 import { pool } from '../../infrastructure/postgres/pool.mjs';
-import { DEFAULT_TIMEZONE, DEFAULT_CURRENCY } from '../../core/domain/defaults.mjs';
+import { DEFAULT_TIMEZONE } from '../../core/domain/defaults.mjs';
+import { region } from '../../infrastructure/region-context.mjs';
 import { normaliseGender } from '../../core/domain/people.mjs';
 import { readType, problemsWithDetail } from '../../core/domain/event-types.mjs';
 import { MANAGE, REGISTER, TEACH } from '../../core/domain/access.mjs';
@@ -328,7 +329,7 @@ export const competition = {
     personId = null, guest = null, enteredForOrg = null,
     weightKg = null, heightCm = null, yearsTraining = null, priorEvents = null,
     declaredGrade = null, clubName = null, placements = [],
-    amountCents = null, currency = DEFAULT_CURRENCY, consent = null, notes = null,
+    amountCents = null, currency = region().currency, consent = null, notes = null,
     byFamily = false, allowNoPlacements = false,
   }) {
     const ev = await one('select organisation_id from event where id = $1', [eventId]);

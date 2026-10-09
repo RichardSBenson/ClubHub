@@ -21,7 +21,9 @@ import { Age, DomainError } from './values.mjs';
  * assist in classes, and the answer for them is to be in the register, not on
  * the website.
  */
-export const PUBLIC_PROFILE_MINIMUM_AGE = 18;
+import { ADULT_AGE } from './defaults.mjs';
+
+export const PUBLIC_PROFILE_MINIMUM_AGE = ADULT_AGE;
 
 export function minimumAgeFor(settings = {}) {
   const asked = Number(settings?.publicProfileMinimumAge);

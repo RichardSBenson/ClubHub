@@ -11,6 +11,7 @@ import { MANAGE, REGISTER, TEACH } from '../../core/domain/access.mjs';
 import { webhooks } from './messaging.mjs';
 import { family, people } from './people.mjs';
 import { Forbidden, Invalid, NotFound, assertRole, homesOf, one, q, qualToday } from './shared.mjs';
+import { region } from '../../infrastructure/region-context.mjs';
 
 const FORM_COLS = `f.id, f.organisation_id, f.title, f.kind, f.intro, f.fields, f.audience, f.renew_months, f.status, f.version,
   f.created_at, f.updated_at, f.published_at, o.name as org_name, o.slug as org_slug, o.type as org_type, o.timezone`;
@@ -146,7 +147,7 @@ export const forms = {
       join person p on p.id = a.person_id where fo.id = $1 order by p.id`, [orgId]);
     const latest = new Map((await q(`select distinct on (person_id) id, person_id, form_version, signed_name, signed_for_minor, answered_at, expires_on::text as expires_on, withdrawn_at, answers
       from form_response where form_id = $1 order by person_id, answered_at desc`, [formId])).map((r) => [r.person_id, r]));
-    const rows = people.filter((p) => appliesTo(f, { dob: p.dob }, day)).map((p) => {
+    const rows = people.filter((p) => appliesTo(f, { dob: p.dob }, day, region().adultAge)).map((p) => {
       const r = latest.get(p.person_id) ?? null;
       return { ...p, standing: standingOn(f, r, day), response: r };
     }).sort((a, b) => a.last_name.localeCompare(b.last_name) || a.first_name.localeCompare(b.first_name));
@@ -181,7 +182,7 @@ export const forms = {
     const day = home ? await todayFor(home) : new Date().toISOString().slice(0, 10);
     const latest = new Map((await q(`select distinct on (form_id) form_id, form_version, expires_on::text as expires_on, withdrawn_at, answered_at, signed_name
       from form_response where person_id = $1 order by form_id, answered_at desc`, [personId])).map((r) => [r.form_id, r]));
-    const items = rows.filter((f) => appliesTo(f, { dob: person.dob }, day))
+    const items = rows.filter((f) => appliesTo(f, { dob: person.dob }, day, region().adultAge))
       .map((f) => ({ form: f, standing: standingOn(f, latest.get(f.id) ?? null, day), last: latest.get(f.id) ?? null }));
     return { person, items, day };
   },
@@ -189,7 +190,7 @@ export const forms = {
   async forPerson(actor, personId) {
     const how = await family.assertMayActFor(actor, personId);
     const { person, items, day } = await this._applicable(personId);
-    return { how, person, minor: isMinorOn(person.dob, day),
+    return { how, person, minor: isMinorOn(person.dob, day, region().adultAge),
       todo: items.filter((i) => i.standing !== 'current').sort((a, b) => a.form.title.localeCompare(b.form.title)),
       done: items.filter((i) => i.standing === 'current').sort((a, b) => a.form.title.localeCompare(b.form.title)) };
   },
@@ -199,12 +200,12 @@ export const forms = {
     const { person, items, day } = await this._applicable(personId);
     const item = items.find((i) => i.form.id === formId);
     if (!item) throw new NotFound('Form');
-    return { how, person, item, minor: isMinorOn(person.dob, day), day };
+    return { how, person, item, minor: isMinorOn(person.dob, day, region().adultAge), day };
   },
 
   async submit(actor, personId, formId, raw, { signedName, ip = null } = {}) {
     const { how, person, item, minor, day } = await this.open(actor, personId, formId);
-    if (minor && how === 'self') throw new Invalid('A parent or guardian answers this for anyone under 18. Ask them to sign in and do it.');
+    if (minor && how === 'self') throw new Invalid(`A parent or guardian answers this for anyone under ${region().adultAge}. Ask them to sign in and do it.`);
     const { answers, problems } = readAnswers(item.form.fields, raw);
     const sig = problemsWithSignature(signedName);
     if (problems.length || sig.length) throw new Invalid([...problems, ...sig].join(' '));

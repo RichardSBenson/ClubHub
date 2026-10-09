@@ -6,7 +6,7 @@
  */
 
 import { pool } from '../../infrastructure/postgres/pool.mjs';
-import { DEFAULT_CURRENCY } from '../../core/domain/defaults.mjs';
+import { region } from '../../infrastructure/region-context.mjs';
 import { normaliseGender } from '../../core/domain/people.mjs';
 import { seal, open as unseal } from '../../infrastructure/crypto/vault.mjs';
 import { PERIODS, feeFor } from '../../core/domain/membership.mjs';
@@ -47,7 +47,7 @@ export const newcomers = {
         and (n.status = 'trialling' or n.updated_at > now() - interval '30 days')
       order by (n.status = 'trialling') desc, n.created_at desc`, [orgId, org.timezone]);
     return { org, today, newcomers: rows.map((r) => ({ ...r, medical_notes: unseal(r.medical_notes),
-      child: isChild(r.date_of_birth, today), readyToTalk: r.status === 'trialling' && timeToTalk(r.visits) })) };
+      child: isChild(r.date_of_birth, today, region().adultAge), readyToTalk: r.status === 'trialling' && timeToTalk(r.visits) })) };
   },
 
   /** Add a newcomer, and — if asked — mark them as at a class today. */
@@ -55,7 +55,7 @@ export const newcomers = {
     await assertRole(actor, orgId, TEACH);
     const org = await attendanceClub(orgId);
     const today = await todayAt(org);
-    const problems = problemsWithNewcomer(input, today);
+    const problems = problemsWithNewcomer(input, today, region().adultAge);
     if (problems.length) throw new Invalid(problems.join(' '));
 
     if (input.email) {
@@ -84,7 +84,7 @@ export const newcomers = {
         values ($1,$2,$3,$4::date)`, [n.id, orgId, sessionId, date]);
       await client.query(`insert into audit_log (account_id, organisation_id, action, entity, entity_id, after)
         values ($1,$2,'newcomer_added','newcomer',$3,$4)`, [actor, orgId, n.id,
-        JSON.stringify({ child: isChild(input.dateOfBirth, today), consent_by: input.consentName })]);
+        JSON.stringify({ child: isChild(input.dateOfBirth, today, region().adultAge), consent_by: input.consentName })]);
       await client.query('commit');
       return { id: n.id };
     } catch (e) { await client.query('rollback'); throw e; } finally { client.release(); }
@@ -98,7 +98,7 @@ export const newcomers = {
     if (!n) throw new NotFound('Newcomer');
     if (n.status === 'joined') throw new Invalid('They have already joined.');
 
-    const child = isChild(n.dob, (await todayAt(await one('select timezone from organisation where id=$1', [orgId]))));
+    const child = isChild(n.dob, (await todayAt(await one('select timezone from organisation where id=$1', [orgId]))), region().adultAge);
     const person = await people.enrol(actor, { organisationId: orgId, firstName: n.first_name, lastName: n.last_name,
       dateOfBirth: n.dob, email: n.email, phone: n.phone, role: 'member', paidUntil,
       emergencyName: n.emergency_name ?? (child ? n.guardian_name : null),
@@ -403,7 +403,7 @@ export const trials = {
     const p = await one('select date_of_birth::text as dob from person where id = $1', [personId]);
     const schedule = await feeRows(org.id);
     const options = Object.entries(PERIODS).filter(([, v]) => v.months)
-      .map(([period, v]) => ({ period, label: v.label, fee: feeFor(schedule, { ageYears: ageOnDate(p.dob, today), period, today }) }))
+      .map(([period, v]) => ({ period, label: v.label, fee: feeFor(schedule, { adultAge: region().adultAge, ageYears: ageOnDate(p.dob, today), period, today }) }))
       .filter((o) => o.fee);
     return { trial: t, options, orgId: org.id };
   },
@@ -433,7 +433,7 @@ export const trials = {
         where l.renews_affiliation_id = $1 and py.status in ('pending','awaiting','failed')`, [a.id])).rows[0];
       if (open) { await client.query('commit'); return { paymentId: open.id, existing: true }; }
       const { rows: [pay] } = await client.query(`insert into payment (organisation_id, person_id, amount_cents, currency, status, requested_by)
-        values ($1,$2,$3,$4,'pending',$5) returning id`, [orgId, personId, choice.fee.amount_cents, choice.fee.currency ?? DEFAULT_CURRENCY, actor]);
+        values ($1,$2,$3,$4,'pending',$5) returning id`, [orgId, personId, choice.fee.amount_cents, choice.fee.currency ?? region().currency, actor]);
       await client.query(`insert into payment_line (payment_id, kind, description, amount_cents, renews_affiliation_id, renews_months)
         values ($1,'dojo_fee',$2,$3,$4,$5)`, [pay.id, `${choice.fee.label} — membership ${choice.label.toLowerCase()}`,
         choice.fee.amount_cents, a.id, PERIODS[period].months]);

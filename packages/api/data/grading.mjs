@@ -6,7 +6,7 @@
  */
 
 import { pool } from '../../infrastructure/postgres/pool.mjs';
-import { DEFAULT_CURRENCY } from '../../core/domain/defaults.mjs';
+import { region } from '../../infrastructure/region-context.mjs';
 import { SUPPORTER_NO_RANK } from '../../core/domain/roles.mjs';
 import { payeeFor } from '../../core/domain/payments.mjs';
 import { AWARDS, problemsWithResults, certificateNumber, entriesOpen } from '../../core/domain/grading.mjs';
@@ -347,7 +347,7 @@ export const gradings = {
         if (fee > 0) {
           const payee = payeeFor(kind, { clubId, organiserId: ev.organisation_id, federationId: root.id });
           const { rows: [pay] } = await client.query(`insert into payment (organisation_id, person_id, event_entry_id, amount_cents, currency, status, requested_by)
-            values ($1,$2,$3,$4,$6,'pending',$5) returning id`, [payee, m.id, entryId, fee, actor, DEFAULT_CURRENCY]);
+            values ($1,$2,$3,$4,$6,'pending',$5) returning id`, [payee, m.id, entryId, fee, actor, region().currency]);
           await client.query(`insert into payment_line (payment_id, kind, description, amount_cents, event_entry_id)
             values ($1,$2,$3,$4,$5)`, [pay.id, kind, `${g.label} grading — ${ev.title}`, fee, entryId]);
         }

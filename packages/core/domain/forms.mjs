@@ -22,7 +22,7 @@ export const FIELD_TYPES = Object.freeze({
   date:       'Date',
 });
 export const KINDS = Object.freeze({ waiver: 'Waiver', consent: 'Consent', medical: 'Medical', other: 'Other' });
-export const AUDIENCES = Object.freeze({ all: 'Everyone on the roll', juniors: 'Juniors (under 18)', seniors: 'Seniors (18 and over)' });
+export const AUDIENCES = Object.freeze({ all: 'Everyone on the roll', juniors: 'Juniors', seniors: 'Adults' });
 export const MAX_FIELDS = 40;
 export const MAX_OPTIONS = 20;
 
@@ -70,14 +70,14 @@ const ageOn = (dob, day) => {
   if (b.getUTCMonth() < a.getUTCMonth() || (b.getUTCMonth() === a.getUTCMonth() && b.getUTCDate() < a.getUTCDate())) y -= 1;
   return y;
 };
-export const isMinor = (dob, day) => { const a = ageOn(dob, day); return a != null && a < ADULT_AGE; };
+export const isMinor = (dob, day, adultAge = ADULT_AGE) => { const a = ageOn(dob, day); return a != null && a < adultAge; };
 
 /** Is this form asked of this person at all? Unknown age counts as an adult for 'seniors' only. */
-export function appliesTo(form, { dob }, day) {
+export function appliesTo(form, { dob }, day, adultAge = ADULT_AGE) {
   if (form.audience === 'all' || !form.audience) return true;
   const a = ageOn(dob, day);
-  if (form.audience === 'juniors') return a != null && a < ADULT_AGE;
-  if (form.audience === 'seniors') return a == null || a >= ADULT_AGE;
+  if (form.audience === 'juniors') return a != null && a < adultAge;
+  if (form.audience === 'seniors') return a == null || a >= adultAge;
   return true;
 }
 

@@ -6,7 +6,7 @@
  */
 
 import { pool } from '../../infrastructure/postgres/pool.mjs';
-import { ADULT_AGE } from '../../core/domain/defaults.mjs';
+import { region } from '../../infrastructure/region-context.mjs';
 import { problemsWithMessage, senderFor, chooseRecipients, renderBody } from '../../core/domain/messaging.mjs';
 import crypto from 'node:crypto';
 import { pushFromEnv } from '../../infrastructure/push/webpush.mjs';
@@ -159,7 +159,7 @@ export const messages = {
                   left join email_preference gp on gp.person_id = g.id
                   where gl.child_id = p.id and gl.ended_on is null), '[]'::json) as guardians
       from person p left join email_preference ep on ep.person_id = p.id
-      where p.id = any($1::uuid[])`, [ids, ADULT_AGE])) : [];
+      where p.id = any($1::uuid[])`, [ids, region().adultAge])) : [];
 
     const { recipients, skipped } = chooseRecipients(candidates,
       { honourOptOut: input.kind === 'announcement', preferFees: input.kind === 'renewal' });

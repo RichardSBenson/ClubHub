@@ -24,13 +24,13 @@ export const RELATIONSHIPS = Object.freeze({
   carer: 'Carer',
 });
 
-export const isMinor = (dateOfBirth, on = null) => {
+export const isMinor = (dateOfBirth, on = null, adultAge = AGE_OF_MAJORITY) => {
   const age = ageOn(dateOfBirth, on);
-  return age !== null && age < AGE_OF_MAJORITY;
+  return age !== null && age < adultAge;
 };
 
 /** What is wrong with a proposed link, as sentences. */
-export function problemsWithGuardianLink({ guardian, child, relationship }, { today = null } = {}) {
+export function problemsWithGuardianLink({ guardian, child, relationship }, { today = null, adultAge = AGE_OF_MAJORITY } = {}) {
   const out = [];
   if (!guardian || !child) return ['Choose both the parent or guardian and the child.'];
   if (guardian.id === child.id) out.push('Somebody cannot be their own guardian.');
@@ -38,12 +38,12 @@ export function problemsWithGuardianLink({ guardian, child, relationship }, { to
     out.push('Choose how they are related.');
   if (!child.date_of_birth)
     out.push(`${child.first_name} has no date of birth on record. Add it first — `
-      + 'a guardian\'s authority depends on the child being under 18.');
-  else if (!isMinor(child.date_of_birth, today))
-    out.push(`${child.first_name} is 18 or over, so nobody can act for them. They `
+      + `a guardian's authority depends on the child being under ${adultAge}.`);
+  else if (!isMinor(child.date_of_birth, today, adultAge))
+    out.push(`${child.first_name} is ${adultAge} or over, so nobody can act for them. They `
       + 'can be given their own access.');
-  if (guardian.date_of_birth && isMinor(guardian.date_of_birth, today))
-    out.push(`${guardian.first_name} is under 18 and cannot be a guardian.`);
+  if (guardian.date_of_birth && isMinor(guardian.date_of_birth, today, adultAge))
+    out.push(`${guardian.first_name} is under ${adultAge} and cannot be a guardian.`);
   return out;
 }
 

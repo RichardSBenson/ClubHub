@@ -61,6 +61,13 @@ for (const f of files.filter((x) => is(x, 'api/server.mjs') || is(x, 'api/views.
       fail(f, i + 1, 'talks to the database; add a function to data.mjs and call that');
   });
 
+// 4b: screens and routes use the organisation's own settings, not the platform defaults
+for (const f of files.filter((x) => /packages\/(api|site|content)\//.test(x)))
+  read(f).forEach((l, i) => {
+    if (!/arch-ok:/.test(l) && !/^\s*(\/\/|\*)/.test(l) && /\b(DEFAULT_CURRENCY|DEFAULT_LOCALE|ADULT_AGE)\b/.test(l))
+      fail(f, i + 1, 'uses a platform default; use region().currency / .locale / .adultAge, which is the organisation\'s own setting');
+  });
+
 // 5: the domain does not read the clock (a default argument may; time.mjs is the one place)
 const DEFAULT_ARG = /\b\w+ = new Date\(\)(\.toISOString\(\)(\.slice\(\d+, ?\d+\))?)?\s*[,)}]/;
 for (const f of files.filter((x) => x.includes('core/domain/') && !is(x, 'defaults.mjs')))
@@ -94,7 +101,7 @@ for (const f of files.filter((x) => x.includes('core/domain/') && !is(x, 'defaul
 const CAPS = { 'packages/api/data/people.mjs': 1500, 'packages/api/server.mjs': 4800, 'packages/api/views.mjs': 5300 };
 const DEFAULT_CAP = 1500;
 for (const f of files) {
-  const rel = path.relative(ROOT, f), n = read(f).length, cap = CAPS[rel] ?? DEFAULT_CAP;
+  const rel = path.relative(ROOT, f), n = fs.readFileSync(f, 'utf8').split('\n').length - 1, cap = CAPS[rel] ?? DEFAULT_CAP;
   if (n > cap) fail(f, 0, `${n} lines, over its cap of ${cap}. Split it by subject (one module per file) rather than raising the cap`);
 }
 
