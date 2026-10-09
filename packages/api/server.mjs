@@ -31,11 +31,12 @@
  */
 
 import { problemWithDeclaration } from '../core/domain/calendar.mjs';
+import { STARTER_DECLARATION } from '../core/domain/declarations.mjs';
 import { nextGrading } from '../core/domain/next-grading.mjs';
 import crypto from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { URL } from 'node:url';
-import { photos, instructorRole, eventDetails, gallery, MAX_GALLERY, pool, orgs, people, rank, events, competition, pages, assets, news,
+import { declarations, photos, instructorRole, eventDetails, gallery, MAX_GALLERY, pool, orgs, people, rank, events, competition, pages, assets, news,
          instructors, memberDocuments, navigation, audit, cards, checkin, search, clubPages, appearance, clubs, registerImport, clubProfile, family, myself, memberEvents, messages, emailPreferences, payments, fees, renewals, reminders, attendance, newcomers, reports, gradings, qualifications, forms, autoRenew, booking, shop, push, apiTokens, api, webhooks, platform, portal, enquiries, scheduledPublishing, TooMany, outsiders, trials, referrals, growth, clubMailer, terms,
          Forbidden, NotFound, Invalid } from './data.mjs';
 import * as auth from './auth.mjs';
@@ -344,6 +345,34 @@ get('/dashboard', async (ctx) => {
     V.dashboard({ me: ctx.me, orgs: rows, parents, groups, csrf: ctx.csrf, platformOwner }));
 });
 
+// ---- the federation's declaration: written once here ------------------------------
+
+async function declarationAdminPage(ctx, extra = {}) {
+  ctx.requireActor();
+  const org = await orgs.bySlug(ctx.params.slug);
+  if (!org) throw new NotFound('Organisation');
+  const owner = await declarations.ownerOf(org.id);
+  if (!(await mayRegisterAt(ctx, owner.id))) throw new Forbidden('Only the federation\'s officials can write its declaration.');
+  const { current, signed } = await declarations.counts(org.id);
+  const { code = 200, ...more } = extra;
+  return ctx.send(code, V.declarationAdmin({ me: ctx.me, csrf: ctx.csrf, org, owner, current, signed,
+    starter: STARTER_DECLARATION, done: ctx.url.searchParams.get('done'), error: ctx.url.searchParams.get('error'), ...more }));
+}
+get('/o/:slug/declaration', async (ctx) => { ctx.requireActor(); return declarationAdminPage(ctx); });
+post('/o/:slug/declaration', async (ctx) => {
+  ctx.requireActor();
+  const form = await ctx.form();
+  const org = await orgs.bySlug(ctx.params.slug);
+  if (!org) throw new NotFound('Organisation');
+  try {
+    const out = await declarations.publish(ctx.me.accountId, org.id, { version: form.version, body: form.body });
+    return ctx.redirect(`/o/${org.slug}/declaration?done=${encodeURIComponent(`Version ${out.version} is published. Everyone will be asked to sign it.`)}`);
+  } catch (e) {
+    if (e instanceof Invalid) return declarationAdminPage(ctx, { code: 422, error: e.message, values: form });
+    throw e;
+  }
+});
+
 // ---- roster ---------------------------------------------------------------
 
 get('/o/:slug/roster', async (ctx) => {
@@ -385,10 +414,12 @@ get('/o/:slug/roster', async (ctx) => {
   }).map((r) => ({ ...r, instructor: states.get(r.id) ?? null }));
   const unlinked = await family.withoutGuardian(all.filter((r) => r.age != null && r.age < 18).map((r) => r.id));
   for (const r of shown) r.noGuardian = unlinked.has(r.id);
+  const unsignedDecl = await declarations.unsignedAmong(org.id, all.filter((r) => r.role !== 'supporter').map((r) => r.id));
+  for (const r of shown) r.noDeclaration = unsignedDecl.has(r.id);
   const waitingDocs = await memberDocuments.waiting(ctx.me.accountId, org.id).catch(() => []);
   return ctx.send(200, V.roster({
     me: ctx.me, org, roster: shown, total: all.length, unlinked: all.filter((r) => unlinked.has(r.id)), waitingDocs, csrf: ctx.csrf,
-    canRegister: await mayRegisterAt(ctx, org.id), canManage, filter,
+    canRegister: await mayRegisterAt(ctx, org.id), canManage, filter, declarationUnsigned: unsignedDecl.size,
     ladder, dueCount: all.filter((r) => r.nextGrading?.due).length,
     done: q.get('done'), error: q.get('error'), rebuild: q.get('rebuild'),
   }));
@@ -830,6 +861,36 @@ async function documentsPage(ctx, extra = {}) {
 }
 get('/me/:personId/documents', async (ctx) => { ctx.requireActor(); return documentsPage(ctx); });
 
+// ---- the federation declaration ----------------------------------------------
+
+const safeMeNext = (n) => safeNext(n) && /^\/me(\/|$|\?)/.test(n) ? n : null;
+
+async function declarationPage(ctx, extra = {}) {
+  const id = ctx.params.personId;
+  if (!UUID_RE.test(id)) throw new NotFound('Person');
+  const mine = await myself.get(ctx.me.accountId, id);
+  const { code = 200, ...more } = extra;
+  return ctx.send(code, V.declarationSign({ me: ctx.me, csrf: ctx.csrf, person: mine.person, how: mine.how,
+    status: await declarations.statusFor(id), next: safeMeNext(ctx.url.searchParams.get('next')),
+    done: ctx.url.searchParams.get('done'), error: ctx.url.searchParams.get('error'), ...more }));
+}
+get('/me/:personId/declaration', async (ctx) => { ctx.requireActor(); return declarationPage(ctx); });
+
+post('/me/:personId/declaration', async (ctx) => {
+  ctx.requireActor();
+  const form = await ctx.form();
+  const id = ctx.params.personId;
+  if (!UUID_RE.test(id)) throw new NotFound('Person');
+  const next = safeMeNext(form.next);
+  try {
+    await declarations.sign(ctx.me.accountId, id, { accepted: !!form.accepted, name: form.acceptedName, ip: ctx.ip });
+  } catch (e) {
+    if (e instanceof Invalid) return declarationPage(ctx, { code: 422, error: e.message, next });
+    throw e;
+  }
+  return ctx.redirect(next ?? `/me/${id}/declaration?done=${encodeURIComponent('Signed. Thank you.')}`);
+});
+
 // Anybody linked to the person, at any age, may send a document to their club.
 post('/me/:personId/documents', async (ctx) => {
   ctx.requireActor();
@@ -1014,6 +1075,17 @@ async function memberEntryPlan(ctx, form = {}, { fromLast = false } = {}) {
   return plan;
 }
 
+
+/** On a roll, somebody who has not signed the federation's declaration signs it first, then comes back here. */
+async function declarationGate(ctx, plan) {
+  if (plan.outsider) return false;
+  const st = await declarations.statusFor(ctx.params.personId);
+  if (st.state !== 'unsigned') return false;
+  const back = `/me/events/${ctx.params.eventId}/${ctx.params.personId}`;
+  ctx.redirect(`/me/${ctx.params.personId}/declaration?next=${encodeURIComponent(back)}`);
+  return true;
+}
+
 const memberEntryView = (ctx, plan, extra = {}) => V.memberEntryForm({
   me: ctx.me, csrf: ctx.csrf, ...plan, ...extra });
 
@@ -1022,6 +1094,7 @@ get('/me/events/:eventId/:personId', async (ctx) => {
   const plan = await memberEntryPlan(ctx, {}, { fromLast: true });
   if (plan.open.already_entered)
     return ctx.redirect(`/me/events?done=${encodeURIComponent('Already entered.')}`);
+  if (await declarationGate(ctx, plan)) return;
   // Nothing different from last time: one button. Otherwise the form, with
   // last time's answers in it and the reason it is being shown.
   if (plan.quick.ok && ctx.url.searchParams.get('edit') !== '1')
@@ -1040,6 +1113,7 @@ post('/me/events/:eventId/:personId/quick', async (ctx) => {
   const plan = await memberEntryPlan(ctx, {}, { fromLast: true });
   if (plan.open.already_entered)
     return ctx.redirect(`/me/events?done=${encodeURIComponent('Already entered.')}`);
+  if (await declarationGate(ctx, plan)) return;
   if (!plan.quick.ok)
     return ctx.redirect(`/me/events/${ctx.params.eventId}/${ctx.params.personId}?edit=1`);
   return commitMemberEntry(ctx, plan);
@@ -1052,6 +1126,7 @@ post('/me/events/:eventId/:personId', async (ctx) => {
 
   if (plan.open.already_entered)
     return ctx.redirect(`/me/events?done=${encodeURIComponent('Already entered.')}`);
+  if (await declarationGate(ctx, plan)) return;
   if (plan.problems.length)
     return ctx.send(422, memberEntryView(ctx, plan, { values: form }));
 

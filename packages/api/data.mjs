@@ -5558,16 +5558,18 @@ export const portal = {
     const trial = await trials.mine(actor, person.id);
     const trialLeft = trial && trial.status !== 'converted'
       ? Math.round((Date.parse(`${trial.ends}T00:00:00Z`) - Date.parse(`${now.date}T00:00:00Z`)) / 864e5) : null;
+    const declarationNow = await declarations.statusFor(person.id);
     const actions = actionsFor({ personId: person.id, owed, closing, qualifications: quals,
       formsDue: await forms.dueFor(person.id),
       trial: trial ? { left: trialLeft } : null,
       termsOpen: (await terms.forPerson(actor, person.id)).items.filter((i) => i.mayEnrol && !i.enrolment).slice(0, 1).map((i) => ({ name: i.term.name, first: person.first_name })),
       memberships: memberships.filter((m) => m.standing).map((m) => ({ name: m.name, standing: m.standing, paid_until: m.paid_until })),
+      declaration: declarationNow.state,
       details: { emergencyContact: !!(priv?.emergency_name && priv?.emergency_phone) } });
 
     return { person, how, memberships, grade, next, nextEvent, trial: trial ? { ...trial, left: trialLeft } : null, openCount: open.length, closing: closing.length,
       owed, owedTotal: owed.reduce((n, p) => n + p.amount_cents, 0), currency: owed[0]?.currency ?? 'NZD',
-      counts, qualifications: quals, actions };
+      counts, qualifications: quals, actions, declaration: declarationNow };
   },
 
   /** The whole dashboard: me and the children I look after, and my messages. */
@@ -6655,6 +6657,74 @@ export const gallery = {
 // ---------------------------------------------------------------------------
 // Documents a member sends to their club
 // ---------------------------------------------------------------------------
+
+import { stateOf as declarationState, problemsWithSigning, problemsWithPublishing as problemsWithDeclarationText, needsGuardian } from '../core/domain/declarations.mjs';
+
+/** The federation's one declaration: written once, signed once per person, kept by version. */
+export const declarations = {
+  /** The organisation that owns the declaration for this one: the federation whose ladder it follows. */
+  async ownerOf(orgId) {
+    return (await orgs.ladderOwnerOf(orgId)) ?? (await one('select * from organisation where id = $1', [orgId]));
+  },
+  async current(federationId) {
+    return one(`select id, version, body, to_char(published_at at time zone 'Pacific/Auckland','YYYY-MM-DD') as published_on
+      from federation_declaration where organisation_id = $1 order by published_at desc limit 1`, [federationId]);
+  },
+  async publish(actor, orgId, { version, body }) {
+    const owner = await this.ownerOf(orgId);
+    await assertRole(actor, owner.id, REGISTER);
+    const problems = problemsWithDeclarationText({ version, body });
+    if (problems.length) throw new Invalid(problems.join(' '));
+    try {
+      return await one(`insert into federation_declaration (organisation_id, version, body, published_by)
+        values ($1,$2,$3,$4) returning id, version`, [owner.id, String(version).trim(), String(body).trim(), actor]);
+    } catch (e) {
+      if (e.code === '23505') throw new Invalid(`Version ${String(version).trim()} has already been used. Give the new wording a new version.`);
+      throw e;
+    }
+  },
+  /** Where one person stands: nothing to sign, to sign, or signed. */
+  async statusFor(personId) {
+    const home = (await homesOf(personId))[0];
+    if (!home) return { state: 'none' };
+    const owner = await this.ownerOf(home);
+    const current = owner ? await this.current(owner.id) : null;
+    if (!current) return { state: 'none', owner };
+    const signed = await one(`select signed_name, guardian, to_char(signed_at at time zone 'Pacific/Auckland','YYYY-MM-DD') as signed_on
+      from declaration_signing where person_id = $1 and declaration_id = $2`, [personId, current.id]);
+    return { state: declarationState({ current, signed }), owner, current, signed };
+  },
+  async sign(actor, personId, { accepted, name, ip = null }) {
+    const how = await family.assertMayActFor(actor, personId);
+    const st = await this.statusFor(personId);
+    if (st.state === 'none') throw new Invalid('There is no declaration to sign yet.');
+    if (st.state === 'signed') return st;
+    const age = (await one(`select date_part('year', age(date_of_birth))::int as age from person where id = $1`, [personId]))?.age ?? null;
+    const problems = problemsWithSigning({ accepted, name, isChild: needsGuardian(age), how });
+    if (problems.length) throw new Invalid(problems.join(' '));
+    await pool.query(`insert into declaration_signing (person_id, declaration_id, signed_name, signed_by, guardian, ip)
+      values ($1,$2,$3,$4,$5,$6) on conflict (person_id, declaration_id) do nothing`,
+      [personId, st.current.id, String(name).trim(), actor, how !== 'self', ip]);
+    return this.statusFor(personId);
+  },
+  /** Of these people, who has not signed the current version. Empty when nothing is published. */
+  async unsignedAmong(orgId, ids = []) {
+    if (!ids.length) return new Set();
+    const owner = await this.ownerOf(orgId);
+    const current = owner ? await this.current(owner.id) : null;
+    if (!current) return new Set();
+    const { rows } = await pool.query(`select person_id from declaration_signing where declaration_id = $1 and person_id = any($2::uuid[])`, [current.id, ids]);
+    const signed = new Set(rows.map((r) => r.person_id));
+    return new Set(ids.filter((id) => !signed.has(id)));
+  },
+  async counts(orgId) {
+    const owner = await this.ownerOf(orgId);
+    const current = owner ? await this.current(owner.id) : null;
+    if (!current) return { current: null, signed: 0 };
+    const row = await one(`select count(*)::int as n from declaration_signing where declaration_id = $1`, [current.id]);
+    return { owner, current, signed: row.n };
+  },
+};
 
 export const memberDocuments = {
   async _homeOf(personId) {

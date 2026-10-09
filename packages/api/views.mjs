@@ -445,7 +445,7 @@ export const dashboard = ({ me, csrf, orgs, parents = [], groups = [], platformO
 };
 
 export const roster = ({ me, csrf, org, roster, total = null, canRegister = false, canManage = false, unlinked = [], waitingDocs = [],
-                        filter = {}, ladder = [], dueCount = 0, done, error, rebuild }) => {
+                        filter = {}, ladder = [], dueCount = 0, declarationUnsigned = 0, done, error, rebuild }) => {
   const here = `/o/${esc(org.slug)}/roster`;
   const withDojo = org.type !== 'club';
   const q = (extra = {}) => new URLSearchParams(Object.entries({ grade: filter.grade !== 'all' ? filter.grade : '', band: filter.band, show: filter.show, ...extra })
@@ -468,7 +468,8 @@ export const roster = ({ me, csrf, org, roster, total = null, canRegister = fals
   <p class="sub">${total ?? roster.length} on the roll ·
     <a href="/o/${esc(org.slug)}/grading">Run a grading</a> ·
     <a href="/o/${esc(org.slug)}/history">History</a> ·
-    <a href="/o/${esc(org.slug)}/events">Events</a> ·
+    <a href="/o/${esc(org.slug)}/events">Events</a> ·${canManage ? `
+    <a href="/o/${esc(org.slug)}/declaration">Declaration</a> ·` : ''}
     <a href="/o/${esc(org.slug)}/pages">Website</a></p>
 
   ${done ? `<div class="good">${esc(done)}</div>` : ''}
@@ -476,6 +477,8 @@ export const roster = ({ me, csrf, org, roster, total = null, canRegister = fals
   ${rebuild ? `<div class="note">${esc(rebuild)}</div>` : ''}
   ${waitingDocs.length ? `<div class="note"><strong>${waitingDocs.length} document${waitingDocs.length === 1 ? ' is' : 's are'} waiting to be checked.</strong>
     ${waitingDocs.slice(0, 6).map((d) => `<a href="/p/${esc(d.person_id)}">${esc(d.first_name)} ${esc(d.last_name)}</a> (${esc(d.title)})`).join(', ')}${waitingDocs.length > 6 ? ' …' : ''}</div>` : ''}
+  ${declarationUnsigned && canManage ? `<div class="note"><strong>${declarationUnsigned} ${declarationUnsigned === 1 ? 'person has' : 'people have'} not signed the federation declaration.</strong>
+    They are marked below. Each is asked to sign the next time they open their page or enter an event. <a href="/o/${esc(org.slug)}/declaration">The declaration</a></div>` : ''}
   ${unlinked.length ? `<div class="note"><strong>${unlinked.length} ${unlinked.length === 1 ? 'child has' : 'children have'} no parent or guardian linked.</strong>
     A child should always sit under a parent. They are marked below; open each one and link a parent.
     <a href="${here}?band=junior">Show the children</a></div>` : ''}
@@ -524,7 +527,7 @@ export const roster = ({ me, csrf, org, roster, total = null, canRegister = fals
       <td class="hide-sm">${nextCell(p.nextGrading)}</td>
       <td class="hide-sm">${p.age ?? ''}</td>
       ${withDojo ? `<td class="hide-sm">${esc(p.dojo ?? '')}</td>` : ''}
-      <td>${p.noGuardian ? '<span class="tag wait">No parent linked</span> ' : ''}${canManage ? nowCell(p) : (p.isInstructor ? '<span class="tag">Instructor</span>' : '<span class="hide-sm">' + esc(p.role) + '</span>')}</td>
+      <td>${p.noGuardian ? '<span class="tag wait">No parent linked</span> ' : ''}${p.noDeclaration ? '<span class="tag wait">Declaration not signed</span> ' : ''}${canManage ? nowCell(p) : (p.isInstructor ? '<span class="tag">Instructor</span>' : '<span class="hide-sm">' + esc(p.role) + '</span>')}</td>
       <td>${p.paid_until ? String(new Date(p.paid_until).toISOString().slice(0,10)) : '—'}</td>
     </tr>`).join('')}</tbody></table>
   ${canManage ? `<p style="margin-top:12px"><button class="btn" type="submit" name="action" value="show">Make instructors and show on the website</button>
@@ -4239,6 +4242,8 @@ const personTiles = (p, csrf) => {
       <p>${p.counts.certificates} certificate${p.counts.certificates === 1 ? '' : 's'} ·
         ${p.counts.consents} signed declaration${p.counts.consents === 1 ? '' : 's'} ·
         ${p.qualifications.length} qualification${p.qualifications.length === 1 ? '' : 's'}</p>
+      ${p.declaration?.state === 'signed' ? `<p><span class="tag ok">Federation declaration signed</span></p>`
+        : p.declaration?.state === 'unsigned' ? `<p><span class="tag wait">Federation declaration not signed</span> <a href="${base}/declaration">Sign it</a></p>` : ''}
       <p><a href="${base}/documents">Open</a></p></div>
     ${supporterOnly ? '' : `<div class="tile"><h3>Training</h3>
       <p class="big">${p.counts.recent_classes} class${p.counts.recent_classes === 1 ? '' : 'es'}</p>
@@ -4314,6 +4319,48 @@ const eventRows = (rows) => `<table><thead><tr><th>When</th><th>Event</th><th>St
   <td><strong>${esc(e.title)}</strong>${(e.picks ?? []).length ? `<div class="muted">${e.picks.map((p) => esc(p.discipline) + (p.division ? ' — ' + esc(p.division) : '')).join('; ')}</div>` : ''}</td>
   <td><span class="tag ${['entered', 'confirmed'].includes(e.status) ? 'ok' : 'no'}">${esc(ENTRY_WORDS[e.status] ?? e.status)}</span>${
     e.pay_status && e.pay_status !== 'succeeded' ? ' <span class="tag wait">Not paid</span>' : ''}</td></tr>`).join('')}</tbody></table>`;
+
+/** Read and sign the federation's declaration, once, for yourself or for a child. */
+export const declarationSign = ({ me, csrf, person, how, status, next = null, done = null, error = null }) => page({
+  title: 'Federation declaration', me, csrf, body: `
+  <h1>Federation declaration</h1>
+  <p class="sub"><a href="/me">Back</a> · for ${esc(person.first_name)} ${esc(person.last_name)}</p>
+  ${done ? `<div class="good">${esc(done)}</div>` : ''}
+  ${error ? `<div class="bad">${esc(error)}</div>` : ''}
+  ${status.state === 'none' ? '<p class="muted">The federation has not published a declaration yet. There is nothing to sign.</p>' : `
+  <div class="note" style="white-space:pre-wrap">${esc(status.current.body)}</div>
+  <p class="muted">Version ${esc(status.current.version)}, published ${esc(status.current.published_on)}. One signature covers every event and class; you are only asked again if the wording changes.</p>
+  ${status.state === 'signed'
+    ? `<div class="good">Signed${status.signed.guardian ? ' by a parent or guardian' : ''}: ${esc(status.signed.signed_name)} on ${esc(status.signed.signed_on)}.</div>
+       ${next ? `<p><a class="btn" href="${esc(next)}">Carry on</a></p>` : ''}`
+    : `<form method="post" action="/me/${esc(person.id)}/declaration" class="card">
+    <input type="hidden" name="_csrf" value="${esc(csrf ?? '')}">
+    ${next ? `<input type="hidden" name="next" value="${esc(next)}">` : ''}
+    <label><input type="checkbox" name="accepted" value="1">
+      ${how === 'self' ? 'I agree to the declaration above.' : `I am ${esc(person.first_name)}'s parent or guardian and I agree to the declaration above on their behalf.`}</label>
+    <label for="acceptedName">Type your full name to sign</label>
+    <input id="acceptedName" name="acceptedName" maxlength="120" autocomplete="name" required>
+    <p><button class="btn" type="submit">Sign</button></p>
+  </form>`}`}` });
+
+/** Where the federation writes its declaration. */
+export const declarationAdmin = ({ me, csrf, org, owner, current, signed = 0, starter = '', values = null, done = null, error = null }) => page({
+  title: 'Declaration', me, csrf, body: `
+  <h1>Federation declaration</h1>
+  <p class="sub">${esc(owner.name)} · <a href="/o/${esc(org.slug)}/roster">Back to the roll</a></p>
+  ${done ? `<div class="good">${esc(done)}</div>` : ''}
+  ${error ? `<div class="bad">${esc(error)}</div>` : ''}
+  <p>One waiver and consent for the whole federation. Each member, or a parent or guardian for a child, signs it once, and it covers every class, grading, seminar, camp and tournament.
+    ${current ? `Version <strong>${esc(current.version)}</strong> is current, and ${signed} ${signed === 1 ? 'person has' : 'people have'} signed it.` : 'Nothing is published yet, so nobody is asked to sign.'}</p>
+  <form method="post" action="/o/${esc(org.slug)}/declaration" class="card">
+    <input type="hidden" name="_csrf" value="${esc(csrf ?? '')}">
+    <label for="version">Version <span class="hint">Change it every time the wording changes. Publishing new wording asks everybody to sign again.</span></label>
+    <input id="version" name="version" maxlength="40" value="${esc(values?.version ?? '')}" placeholder="2026.1" style="max-width:200px" required>
+    <label for="body">The declaration</label>
+    <textarea id="body" name="body" rows="14" required>${esc(values?.body ?? current?.body ?? starter)}</textarea>
+    ${current ? '' : '<p class="hint">This is plain starting wording. It is not legal advice, so have the federation\'s advisers read it before publishing.</p>'}
+    <p><button class="btn" type="submit">Publish</button></p>
+  </form>` });
 
 const DOC_STATUS = { pending: ['wait', 'Waiting for your club'], accepted: ['ok', 'Accepted'], declined: ['no', 'Declined'] };
 
