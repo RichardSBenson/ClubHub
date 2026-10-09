@@ -393,15 +393,25 @@ console.log('\nTHE ENTRY LIST');
     r.html.includes('calculated'), 'placement source not shown');
 }
 
-console.log('\nA FREE SEMINAR HAS NO DIVISIONS OR FEES');
+console.log('\nA SEMINAR HAS ONE FLAT FEE, NOT DIVISIONS');
 {
-  const src = (await q(`select organisation_id from event where slug = '2026-kokoro-cup'`))[0];
-  await q(`insert into event (organisation_id, kind, title, slug, starts_at, status, visibility)
-    values ($1,'seminar','Free Seminar','free-seminar', now() + interval '20 days','published','public')`, [src.organisation_id]);
-  const r = await req('/o/moknz/events/free-seminar/entries');
-  ok('the seminar entries page opens', r.status === 200, String(r.status));
-  ok('it does not offer divisions and fees', !/Divisions and fees/.test(r.html) && !/across \d+ division/.test(r.html));
-  ok('and says so', /No divisions or fees for this event/.test(r.html));
+  const mk = (title, extra = {}) => req('/o/moknz/events/new', { method: 'POST', form: {
+    title, kind: 'seminar', startsAt: '2026-12-05T10:00', visibility: 'public', status: 'published', ...extra } });
+  ok('a seminar with the fee left blank is saved', (await mk('Free Seminar')).status === 302);
+  const priceOf = async (slug) => (await q(`select p.amount_cents from entry_price p join event e on e.id = p.event_id where e.slug = $1 and p.for_count = 1 and not p.members_only`, [slug]))[0]?.amount_cents;
+  ok('blank means free: a price of 0 is stored', (await priceOf('free-seminar')) === 0, String(await priceOf('free-seminar')));
+  let r = await req('/o/moknz/events/free-seminar/entries');
+  ok('the entries page opens', r.status === 200, String(r.status));
+  ok('it offers no divisions', !/Divisions and fees/.test(r.html) && !/across \d+ division/.test(r.html));
+  ok('it shows the fee: $0.00', /Entry fee \$0\.00/.test(r.html));
+  const paid = await mk('Paid Seminar', { entryFee: '$25', startsAt: '2026-12-06T10:00' });
+  ok('a paid seminar is saved with its fee', paid.status === 302 && (await priceOf('paid-seminar')) === 2500, paid.status + ' ' + (await priceOf('paid-seminar')));
+  r = await req('/o/moknz/events/paid-seminar/entries');
+  ok('and shows $25.00', /Entry fee \$25\.00/.test(r.html));
+  r = await req('/o/moknz/events/paid-seminar/edit');
+  ok('the edit form has the fee in it', /name="entryFee"[^>]*value="25"/.test(r.html));
+  ok('a fee that is not an amount is refused', (await mk('Bad Fee', { entryFee: 'lots', startsAt: '2026-12-07T10:00' })).status === 422);
+  ok('a tournament takes no flat fee (it is priced by division)', (await q(`select 1 from entry_price p join event e on e.id = p.event_id where e.slug = '2026-kokoro-cup' and p.label = 'Entry fee'`)).length === 0);
 }
 
 console.log('\nTHE ENTRIES AS A SPREADSHEET');

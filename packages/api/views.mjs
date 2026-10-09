@@ -1284,6 +1284,9 @@ export const eventForm = ({ me, csrf, org, values = {}, zone, error,
       <label for="costNote">Cost
         <span class="hint">In words: "$60 adults, $40 juniors. Includes lunch."</span></label>
       <input id="costNote" name="costNote" maxlength="300" value="${esc(v('costNote'))}" style="max-width:560px">
+      <label for="entryFee">Entry fee ($)
+        <span class="hint">0 if it is free. This is what members are charged when they enter a seminar or camp. A tournament is priced by division instead.</span></label>
+      <input id="entryFee" name="entryFee" inputmode="decimal" maxlength="10" value="${esc(v('entryFee') ?? '0')}" style="max-width:140px">
       <label for="infoUrl">Link for more information
         <span class="hint">Starts with https://</span></label>
       <input id="infoUrl" name="infoUrl" maxlength="300" value="${esc(v('infoUrl'))}" style="max-width:560px">
@@ -1790,7 +1793,7 @@ export const entryPreview = ({ me, csrf, org, event, rows = [], text,
 
 /** Who is entered, by division, with the unplaced impossible to miss. */
 export const entryList = ({ me, csrf, org, event, entries = [],
-                            divisions = [], canAssign = false, done, error }) => {
+                            divisions = [], entryFeeCents = 0, canAssign = false, done, error }) => {
   const unplaced = entries.flatMap((e) =>
     e.selections.filter((s) => !s.division_id).map((s) => ({ entry: e, s })));
 
@@ -1814,7 +1817,7 @@ export const entryList = ({ me, csrf, org, event, entries = [],
     title: `Entries — ${event.title}`, me, csrf, body: `
   <h1>Entries</h1>
   <p class="sub">${esc(event.title)} (${esc((EVENT_KIND_WORDS[event.kind] ?? 'Event').toLowerCase())}) · ${esc(org.name)} ·
-    ${hasDivisions ? `<a href="/o/${esc(org.slug)}/events/${esc(event.slug)}/setup">Divisions and fees</a>` : '<span class="muted">No divisions or fees for this event</span>'}</p>
+    ${hasDivisions ? `<a href="/o/${esc(org.slug)}/events/${esc(event.slug)}/setup">Divisions and fees</a>` : `<strong>Entry fee ${esc(cents(entryFeeCents))}</strong> · <a href="/o/${esc(org.slug)}/events/${esc(event.slug)}/edit">Change</a>`}</p>
   <p><a class="btn" href="/o/${esc(org.slug)}/events/${esc(event.slug)}/entries.csv">Download entries (CSV)</a></p>
 
   ${done ? `<div class="good">${esc(done)}</div>` : ''}

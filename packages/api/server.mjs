@@ -988,6 +988,11 @@ async function memberEntryPlan(ctx, form = {}, { fromLast = false } = {}) {
       amountCents = priceFor(chosen.length, setup.enginePrices, { isMember: !outsider }).amountCents;
     }
   }
+  else {
+    // No divisions: a seminar or camp has one flat entry fee, if the organiser set one.
+    const flat = priceFor(1, setup.enginePrices, { isMember: !outsider }).amountCents;
+    if (flat != null) amountCents = flat;
+  }
 
   if (event.consentVersion) {
     problems.push(...problemsWithConsent({ accepted: !!form.accepted,
@@ -3888,6 +3893,7 @@ get('/o/:slug/events/:eventSlug/entries', async (ctx) => {
     me: ctx.me, org: host, event, csrf: ctx.csrf,
     entries: await competition.entriesFor(ctx.me.accountId, event.id),
     divisions: setup.divisions,
+    entryFeeCents: setup.prices.find((p) => p.for_count === 1 && !p.members_only)?.amount_cents ?? 0,
     canAssign: await mayScheduleAt(ctx, host.id),
     done: ctx.url.searchParams.get('done'),
     error: ctx.url.searchParams.get('error'),
@@ -4307,6 +4313,21 @@ function eventFieldsFrom(form, zone) {
   };
 }
 
+/** Dollars typed in the form → cents. Blank is free. Returns { cents } or { problem }. */
+function readEntryFee(form) {
+  const raw = String(form.entryFee ?? '').replace(/[$,\s]/g, '');
+  if (!raw) return { cents: 0 };
+  const n = Number(raw);
+  if (!Number.isFinite(n) || n < 0 || n > 100000) return { problem: 'The entry fee must be an amount like 0 or 25.00.' };
+  return { cents: Math.round(n * 100) };
+}
+/** Competitions are priced by division, so only the other kinds of event take one flat fee. */
+const takesFlatFee = (kind) => !['tournament', 'fight_night'].includes(kind);
+const flatFeeOf = async (eventId) => {
+  const row = (await pool.query(`select amount_cents from entry_price where event_id=$1 and for_count=1 and not members_only`, [eventId])).rows[0];
+  return row ? (row.amount_cents / 100).toFixed(2).replace(/\.00$/, '') : '0';
+};
+
 const detailAsForm = (d) => d ? { eventType: d.type_key ?? '', contactName: d.contact_name ?? '', contactEmail: d.contact_email ?? '',
   contactPhone: d.contact_phone ?? '', costNote: d.cost_note ?? '', infoUrl: d.info_url ?? '', description: d.description ?? '',
   latitude: d.latitude ?? '', longitude: d.longitude ?? '' } : {};
@@ -4374,12 +4395,15 @@ post('/o/:slug/events/new', async (ctx) => {
     if (detail.problems.length) throw Object.assign(new Error(detail.problems.join(' ')), { status: 422 });
     const declared = problemWithDeclaration(eventFieldsFrom(form, org.timezone).kind, form.consentVersion?.trim());
     if (declared) throw Object.assign(new Error(declared), { status: 422 });
+    const fee = readEntryFee(form);
+    if (fee.problem) throw Object.assign(new Error(fee.problem), { status: 422 });
     const saved = await schedule.execute({
       actorId: ctx.me.accountId, organisationId: org.id,
       ...eventFieldsFrom(form, org.timezone),
       status: form.status === 'published' ? 'published' : 'draft',
     });
     await eventDetails.save(saved.id, detail.d);
+    if (takesFlatFee(saved.kind)) await competition.setPrice(ctx.me.accountId, saved.id, { forCount: 1, amountCents: fee.cents, label: 'Entry fee' });
     const rebuild = await requestRebuild({ reason: `event ${org.slug}` });
     return ctx.redirect(`/o/${org.slug}/events?done=`
       + encodeURIComponent(`"${saved.title}" saved.`)
@@ -4404,7 +4428,7 @@ get('/o/:slug/events/:eventSlug/edit', async (ctx) => {
   return ctx.send(200, V.eventForm({
     me: ctx.me, org, csrf: ctx.csrf, isNew: false, status: event.status,
     zone: org.timezone, grades: await gradesFor(org),
-    values: { ...eventAsForm(event, org.timezone), ...detailAsForm(await eventDetails.forEvent(event.id)) },
+    values: { ...eventAsForm(event, org.timezone), ...detailAsForm(await eventDetails.forEvent(event.id)), entryFee: await flatFeeOf(event.id) },
   }));
 });
 
@@ -4421,12 +4445,15 @@ post('/o/:slug/events/:eventSlug/edit', async (ctx) => {
     if (detail.problems.length) throw Object.assign(new Error(detail.problems.join(' ')), { status: 422 });
     const declared = problemWithDeclaration(eventFieldsFrom(form, org.timezone).kind, form.consentVersion?.trim());
     if (declared) throw Object.assign(new Error(declared), { status: 422 });
+    const fee = readEntryFee(form);
+    if (fee.problem) throw Object.assign(new Error(fee.problem), { status: 422 });
     const saved = await revise.execute({
       actorId: ctx.me.accountId, eventId: existing.id,
       ...eventFieldsFrom(form, org.timezone),
       status: form.status,
     });
     await eventDetails.save(existing.id, detail.d);
+    if (takesFlatFee(saved.kind)) await competition.setPrice(ctx.me.accountId, existing.id, { forCount: 1, amountCents: fee.cents, label: 'Entry fee' });
     const rebuild = await requestRebuild({ reason: `event ${org.slug}` });
     return ctx.redirect(`/o/${org.slug}/events?done=`
       + encodeURIComponent(`"${saved.title}" updated.`)
