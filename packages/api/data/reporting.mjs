@@ -8,6 +8,7 @@
 import { pool } from '../../infrastructure/postgres/pool.mjs';
 import { DEFAULT_TIMEZONE } from '../../core/domain/defaults.mjs';
 import { region } from '../../infrastructure/region-context.mjs';
+import { taxInside } from '../../core/domain/tax.mjs';
 import { nextGrading } from '../../core/domain/next-grading.mjs';
 import { standing } from '../../core/domain/membership.mjs';
 import { readQuery, fold } from '../../content/search.mjs';
@@ -350,9 +351,10 @@ export const reports = {
         and coalesce(py.settled_at, py.created_at)::date between $2::date and $3::date
       order by coalesce(py.settled_at, py.created_at), py.receipt_no`, [orgId, from, to]);
     return { columns: [['date', 'Date'], ['receipt', 'Receipt'], ['payee', 'Paid to'], ['number', 'Member number'],
-      ['payer', 'Paid by'], ['kinds', 'For'], ['description', 'Details'], ['method', 'Method'], ['amount', 'Amount']]
+      ['payer', 'Paid by'], ['kinds', 'For'], ['description', 'Details'], ['method', 'Method'], ['amount', 'Amount'],
+      ...(region().taxPercent > 0 ? [['tax', `${region().taxName} included`]] : [])]
       .map(([key, label]) => ({ key, label })),
-      rows: rows.map((r) => ({ ...r, amount: cents(r.amount_cents) })),
+      rows: rows.map((r) => ({ ...r, amount: cents(r.amount_cents), tax: cents(taxInside(r.amount_cents, region().taxPercent)) })),
       total: rows.reduce((s, r) => s + r.amount_cents, 0) };
   },
 

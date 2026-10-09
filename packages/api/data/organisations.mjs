@@ -7,7 +7,7 @@
 
 import { pool } from '../../infrastructure/postgres/pool.mjs';
 import { DEFAULT_TIMEZONE } from '../../core/domain/defaults.mjs';
-import { region } from '../../infrastructure/region-context.mjs';
+import { region, setRegion, setEventTypes, setWords } from '../../infrastructure/region-context.mjs';
 import { feeFor } from '../../core/domain/membership.mjs';
 import { readTheme } from '../../site/theme.mjs';
 import { problemsWithClubProfile, changesTheSite } from '../../core/domain/club-profile.mjs';
@@ -69,6 +69,12 @@ export const orgs = {
       limit 1`, [orgId]);
     return resolveRegion(row?.region ?? {});
   },
+  /** Make this organisation's currency, language, kinds of event and wording apply to the rest of the request. */
+  async enter(orgId) {
+    setRegion(await this.regionOf(orgId));
+    setEventTypes(await this.eventTypesOf(orgId));
+    setWords(await this.vocabulary(orgId));
+  },
   /** The kinds of event this organisation runs: the nearest list up the tree, else the generic one. */
   async eventTypesOf(orgId) {
     if (!orgId) return resolveEventTypes(null);
@@ -102,7 +108,8 @@ export const orgs = {
     const problems = problemsWithRegion(input);
     if (problems.length) throw new Invalid(problems.join(' '));
     await pool.query(`update organisation set settings = jsonb_set(coalesce(settings,'{}'::jsonb), '{region}', $2::jsonb) where id = $1`,
-      [orgId, JSON.stringify({ currency: input.currency, locale: input.locale, adultAge: input.adultAge })]);
+      [orgId, JSON.stringify({ currency: input.currency, locale: input.locale, adultAge: input.adultAge,
+        taxName: input.taxName ?? '', taxPercent: input.taxPercent ?? 0, taxNumber: input.taxNumber ?? '' })]);
     await pool.query(`insert into audit_log (account_id, organisation_id, action, entity, entity_id, after)
       values ($1,$2,'region_changed','organisation',$2,$3::jsonb)`, [actor, orgId, JSON.stringify(input)]);
   },

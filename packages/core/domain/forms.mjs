@@ -122,19 +122,19 @@ export function readAnswers(fields, raw = {}) {
 /** What gets signed: the typed name must look like a name. */
 export const problemsWithSignature = (name) => str(name, 120).length < 2 ? ['Type your full name to sign.'] : [];
 
-/** Starter forms, so nobody starts from a blank page. Plain wording a dojo can change. */
+/** Starter forms, so nobody starts from a blank page. Plain wording a club can change. */
 export const STARTERS = Object.freeze({
   waiver: { title: 'Membership waiver', kind: 'waiver', audience: 'all', renewMonths: 12,
     intro: 'Training in martial arts involves physical contact and a risk of injury. Please read and agree before you train.',
     fields: [
       { type: 'agree', label: 'I understand that training involves physical contact and a risk of injury, and I accept that risk.' },
       { type: 'agree', label: 'I will tell my instructor straight away about any injury or health problem that could affect my training.' },
-      { type: 'agree', label: 'I agree to follow the dojo\'s rules and my instructors\' directions.' },
+      { type: 'agree', label: 'I agree to follow the club\'s rules and my instructors\' directions.' },
     ] },
   photos: { title: 'Photo and video consent', kind: 'consent', audience: 'all', renewMonths: null,
     intro: 'Photos and video are sometimes taken at classes and events. Tell us where they may be used.',
     fields: [
-      { type: 'choice', label: 'May the dojo use photos and video of me (or my child)?', options: 'Yes, anywhere the dojo promotes itself\nYes, but only inside the dojo (no website or social media)\nNo, please do not use photos of us', required: true },
+      { type: 'choice', label: 'May the club use photos and video of me (or my child)?', options: 'Yes, anywhere the club promotes itself\nYes, but only inside the club (no website or social media)\nNo, please do not use photos of us', required: true },
       { type: 'longtext', label: 'Anything we should know?', required: false },
     ] },
   medical: { title: 'Medical information', kind: 'medical', audience: 'all', renewMonths: 12,
@@ -143,6 +143,6 @@ export const STARTERS = Object.freeze({
       { type: 'longtext', label: 'Medical conditions, allergies or injuries we should know about', required: false, help: 'Write "none" if there is nothing.' },
       { type: 'text', label: 'Regular medication', required: false },
       { type: 'text', label: 'Doctor\'s name and phone', required: false },
-      { type: 'agree', label: 'The information I have given is correct, and I will tell the dojo if it changes.' },
+      { type: 'agree', label: 'The information I have given is correct, and I will tell the club if it changes.' },
     ] },
 });

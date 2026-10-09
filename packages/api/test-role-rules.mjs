@@ -31,9 +31,9 @@ console.log('\nINSTRUCTORS');
 {
   const kyu = await enrol('Kyu', 'Person', '1990-01-01'); await give(kyu, '2nd kyu');
   const dan = await enrol('Dan', 'Person', '1980-01-01'); await give(dan, '1st dan');
-  ok('a kyu grade is refused', /shodan/.test(await refused(() => instructors.set(doug.id, kyu.id, true)) ?? ''));
+  ok('a kyu grade is refused', /dan grade/.test(await refused(() => instructors.set(doug.id, kyu.id, true)) ?? ''));
   ok('a 1st dan is accepted', (await instructors.set(doug.id, dan.id, true)).changed === true);
-  ok('enrolling straight in as an instructor is refused', /shodan/.test(await refused(() => enrol('Straight', 'In', '1980-01-01', 'instructor')) ?? ''));
+  ok('enrolling straight in as an instructor is refused', /dan grade/.test(await refused(() => enrol('Straight', 'In', '1980-01-01', 'instructor')) ?? ''));
 }
 
 console.log('\nSUPPORTERS');

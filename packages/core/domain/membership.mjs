@@ -41,7 +41,7 @@ export const EXEMPT_REASONS = Object.freeze({
 /** How a person who is not charged online has paid. */
 export const MANUAL_METHODS = Object.freeze({
   cash:     'Cash',
-  transfer: 'Bank transfer to the dojo',
+  transfer: 'Bank transfer to the club',
 });
 
 const DATE = /^\d{4}-\d{2}-\d{2}$/;

@@ -6,7 +6,8 @@
  */
 
 import { pool } from '../../infrastructure/postgres/pool.mjs';
-import { region } from '../../infrastructure/region-context.mjs';
+import { region, words } from '../../infrastructure/region-context.mjs';
+const clubWord = () => words().club.toLowerCase();
 import { payeeFor, problemsWithPaymentRequest, problemsWithPayment, KINDS as PAY_KINDS } from '../../core/domain/payments.mjs';
 import { isTestProvider } from '../../infrastructure/payments/providers.mjs';
 import { dueForReminder, reminderText, PERIODS, extendedUntil, standing, feeFor, problemsWithFee, problemsWithExemption, MANUAL_METHODS } from '../../core/domain/membership.mjs';
@@ -252,7 +253,7 @@ export const payments = {
     if (input.received) {
       if (!MANUAL_METHODS[input.received]) throw new Invalid('Choose how it was paid.');
       const may = await one('select has_role_at($1,$2,$3) as ok', [actor, payeeId, REGISTER]);
-      if (!may?.ok) throw new Invalid('This money belongs to the federation, so a dojo cannot record it as received. Ask for it instead.');
+      if (!may?.ok) throw new Invalid(`This money belongs to the federation, so a ${clubWord()} cannot record it as received. Ask for it instead.`);
     }
     const description = input.description || PAY_KINDS[input.kind].label;
     const client = await pool.connect();
@@ -524,7 +525,7 @@ export const autoRenew = {
     const person = await one('select date_of_birth::text as dob from person where id=$1', [personId]);
     const age = person.dob ? Math.floor((Date.parse(today) - Date.parse(person.dob)) / 31_557_600_000) : null;
     if (!feeFor(await feeRows(a.organisation_id), { adultAge: region().adultAge, ageYears: age, period: input.period, today }))
-      throw new Invalid('The dojo has not set a price for that yet. Choose another, or ask the dojo.');
+      throw new Invalid(`The ${clubWord()} has not set a price for that yet. Choose another, or ask the ${clubWord()}.`);
     if (await one(`select 1 x from payment_agreement where affiliation_id=$1 and status <> 'cancelled'`, [affiliationId]))
       throw new Invalid('Automatic renewal is already set up. Stop it first to change it.');
     let saved;
@@ -758,7 +759,7 @@ export const shop = {
   /** Place an order. Prices, sizes and what is on offer are all decided here, from the dojo's range, never from the form. */
   async place(actor, personId, clubId, form) {
     await family.assertMayActFor(actor, personId);
-    if (!await mayShopFor(personId, clubId)) throw new NotFound('Dojo');
+    if (!await mayShopFor(personId, clubId)) throw new NotFound(words().club);
     const range = await q(RANGE, [clubId]);
     const basket = readBasket(form ?? {}, range);
     if (basket.problem) throw new Invalid(basket.problem);
@@ -781,7 +782,7 @@ export const shop = {
   async cancelMine(actor, personId, orderId) {
     await family.assertMayActFor(actor, personId);
     const r = await one(`update shop_order set status='cancelled', updated_at=now() where id=$1 and person_id=$2 and status='placed' returning id`, [orderId, personId]);
-    if (!r) throw new Invalid('That order can no longer be cancelled here. Please ask the dojo.');
+    if (!r) throw new Invalid(`That order can no longer be cancelled here. Please ask the ${clubWord()}.`);
   },
 
   /** The dojo's (or the federation's) side. A dojo: orders, its own products, and the national range to hide or reprice. */

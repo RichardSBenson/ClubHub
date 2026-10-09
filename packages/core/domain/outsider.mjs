@@ -9,7 +9,7 @@ import { normaliseGender, isRealDate } from './people.mjs';
 const EMAIL = /^[^\s@<>,;"]+@[^\s@<>,;"]+\.[^\s@<>,;"]{2,}$/;
 const oneLine = (v, n) => String(v ?? '').replace(/[\u0000-\u001f]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, n);
 
-/** The last eight digits: enough to recognise +64 21 555 1234 and 021 555 1234 as one number. */
+/** The last eight digits: enough to recognise "+64 21 555 1234" and "021 555 1234" (or "+61 4.. / 04..", "+1 ...") as one number, in any country. */
 export function phoneKey(phone) {
   const digits = String(phone ?? '').replace(/\D/g, '');
   return digits.length >= 8 ? digits.slice(-8) : null;

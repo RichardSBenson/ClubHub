@@ -28,6 +28,18 @@ export const regionSettings = ({ me, csrf, org, own, inherited, values = null, d
         <input id="adultAge" name="adultAge" type="number" min="16" max="21" required value="${esc(v.adultAge)}">
         <span class="hint">Under this age a parent or guardian signs for a person, and photographs need their consent.</span></div>
     </div>
+    <h2>Sales tax</h2>
+    <p class="hint">Prices are the amount a member pays, tax included. Leave the rate at 0 if you charge no tax. Receipts and the payments report then show the tax inside each amount.</p>
+    <div class="row">
+      <div><label for="taxName">Name of the tax</label>
+        <input id="taxName" name="taxName" maxlength="20" size="8" value="${esc(v.taxName ?? '')}">
+        <span class="hint">GST, VAT, sales tax…</span></div>
+      <div><label for="taxPercent">Rate (%)</label>
+        <input id="taxPercent" name="taxPercent" type="number" step="0.01" min="0" max="30" size="6" value="${esc(v.taxPercent ?? 0)}"></div>
+      <div><label for="taxNumber">Your tax number</label>
+        <input id="taxNumber" name="taxNumber" maxlength="30" size="14" value="${esc(v.taxNumber ?? '')}">
+        <span class="hint">Shown on receipts. Optional.</span></div>
+    </div>
     <p><button class="btn" type="submit">Save</button></p>
   </form>` });
 };

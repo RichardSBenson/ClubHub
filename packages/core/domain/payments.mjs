@@ -20,7 +20,7 @@ import { money } from './money.mjs';
 import { DEFAULT_CURRENCY, DEFAULT_LOCALE } from './defaults.mjs';
 
 export const KINDS = Object.freeze({
-  dojo_fee:         { label: 'Dojo fees',           payee: 'club' },
+  dojo_fee:         { label: 'Club fees',           payee: 'club' },
   tournament_entry: { label: 'Tournament entry',    payee: 'organiser' },
   kyu_grading:      { label: 'Kyu grading',         payee: 'club' },
   dan_grading:      { label: 'Black belt grading',  payee: 'federation' },

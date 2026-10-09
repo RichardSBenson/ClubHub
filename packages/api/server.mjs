@@ -97,7 +97,7 @@ import { esc } from '../core/domain/html.mjs';
 import { MANAGE, REGISTER, TEACH, WRITE } from '../core/domain/access.mjs';
 import { registerSettingsRoutes } from './routes-settings.mjs';
 import { DEFAULT_TIMEZONE } from '../core/domain/defaults.mjs';
-import { region, setRegion, setEventTypes, eventTypes, withRegion } from '../infrastructure/region-context.mjs';
+import { region, eventTypes, words, withRegion } from '../infrastructure/region-context.mjs';
 
 const SESSION_COOKIE = 'honbu_session';
 const CSRF_COOKIE = 'honbu_csrf';
@@ -1355,7 +1355,7 @@ post('/me/:personId/shop', async (ctx) => {
   try {
     if (!UUID_RE.test(String(f.clubId))) throw new Invalid('Choose a dojo.');
     await shop.place(ctx.me.accountId, ctx.params.personId, f.clubId, f);
-    return back('done', 'Ordered. Your dojo will let you know when it is ready, and you pay them when you collect it.');
+    return back('done', `Ordered. Your ${words().club.toLowerCase()} will let you know when it is ready, and you pay them when you collect it.`);
   } catch (e) { if (e instanceof Invalid) return back('error', e.message); throw e; }
 });
 post('/me/:personId/shop/:orderId/cancel', async (ctx) => {
@@ -2432,7 +2432,7 @@ get('/o/:slug/forms/:formId/status.csv', async (ctx) => {
   const r = await forms.report(ctx.me.accountId, org.id, ctx.params.formId);
   const W = { current: 'Signed', missing: 'Not signed', expired: 'Run out' };
   return ctx.download(fileName(org.slug, `form-${r.form.title}`, new Date().toISOString().slice(0, 10)), 'text/csv',
-    toCsv([{ key: 'number', label: 'Number' }, { key: 'first', label: 'First name' }, { key: 'last', label: 'Last name' }, { key: 'dojo', label: 'Dojo' },
+    toCsv([{ key: 'number', label: 'Number' }, { key: 'first', label: 'First name' }, { key: 'last', label: 'Last name' }, { key: 'dojo', label: words().club },
       { key: 'standing', label: 'Status' }, { key: 'signed', label: 'Signed by' }, { key: 'until', label: 'Until' }],
       r.rows.map((p) => ({ number: p.display_number, first: p.first_name, last: p.last_name, dojo: p.dojo, standing: W[p.standing],
         signed: p.response?.signed_name ?? '', until: p.response?.expires_on ?? '' }))));
@@ -2823,14 +2823,14 @@ function bundledRegisterFiles() {
 
 get('/o/:slug/register-import', async (ctx) => {
   const org = await organisationFor(ctx);
-  if (org.type === 'club') throw new Forbidden('Only a federation or region can import dojo.');
+  if (org.type === 'club') throw new Forbidden('Only a federation or region can import clubs.');
   const bundled = ctx.url.searchParams.get('use') === 'bundled';
   return registerImportScreen(ctx, org, bundled ? { files: bundledRegisterFiles(), bundled: true } : {});
 });
 
 post('/o/:slug/register-import', async (ctx) => {
   const org = await organisationFor(ctx);
-  if (org.type === 'club') throw new Forbidden('Only a federation or region can import dojo.');
+  if (org.type === 'club') throw new Forbidden('Only a federation or region can import clubs.');
   const form = await ctx.form();
   const files = { dojos: form.dojos ?? '', sessions: form.sessions ?? '', instructors: form.instructors ?? '' };
   try {
@@ -4279,7 +4279,7 @@ async function organisationFor(ctx, { toSchedule = false,
 
   if (!ctx.me.scope?.some((o) => o.id === org.id))
     throw new Forbidden(`You do not have access to ${org.name}.`);
-  setRegion(await orgs.regionOf(org.id)); setEventTypes(await orgs.eventTypesOf(org.id));
+  await orgs.enter(org.id);
 
   if (toSchedule && !await mayScheduleAt(ctx, org.id)) {
     throw new Forbidden(
@@ -4755,7 +4755,7 @@ async function handle(req, res) {
       }
     },
   };
-  if (ctx.me?.home?.id) setRegion(await orgs.regionOf(ctx.me.home.id)), setEventTypes(await orgs.eventTypesOf(ctx.me.home.id));
+  if (ctx.me?.home?.id) await orgs.enter(ctx.me.home.id);
 
   // A demonstration session may look at anything it can see and change
   // nothing. Enforced here rather than in each route, so a route written next

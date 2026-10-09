@@ -429,7 +429,7 @@ console.log('\nTHE ENTRIES AS A SPREADSHEET');
   ok('it downloads', r.status === 200, String(r.status));
   const lines = r.html.replace(/^\uFEFF/, '').trim().split('\r\n');
   const head = lines[0].split(',');
-  for (const col of ['Last name', 'First name', 'Age on the day', 'Weight (kg)', 'Height (cm)', 'Grade', 'Years training', 'Dojo'])
+  for (const col of ['Last name', 'First name', 'Age on the day', 'Weight (kg)', 'Height (cm)', 'Grade', 'Years training', 'Club'])
     ok(`column: ${col}`, head.includes(col), lines[0]);
   const n = (await q('select count(*)::int n from event_entry e join event ev on ev.id = e.event_id where ev.slug = $1', ['2026-kokoro-cup']))[0].n;
   ok('one row for every entry', lines.length - 1 === n, `${lines.length - 1} rows, ${n} entries`);

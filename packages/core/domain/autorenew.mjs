@@ -21,7 +21,7 @@ export function problemsWithSetup({ method, period, agreed } = {}) {
   const out = [];
   if (!Object.hasOwn(METHODS, method)) out.push('Choose how to pay.');
   if (!PERIOD_CHOICES.includes(period)) out.push('Choose how often to renew.');
-  if (!agreed) out.push('Please tick that you agree to the dojo charging you automatically.');
+  if (!agreed) out.push('Please tick that you agree to the club charging you automatically.');
   return out;
 }
 

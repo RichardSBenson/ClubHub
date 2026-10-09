@@ -8,9 +8,10 @@
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { resolveRegion } from '../core/domain/region.mjs';
 import { resolveEventTypes } from '../core/domain/event-types.mjs';
+import { NEUTRAL_VOCABULARY } from '../core/domain/founding.mjs';
 
 const store = new AsyncLocalStorage();
-const fresh = (stored = {}, types = null) => ({ region: resolveRegion(stored), eventTypes: resolveEventTypes(types) });
+const fresh = (stored = {}, types = null, words = null) => ({ region: resolveRegion(stored), eventTypes: resolveEventTypes(types), words: { ...NEUTRAL_VOCABULARY, ...(words ?? {}) } });
 
 /** Run `fn` with its own settings, starting from the platform defaults. */
 export const withRegion = (fn, stored = {}) => store.run(fresh(stored), fn);
@@ -27,9 +28,15 @@ export const setEventTypes = (stored) => { const s = store.getStore(); if (s) s.
 /** The kinds of event this organisation runs. */
 export const eventTypes = () => store.getStore()?.eventTypes ?? resolveEventTypes(null);
 
+/** Say what this organisation calls things (its club, grade, instructor). */
+export const setWords = (words) => { const s = store.getStore(); if (s) s.words = { ...NEUTRAL_VOCABULARY, ...(words ?? {}) }; };
+
+/** The words in use: { club, clubPlural, grade, grading, instructor }. Neutral unless the organisation chose its own. */
+export const words = () => store.getStore()?.words ?? NEUTRAL_VOCABULARY;
+
 /** For a script that has no request to wrap (the site build): apply these settings to everything that follows. */
-export const enterRegion = (stored, types = null) => {
+export const enterRegion = (stored, types = null, vocab = null) => {
   const s = store.getStore();
-  if (s) { s.region = resolveRegion(stored); s.eventTypes = resolveEventTypes(types); }
-  else store.enterWith(fresh(stored, types));
+  if (s) { s.region = resolveRegion(stored); s.eventTypes = resolveEventTypes(types); s.words = { ...NEUTRAL_VOCABULARY, ...(vocab ?? {}) }; }
+  else store.enterWith(fresh(stored, types, vocab));
 };

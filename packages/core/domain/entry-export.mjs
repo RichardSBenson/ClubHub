@@ -21,7 +21,7 @@ export const ENTRY_COLUMNS = Object.freeze([
   { key: 'grade', label: 'Grade' },
   { key: 'experience', label: 'Years training' },
   { key: 'prior', label: 'Previous tournaments' },
-  { key: 'dojo', label: 'Dojo' },
+  { key: 'dojo', label: 'Club' },
   { key: 'disciplines', label: 'Disciplines' },
   { key: 'divisions', label: 'Divisions' },
   { key: 'status', label: 'Status' },

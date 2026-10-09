@@ -4,7 +4,7 @@
  * Four rules the federation holds to, written once so a form, a spreadsheet
  * import and a screen all judge them the same way:
  *
- *  1. Only a shodan (1st dan) or above can be an instructor.
+ *  1. Only someone who holds a dan grade (a black belt) can be an instructor.
  *  2. A supporter is not a member. Supporters are friends of the club: they
  *     have no membership, no fees, no standing.
  *  3. A child is under a parent or guardian: a person under eighteen has to
@@ -25,7 +25,7 @@ export const isSupporterRole = (role) => role === 'supporter';
 /** Rule 1. `grade` is { is_dan } or null (no grade held). */
 export function whyNotInstructor(grade) {
   if (grade?.is_dan) return null;
-  return 'Only a shodan (1st dan) or above can be an instructor.'
+  return 'Only someone who holds a dan grade (a black belt) can be an instructor.'
     + (grade ? ` ${grade.label ?? 'Their current grade'} is below that.` : ' They do not hold a dan grade on the record.');
 }
 

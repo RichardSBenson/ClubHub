@@ -4,7 +4,7 @@ import { describe as auditDescribe, weight as auditWeight }
 import { highlight as searchHighlight, linkTo as searchLinkTo }
   from '../content/search.mjs';
 import { REASON_WORDS } from '../core/domain/repeat-entry.mjs';
-import { region, eventTypes } from '../infrastructure/region-context.mjs';
+import { region, eventTypes, words } from '../infrastructure/region-context.mjs';
 import { nextGradingWords } from '../core/domain/next-grading.mjs';
 import { photoNeedsConsent } from '../core/domain/documents.mjs';
 import { ageOn as personAgeOn } from '../core/domain/people.mjs';
@@ -49,8 +49,12 @@ const VOCABULARY = (() => {
 })();
 
 import { esc } from '../core/domain/html.mjs';
+const clubWord = () => words().club.toLowerCase();
+const ClubWord = () => words().club;
 import { DEFAULT_TIMEZONE } from '../core/domain/defaults.mjs';
 import { money as cents, dollars as money } from '../core/domain/money.mjs';
+import { taxLine } from '../core/domain/tax.mjs';
+const taxNote = (amount, currency) => { const t = taxLine(amount, region(), (c) => cents(c, currency)); return t ? ` <span class="muted">${esc(t)}</span>` : ''; };
 
 const V = VOCABULARY;
 
@@ -521,7 +525,7 @@ export const roster = ({ me, csrf, org, roster, total = null, canRegister = fals
       <a id="pickall-link" href="${here}?${esc(q({ all: '1' }))}">Select everyone shown (${roster.length})</a></p>` : ''}
   <table>
     <thead><tr>${canManage ? '<th></th>' : ''}<th>Name</th><th>Grade</th><th class="hide-sm">Next grading</th><th class="hide-sm">Age</th>
-      ${withDojo ? '<th class="hide-sm">Dojo</th>' : ''}<th>${canManage ? 'Instructor' : 'Role'}</th><th>Paid until</th></tr></thead>
+      ${withDojo ? `<th class="hide-sm">${ClubWord()}</th>` : ''}<th>${canManage ? 'Instructor' : 'Role'}</th><th>Paid until</th></tr></thead>
     <tbody>${roster.map((p) => `<tr>
       ${canManage ? `<td>${p.is_dan || p.isInstructor ? `<input class="pick" type="checkbox" name="pick_${esc(p.id)}" aria-label="Choose ${esc(p.first_name)} ${esc(p.last_name)}"${filter.all ? ' checked' : ''}>` : ''}</td>` : ''}
       <td><a href="/p/${p.id}">${esc(p.first_name)} ${esc(p.last_name)}</a>
@@ -537,7 +541,7 @@ export const roster = ({ me, csrf, org, roster, total = null, canRegister = fals
   ${canManage ? `<p style="margin-top:12px"><button class="btn" type="submit" name="action" value="show">Make instructors and show on the website</button>
       <button class="btn quiet" type="submit" name="action" value="role">Make instructors only</button>
       <button class="btn quiet" type="submit" name="action" value="off">Take off as instructors</button></p>
-    <p class="hint">Tick the people who teach. They are shown on their dojo's website once they are ${region().adultAge} or over, their first aid, police vetting and child
+    <p class="hint">Tick the people who teach. They are shown on their ${clubWord()}'s website once they are ${region().adultAge} or over, their first aid, police vetting and child
       protection are current, and they have written a few words about themselves (on their profile, in the <em>Write-up</em> box under the photograph); anyone not ready is made an instructor and
       the screen says what is missing. Showing puts their name, grade and photograph on a page anybody can read, so only do it for people who have agreed.</p>
   </form>
@@ -577,10 +581,10 @@ export const person = ({ me, csrf, person, history, affiliations, eligibility,
   </form>` : ''}
 
   ${instructorSite ? `<div class="card" style="margin:12px 0"><h3 style="margin-top:0">On the ${esc(instructorSite.name)} website</h3>
-    <p>${instructorSite.published ? '<span class="tag ok">Shown</span> on the dojo page and the Instructors page.' : '<span class="tag wait">Not shown yet</span> The dojo page says "Introductions coming soon".'}</p>
+    <p>${instructorSite.published ? `<span class="tag ok">Shown</span> on the ${clubWord()} page and the Instructors page.` : `<span class="tag wait">Not shown yet</span> The ${clubWord()} page says "Introductions coming soon".`}</p>
     ${canManage ? `<p><a class="btn" href="/o/${esc(instructorSite.slug)}/instructors">${instructorSite.published ? 'See instructors on the roll' : 'Show them on the website'}</a></p>
     <p class="hint">On the roll, tick them and press <strong>Make instructors and show on the website</strong>. They are shown once they have a write-up and their first aid, police vetting and child protection are current.</p>`
-      : '<p class="hint">An owner or administrator of the dojo (or the federation) switches this on, under Instructors.</p>'}</div>` : ''}
+      : `<p class="hint">An owner or administrator of the ${clubWord()} (or the federation) switches this on, under Instructors.</p>`}</div>` : ''}
 
   ${recognisable.length ? `<form method="post" action="/p/${esc(person.id)}/recognise-grade" class="card" style="margin:12px 0">
     <input type="hidden" name="_csrf" value="${esc(csrf ?? '')}">
@@ -2996,26 +3000,26 @@ export const registerImportScreen = ({ me, csrf, org, files = {}, report = null,
     <p class="muted">${hint}</p>
     <textarea id="${id}" name="${id}" rows="6" spellcheck="false" style="font-family:monospace">${esc(files[id] ?? '')}</textarea>`;
   const list = (rows) => rows.length ? `<ul>${rows.map((r) => `<li>${r}</li>`).join('')}</ul>` : '';
-  return page({ title: `Import dojo — ${org.name}`, me, csrf, body: `
-  <h1>Import dojo, class times and instructors</h1>
+  return page({ title: `Import ${clubWord()}s — ${org.name}`, me, csrf, body: `
+  <h1>Import ${clubWord()}s, class times and instructors</h1>
   <p class="sub">${esc(org.name)}</p>
   <p><a href="/o/${esc(org.slug)}/clubs">Back to clubs</a></p>
   ${error ? `<div class="bad">${esc(error)}</div>` : ''}
   ${report ? `<div class="${saved ? 'good' : 'note'}"><strong>${saved ? 'Saved.' : 'Preview. Nothing is saved yet.'}</strong>
-    ${report.updated} dojo ${saved ? 'updated' : 'would be updated'}, ${report.published} ${saved ? 'published' : 'would be published'}.
+    ${report.updated} ${clubWord()}s ${saved ? 'updated' : 'would be updated'}, ${report.published} ${saved ? 'published' : 'would be published'}.
     ${report.people.added || report.people.instructors ? `${report.people.added} people ${saved ? 'added' : 'would be added'}, ${report.people.instructors} ${saved ? 'made' : 'would be made'} instructors, ${report.people.graded} grades recorded.` : ''}
-    ${list(report.added.map((n) => `${esc(n)} ${saved ? 'was' : 'would be'} added as a new dojo`))}
+    ${list(report.added.map((n) => `${esc(n)} ${saved ? 'was' : 'would be'} added as a new ${clubWord()}`))}
     ${report.held.length ? `<p>Held back, not published, because something a visitor needs is missing:</p>${list(report.held.map((h) => `${esc(h.name)} needs ${esc(h.missing.join(', '))}`))}` : ''}
     ${list(report.notes.map(esc))}
   </div>` : ''}
   ${report || error || (files.dojos ?? '') ? '' : `<p><a class="btn" href="/o/${esc(org.slug)}/register-import?use=bundled">Fill the boxes from the files that came with this version</a></p>`}
   ${bundled ? '<div class="note">The boxes are filled from the files that came with this version. Press Preview to see what would happen. Nothing is saved yet.</div>' : ''}
   <p>Paste the contents of each CSV file, or use the button above. Blank means unknown and is never filled in for you.
-  Importing twice does not duplicate anything. This puts instructors on their dojo's roll; showing them on the
+  Importing twice does not duplicate anything. This puts instructors on their ${clubWord()}'s roll; showing them on the
   website still needs their own consent, a write-up and current checks.</p>
   <form method="post" action="/o/${esc(org.slug)}/register-import">
     <input type="hidden" name="_csrf" value="${esc(csrf ?? '')}">
-    ${box('dojos', 'Dojo', 'Columns: slug, name, venue_name, address_line, suburb, city, postcode, latitude, longitude, phone, email, directions, blurb, who_trains, instructor_name, instructor_grade, publish (and optionally country, timezone)')}
+    ${box('dojos', ClubWord(), 'Columns: slug, name, venue_name, address_line, suburb, city, postcode, latitude, longitude, phone, email, directions, blurb, who_trains, instructor_name, instructor_grade, publish (and optionally country, timezone)')}
     ${box('sessions', 'Class times', 'Columns: slug, label, weekday, starts, ends, min_age, max_age')}
     ${box('instructors', 'Instructors', 'Columns: slug, first_name, last_name, dan, distinct')}
     <div class="actions">
@@ -3043,13 +3047,13 @@ export const clubsScreen = ({ me, csrf, org, clubs = [], values = {}, error,
   ${added ? `<div class="good"><strong>${esc(added.name)}</strong> is added.
     <a href="/o/${esc(added.slug)}/roster">Open it</a>.
     It has no page on the website yet — the club asks for that from its own
-    screen and you approve it under Dojo pages.
+    screen and you approve it under ${ClubWord()} pages.
     ${adminName ? `<br>${esc(adminName)} can run it. ${link
       ? `Give them this sign-in link (it works once, for ${esc(String(linkExpires ?? 15))}
          minutes, and is not shown again):<br><code style="word-break:break-all">${esc(link)}</code>`
       : ''}` : ''}</div>` : ''}
 
-  <p><a href="/o/${esc(org.slug)}/register-import">Import dojo, class times and instructors from CSV files</a></p>
+  <p><a href="/o/${esc(org.slug)}/register-import">Import ${clubWord()}s, class times and instructors from CSV files</a></p>
   <h2>Add a club</h2>
   <form method="post" action="/o/${esc(org.slug)}/clubs/new">
     <input type="hidden" name="_csrf" value="${esc(csrf ?? '')}">
@@ -3203,8 +3207,8 @@ export const myPerson = ({ me, csrf, how, person, private: priv = {}, grade, mem
 
   ${instructorSite && mine ? `<h2>Instructor</h2>
   <div class="card"><p>You are an instructor at ${esc(instructorSite.name)}.
-    ${instructorSite.published ? '<span class="tag ok">Shown on the dojo website</span>' : '<span class="tag wait">Not on the dojo website yet</span>'}</p>
-    ${instructorSite.published ? '' : '<p class="hint">Appearing on the website is the dojo\'s choice and yours: an owner or administrator of the dojo (or the federation) switches it on from the Instructors screen, once they have your photograph and a few words. Add your photograph below, and ask them.</p>'}</div>
+    ${instructorSite.published ? `<span class="tag ok">Shown on the ${clubWord()} website</span>` : `<span class="tag wait">Not on the ${clubWord()} website yet</span>`}</p>
+    ${instructorSite.published ? '' : `<p class="hint">Appearing on the website is the ${clubWord()}'s choice and yours: an owner or administrator of the ${clubWord()} (or the federation) switches it on from the Instructors screen, once they have your photograph and a few words. Add your photograph below, and ask them.</p>`}</div>
   ` : ''}
   <h2>Photograph</h2>
   <form method="post" action="/p/${esc(person.id)}/photo" enctype="multipart/form-data" class="card" style="margin:12px 0">
@@ -3571,7 +3575,7 @@ export const paymentsScreen = ({ me, csrf, org, rows = [], totals = [], methods 
   return page({ title: `${org.name} — payments`, me, csrf, body: `
   <h1>Payments</h1>
   <p class="sub">What ${esc(org.name)} has been paid. Money goes to the organisation it is for:
-    dojo fees, kyu gradings, uniforms and equipment to the dojo; tournament entries to whoever runs
+    ${clubWord()} fees, kyu gradings, uniforms and equipment to the ${clubWord()}; tournament entries to whoever runs
     the tournament; black belt gradings to the federation.</p>
   ${done ? `<div class="good">${esc(done)}</div>` : ''}
   ${error ? `<div class="bad">${esc(error)}</div>` : ''}
@@ -3614,7 +3618,7 @@ export const paymentsScreen = ({ me, csrf, org, rows = [], totals = [], methods 
       <td>${esc(new Date(r.created_at).toISOString().slice(0, 10))}</td>
       <td>${esc(r.person_name ?? '—')}</td>
       <td>${r.lines.map((l) => esc(l.description)).join('<br>')}</td>
-      <td>${esc(cents(r.amount_cents, r.currency))}</td>
+      <td>${esc(cents(r.amount_cents, r.currency))}${r.status === 'succeeded' ? taxNote(r.amount_cents, r.currency) : ''}</td>
       <td>${payStatus(r.status)}${r.method && r.status === 'succeeded'
           ? ` <span class="muted">· ${esc((MANUAL_METHODS[r.method] ?? FEE_METHOD_LABEL[r.method] ?? r.method).toLowerCase())}${
               r.receipt_no ? ` · ${esc(r.receipt_no)}` : ''}</span>` : ''}</td>
@@ -4430,7 +4434,7 @@ export const myDocuments = ({ me, csrf, how, person, certificates = [], consents
 
   <h2>Receipts</h2>
   ${receipts.length ? `<table><tbody>${receipts.map((r) => `<tr><td>${esc(r.settled_at ? when(r.settled_at) : '')}</td><td>${esc(r.description ?? '')}</td>
-    <td>${esc(cents(r.amount_cents, r.currency))}</td><td class="muted">${esc(r.receipt_no ?? '')} · ${esc(r.payee)}</td></tr>`).join('')}</tbody></table>`
+    <td>${esc(cents(r.amount_cents, r.currency))}${taxNote(r.amount_cents, r.currency)}</td><td class="muted">${esc(r.receipt_no ?? '')} · ${esc(r.payee)}</td></tr>`).join('')}</tbody></table>`
     : '<p class="muted">No payments yet.</p>'}` });
 
 export const myClasses = ({ me, csrf, groups = [] }) => page({
@@ -4960,7 +4964,7 @@ export const formStatus = ({ me, csrf, org, form: f, rows = [], counts = {}, fil
   <h1>Who has signed</h1>
   <p class="sub">${counts.current} signed · ${counts.missing} not yet · ${counts.expired} run out · ${counts.total} asked.
     <a href="${base}/status?filter=todo">Only those to chase</a> · <a href="${base}/status">Everyone</a> · <a href="${base}/status.csv">Download CSV</a></p>
-  <table><thead><tr><th>Name</th><th>Dojo</th><th>Status</th><th>Signed by</th><th>Until</th></tr></thead><tbody>
+  <table><thead><tr><th>Name</th><th>${ClubWord()}</th><th>Status</th><th>Signed by</th><th>Until</th></tr></thead><tbody>
   ${rows.filter((r) => filter !== 'todo' || r.standing !== 'current').map((r) => { const [w, c] = words[r.standing]; return `<tr>
     <td><a href="/p/${esc(r.person_id)}">${esc(r.last_name)}, ${esc(r.first_name)}</a>${r.response ? ` <a class="muted" href="${base}/people/${esc(r.person_id)}">answers</a>` : ''}</td><td>${esc(r.dojo)}</td>
     <td><span class="tag ${c}">${w}</span></td><td>${esc(r.response?.signed_name ?? '')}</td><td>${esc(r.response?.expires_on ?? '')}</td></tr>`; }).join('')}
@@ -5014,12 +5018,12 @@ export const autoRenewScreen = ({ me, csrf, person, memberships = [], test = fal
   return page({ title: `Automatic renewal — ${person.first_name}`, me, csrf, body: `
   <p><a href="/me/payments">&larr; Payments</a></p>
   <h1>Automatic renewal for ${esc(person.first_name)}</h1>
-  <p class="sub">The dojo charges your saved card or bank a few days before fees run out, so membership never lapses. You can stop it at any time with one press.</p>
+  <p class="sub">The ${clubWord()} charges your saved card or bank a few days before fees run out, so membership never lapses. You can stop it at any time with one press.</p>
   ${testBanner(test)}
   ${done ? `<div class="good">${esc(done)}</div>` : ''}${error ? `<div class="bad">${esc(error)}</div>` : ''}
   ${memberships.length ? memberships.map((m) => `<div class="card"><h2>${esc(m.dojo)}</h2>
     <p class="muted">Fees run to ${esc(m.paid_until ?? 'not paid yet')}</p>
-    ${m.fee_exempt ? '<p>You are not charged by this dojo.</p>'
+    ${m.fee_exempt ? `<p>You are not charged by this ${clubWord()}.</p>`
     : m.agreement ? `<p><span class="tag ${m.agreement.status === 'paused' ? 'bad' : 'ok'}">${m.agreement.status === 'paused' ? 'Stopped' : 'On'}</span>
       ${esc(FEE_PERIODS[m.agreement.period]?.label ?? m.agreement.period)} with ${esc(m.agreement.label)}</p>
       ${m.agreement.status === 'paused' ? '<p class="bad">The last payments did not go through, so this has stopped. Stop it here, then set it up again with another card — or pay from My payments.</p>'
@@ -5031,7 +5035,7 @@ export const autoRenewScreen = ({ me, csrf, person, memberships = [], test = fal
       <p><label>Card number (we never keep it — the payment provider does)<br><input name="card" inputmode="numeric" autocomplete="cc-number" maxlength="23"></label></p>
       <p><label><input type="checkbox" name="agreed"> I agree that ${esc(m.dojo)} may charge this automatically each time fees are due, at the price shown. I can stop it at any time.</label></p>
       <button class="btn" type="submit">Turn on automatic renewal</button></form>`
-    : '<p class="muted">This dojo has not set prices for automatic renewal yet.</p>'}</div>`).join('') : '<p class="muted">No club memberships to renew.</p>'}` });
+    : `<p class="muted">This ${clubWord()} has not set prices for automatic renewal yet.</p>`}</div>`).join('') : '<p class="muted">No club memberships to renew.</p>'}` });
 };
 
 export const bookScreen = ({ me, csrf, person, clubs = [], done, error }) => {
@@ -5172,7 +5176,7 @@ export const shopScreen = ({ me, csrf, person, clubs = [], done, error }) => {
   return page({ title: `Shop — ${person.first_name}`, me, csrf, body: `
   <p><a href="/me">&larr; Home</a></p>
   <h1>Shop</h1>
-  <p class="sub">Gear for ${esc(person.first_name)}, ordered through the dojo. You pay the dojo when you collect it.</p>
+  <p class="sub">Gear for ${esc(person.first_name)}, ordered through the ${clubWord()}. You pay the ${clubWord()} when you collect it.</p>
   ${done ? `<div class="good">${esc(done)}</div>` : ''}${error ? `<div class="bad">${esc(error)}</div>` : ''}
   ${clubs.map(({ club, range, orders }) => `<h2>${esc(club.name)}</h2>
   ${range.length ? `<form method="post" action="${base}">${tok}<input type="hidden" name="clubId" value="${esc(club.id)}">
@@ -5181,7 +5185,7 @@ export const shopScreen = ({ me, csrf, person, clubs = [], done, error }) => {
       <td>${esc(cents(p.price_cents, p.currency))}</td>
       <td>${p.sizes.length ? `<select name="size_${esc(p.id)}" aria-label="Size for ${esc(p.name)}"><option value="">Choose</option>${p.sizes.map((s) => `<option>${esc(s)}</option>`).join('')}</select>` : '<span class="muted">—</span>'}</td>
       <td><input name="qty_${esc(p.id)}" inputmode="numeric" maxlength="2" size="3" placeholder="0" aria-label="How many ${esc(p.name)}"></td></tr>`).join('')}</tbody></table>
-    <p><label>A note for the dojo <span class="muted">(optional)</span><br><input name="note" maxlength="300" size="50"></label></p>
+    <p><label>A note for the ${clubWord()} <span class="muted">(optional)</span><br><input name="note" maxlength="300" size="50"></label></p>
     <button class="btn" type="submit">Place order</button></form>`
     : `<p class="muted">${esc(club.name)} has not put anything in its shop yet.</p>`}
   ${orders.length ? `<h3>Your orders</h3><table><tbody>${orders.map((o) => `<tr>
@@ -5194,10 +5198,10 @@ export const shopScreen = ({ me, csrf, person, clubs = [], done, error }) => {
 /** Shown to someone who is not signed in. */
 export const shopPublic = ({ me, csrf }) => page({ title: 'Shop', me, csrf, body: `
   <h1>Shop</h1>
-  <p class="lede">Gi, gloves, shin pads and tournament tee shirts, ordered through your own dojo.</p>
-  <p>Each dojo has its own range and its own prices, so sign in and the shop shows you what <em>your</em> dojo offers.</p>
+  <p class="lede">Gi, gloves, shin pads and tournament tee shirts, ordered through your own ${clubWord()}.</p>
+  <p>Each ${clubWord()} has its own range and its own prices, so sign in and the shop shows you what <em>your</em> ${clubWord()} offers.</p>
   <p><a class="btn" href="/signin">Sign in to the shop</a></p>
-  <p class="muted">Not a member yet? <a href="/find-a-dojo">Find your nearest dojo</a>.</p>` });
+  <p class="muted">Not a member yet? <a href="/find-a-dojo">Find your nearest ${clubWord()}</a>.</p>` });
 
 /** The dojo's (or federation's) side: orders, its own items, and the national range it can hide or reprice. */
 export const shopAdminScreen = ({ me, csrf, org, isClub, own = [], national = [], orders = [], done, error }) => {
@@ -5211,8 +5215,8 @@ export const shopAdminScreen = ({ me, csrf, org, isClub, own = [], national = []
   return page({ title: `${org.name} — shop`, me, csrf, body: `
   <h1>Shop</h1>
   <p class="sub">${isClub
-    ? 'Members of this dojo see the national range and the items you add here, and nothing from any other dojo. You collect the money when they collect the gear.'
-    : 'Items you add here are the national range. Every dojo can offer them, hide the ones it does not want, and set its own price.'}</p>
+    ? `Members of this ${clubWord()} see the national range and the items you add here, and nothing from any other ${clubWord()}. You collect the money when they collect the gear.`
+    : `Items you add here are the national range. Every ${clubWord()} can offer them, hide the ones it does not want, and set its own price.`}</p>
   ${done ? `<div class="good">${esc(done)}</div>` : ''}${error ? `<div class="bad">${esc(error)}</div>` : ''}
   ${isClub ? `<h2>Orders</h2>${orders.length ? `<table><thead><tr><th>When</th><th>Who</th><th>Order</th><th>Total</th><th>Status</th></tr></thead><tbody>${orders.map((o) => `<tr>
     <td>${esc(when(o.created_at))}</td><td><a href="/p/${esc(o.person_id)}">${esc(o.first_name)} ${esc(o.last_name)}</a></td>

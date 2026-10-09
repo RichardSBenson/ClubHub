@@ -6,6 +6,7 @@
  * Anything not set falls back to the platform defaults in defaults.mjs.
  */
 import { DEFAULT_CURRENCY, DEFAULT_LOCALE, ADULT_AGE } from './defaults.mjs';
+import { problemsWithTax } from './tax.mjs';
 
 export const ADULT_AGE_RANGE = Object.freeze([16, 21]);
 
@@ -16,12 +17,15 @@ export function resolveRegion(stored = {}) {
     currency: s.currency || DEFAULT_CURRENCY,
     locale: s.locale || DEFAULT_LOCALE,
     adultAge: Number.isInteger(s.adultAge) ? s.adultAge : ADULT_AGE,
+    taxName: String(s.taxName ?? ''),
+    taxPercent: Number(s.taxPercent) > 0 ? Number(s.taxPercent) : 0,
+    taxNumber: String(s.taxNumber ?? ''),
   });
 }
 
 /** What may be saved. Returns reasons (text); an empty list means fine. */
-export function problemsWithRegion({ currency, locale, adultAge } = {}) {
-  const out = [];
+export function problemsWithRegion({ currency, locale, adultAge, taxName, taxPercent, taxNumber } = {}) {
+  const out = problemsWithTax({ taxName, taxPercent, taxNumber });
   if (!/^[A-Z]{3}$/.test(String(currency ?? ''))) out.push('Currency is a three-letter code, like NZD, AUD, USD or GBP.');
   else {
     try { new Intl.NumberFormat('en', { style: 'currency', currency }); } // arch-ok: validating a code, not formatting
@@ -41,4 +45,7 @@ export const readRegionForm = (f = {}) => ({
   currency: String(f.currency ?? '').trim().toUpperCase(),
   locale: String(f.locale ?? '').trim(),
   adultAge: Number.parseInt(String(f.adultAge ?? '').trim(), 10),
+  taxName: String(f.taxName ?? '').trim(),
+  taxPercent: Number(String(f.taxPercent ?? '').trim() || 0),
+  taxNumber: String(f.taxNumber ?? '').trim(),
 });

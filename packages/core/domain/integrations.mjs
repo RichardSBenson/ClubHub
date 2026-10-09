@@ -11,7 +11,7 @@
  *  - We never call addresses inside our own network.
  */
 export const SCOPES = Object.freeze({
-  'organisations:read': 'The organisations (federation, regions, dojos)',
+  'organisations:read': 'The organisations (federation, regions, clubs)',
   'members:read': 'Members: names, numbers, grades, membership status',
   'events:read': 'Events and their entries',
 });
