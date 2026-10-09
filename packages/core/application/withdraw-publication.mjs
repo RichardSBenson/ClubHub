@@ -8,6 +8,7 @@
 
 import { publicationWithdrawn } from '../domain/publishing.mjs';
 import { MANAGE } from '../domain/access.mjs';
+import { DEFAULT_LOCALE } from '../domain/defaults.mjs';
 import { requirePort, Refused, NotPermitted,
          PUBLICATION_REPOSITORY, ENTRY_REPOSITORY, AUTHORISATION,
          EVENT_BUS, CLOCK } from './ports.mjs';
@@ -23,7 +24,7 @@ export class WithdrawPublication {
     this.clock = requirePort(clock, CLOCK);
   }
 
-  async execute({ actorId, entryId, locale = 'en-NZ' }) {
+  async execute({ actorId, entryId, locale = DEFAULT_LOCALE }) {
     const live = await this.publications.liveFor(entryId, locale);
     if (!live) throw new Refused('Nothing is live for that entry');
 

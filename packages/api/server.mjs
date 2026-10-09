@@ -95,7 +95,7 @@ import * as R from '../site/render.mjs';
 import { requestRebuild } from '../infrastructure/publishing/rebuild.mjs';
 import { esc } from '../core/domain/html.mjs';
 import { MANAGE, REGISTER, TEACH, WRITE } from '../core/domain/access.mjs';
-import { DEFAULT_TIMEZONE } from '../core/domain/time.mjs';
+import { DEFAULT_TIMEZONE, DEFAULT_CURRENCY, ADULT_AGE } from '../core/domain/defaults.mjs';
 
 const SESSION_COOKIE = 'honbu_session';
 const CSRF_COOKIE = 'honbu_csrf';
@@ -402,13 +402,13 @@ get('/o/:slug/roster', async (ctx) => {
   const shown = all.filter((r) => {
     if (filter.grade === 'dan' && !r.is_dan) return false;
     if (filter.grade !== 'all' && filter.grade !== 'dan' && r.grade_id !== filter.grade) return false;
-    if (filter.band === 'junior' && !(r.age != null && r.age < 18)) return false;
-    if (filter.band === 'senior' && !(r.age == null || r.age >= 18)) return false;
+    if (filter.band === 'junior' && !(r.age != null && r.age < ADULT_AGE)) return false;
+    if (filter.band === 'senior' && !(r.age == null || r.age >= ADULT_AGE)) return false;
     if (filter.show === 'instructors' && !r.isInstructor) return false;
     if (filter.show === 'due' && !r.nextGrading?.due) return false;
     return true;
   }).map((r) => ({ ...r, instructor: states.get(r.id) ?? null }));
-  const unlinked = await family.withoutGuardian(all.filter((r) => r.age != null && r.age < 18).map((r) => r.id));
+  const unlinked = await family.withoutGuardian(all.filter((r) => r.age != null && r.age < ADULT_AGE).map((r) => r.id));
   for (const r of shown) r.noGuardian = unlinked.has(r.id);
   const unsignedDecl = await declarations.unsignedAmong(org.id, all.filter((r) => r.role !== 'supporter').map((r) => r.id));
   for (const r of shown) r.noDeclaration = unsignedDecl.has(r.id);
@@ -1081,7 +1081,7 @@ async function memberEntryPlan(ctx, form = {}, { fromLast = false } = {}) {
 
   const plan = { how, open, event, setup, mine, eventDate, relationship, competitor, need,
            chosen, weightKg, heightCm, placements, amountCents, problems, form, last, repeat,
-           experience, outsider, grades, claimedGrade: outsider ? gradeBy(form.grade) : null, currency: setup.prices[0]?.currency ?? 'NZD' };
+           experience, outsider, grades, claimedGrade: outsider ? gradeBy(form.grade) : null, currency: setup.prices[0]?.currency ?? DEFAULT_CURRENCY };
   if (repeat) plan.quick = decideQuick({ repeat, last, placements, ready, problems });
   return plan;
 }
@@ -3922,7 +3922,7 @@ post('/o/:slug/events/:eventSlug/enter', async (ctx) => {
       .filter(([k]) => k !== '_csrf' && k !== 'confirm'));
     return ctx.send(200, V.entryPreview({
       me: ctx.me, org, event, csrf: ctx.csrf, rows, text, total,
-      currency: setup.prices[0]?.currency ?? 'NZD' }));
+      currency: setup.prices[0]?.currency ?? DEFAULT_CURRENCY }));
   }
 
   if (!ready.length) return backToForm('Nobody is ready to enter yet.');
@@ -3935,7 +3935,7 @@ post('/o/:slug/events/:eventSlug/enter', async (ctx) => {
         personId: r.personId, enteredForOrg: org.id,
         weightKg: r.weightKg, heightCm: r.heightCm, clubName: org.name,
         amountCents: r.amountCents,
-        currency: setup.prices[0]?.currency ?? 'NZD',
+        currency: setup.prices[0]?.currency ?? DEFAULT_CURRENCY,
         placements: r.placements.map((p) => ({
           disciplineId: p.discipline.id, divisionId: p.division?.id ?? null,
           placedBy: 'calculated',

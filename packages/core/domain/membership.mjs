@@ -16,6 +16,8 @@
  * asked for money.
  */
 
+import { ADULT_AGE } from './defaults.mjs';
+
 export const PERIODS = Object.freeze({
   annual:  { label: 'Per year',  months: 12 },
   term:    { label: 'Per term',  months: 3 },
@@ -83,7 +85,7 @@ export const STANDING_WORDS = Object.freeze({
 
 /** Which of the dojo's prices applies to this person for this period. */
 export function feeFor(schedules, { ageYears, period, today }) {
-  const wanted = ageYears != null && ageYears < 18 ? 'junior' : 'adult';
+  const wanted = ageYears != null && ageYears < ADULT_AGE ? 'junior' : 'adult';
   const live = schedules.filter((f) => f.period === period
     && f.effective_from <= today && (!f.effective_to || f.effective_to >= today));
   for (const category of [wanted, 'member']) {

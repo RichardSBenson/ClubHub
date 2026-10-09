@@ -7,7 +7,9 @@
  */
 
 /** A child cannot sign for themselves. Age unknown is treated as an adult, as the rest of the register does. */
-export const needsGuardian = (age) => age != null && age < 18;
+import { ADULT_AGE } from './defaults.mjs';
+
+export const needsGuardian = (age) => age != null && age < ADULT_AGE;
 
 /** none: nothing published. unsigned: published, not yet signed. signed: signed this version. */
 export const stateOf = ({ current, signed }) => !current ? 'none' : signed ? 'signed' : 'unsigned';

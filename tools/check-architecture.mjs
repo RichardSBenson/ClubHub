@@ -4,7 +4,8 @@
  * These are the mistakes that crept in once and must not again:
  *   1. A helper defined a second time (esc, money, addMonths) instead of imported.
  *   2. The same role list typed out again instead of imported from access.mjs.
- *   3. The default timezone typed out instead of DEFAULT_TIMEZONE.
+ *   3. A default (timezone, locale, currency, age of majority) typed out instead of imported from defaults.mjs.
+ *      Hard-coded addresses, deployment URLs and secrets are refused too.
  *   4. A route (server.mjs) or a screen (views.mjs) talking to the database itself.
  *   5. The domain reading the clock, so its answers change with the time of day.
  *   6. The same block of code pasted into two files.
@@ -37,7 +38,7 @@ const SINGLE = [
   { re: /^\s*(export\s+)?(const|function)\s+(money|tidyMoney)\b|Intl\.NumberFormat\([^)]*currency/, owner: 'core/domain/money.mjs', what: 'a money formatter (import money / dollars / tidyMoney)' },
   { re: /^\s*(export\s+)?(const|function)\s+addMonths\b/, owner: 'core/domain/membership.mjs', what: 'addMonths' },
   { re: /\[\s*'owner',\s*'administrator'/, owner: 'core/domain/access.mjs', what: 'a role list (import MANAGE / REGISTER / TEACH / WRITE)', skipSql: true },
-  { re: /'Pacific\/Auckland'/, owner: 'core/domain/time.mjs', what: 'the default timezone (import DEFAULT_TIMEZONE)', skipComment: true },
+  { re: /'Pacific\/Auckland'/, owner: 'core/domain/defaults.mjs', what: 'the default timezone (import DEFAULT_TIMEZONE)', skipComment: true },
 ];
 for (const f of files) {
   const lines = read(f);
@@ -62,11 +63,11 @@ for (const f of files.filter((x) => is(x, 'api/server.mjs') || is(x, 'api/views.
 
 // 5: the domain does not read the clock (a default argument may; time.mjs is the one place)
 const DEFAULT_ARG = /\b\w+ = new Date\(\)(\.toISOString\(\)(\.slice\(\d+, ?\d+\))?)?\s*[,)}]/;
-for (const f of files.filter((x) => x.includes('core/domain/') && !is(x, 'time.mjs')))
+for (const f of files.filter((x) => x.includes('core/domain/') && !is(x, 'defaults.mjs')))
   read(f).forEach((l, i) => {
     if (/arch-ok:/.test(l) || /^\s*(\/\/|\*)/.test(l)) return;
     if (/new Date\(\)|Date\.now\(\)/.test(l) && !DEFAULT_ARG.test(l))
-      fail(f, i + 1, 'reads the clock inside the domain; take the time as an argument (or use todayIso from time.mjs)');
+      fail(f, i + 1, 'reads the clock inside the domain; take the time as an argument (or use todayIso from defaults.mjs)');
   });
 
 // 6: no block of 8+ lines pasted into two files
@@ -90,7 +91,7 @@ for (const f of files.filter((x) => x.includes('core/domain/') && !is(x, 'time.m
 }
 
 // 7: size caps. Lower these as the big files are split; never raise them.
-const CAPS = { 'packages/api/data.mjs': 8000, 'packages/api/server.mjs': 4800, 'packages/api/views.mjs': 5300 };
+const CAPS = { 'packages/api/data/people.mjs': 1500, 'packages/api/server.mjs': 4800, 'packages/api/views.mjs': 5300 };
 const DEFAULT_CAP = 1500;
 for (const f of files) {
   const rel = path.relative(ROOT, f), n = read(f).length, cap = CAPS[rel] ?? DEFAULT_CAP;

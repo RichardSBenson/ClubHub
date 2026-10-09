@@ -14,6 +14,7 @@
  */
 
 import { esc } from '../core/domain/html.mjs';
+import { DEFAULT_LOCALE } from '../core/domain/defaults.mjs';
 
 // ---------------------------------------------------------------------------
 // the whitelist
@@ -240,7 +241,7 @@ export function renderBlocks(doc, data = {}, { origin = '' } = {}) {
           `<ul class="events">${evs.map((e) => {
             const d = new Date(e.starts_at);
             return `<li><div class="d"><b>${d.getDate()}</b>` +
-              `<span>${d.toLocaleDateString('en-NZ', { month: 'short' })}</span></div>` +
+              `<span>${d.toLocaleDateString(DEFAULT_LOCALE, { month: 'short' })}</span></div>` +
               `<div><h3><a href="/events/${esc(e.slug)}">${esc(e.title)}</a></h3></div></li>`;
           }).join('')}</ul>`;
       }

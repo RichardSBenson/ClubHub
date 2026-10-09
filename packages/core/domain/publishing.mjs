@@ -12,6 +12,7 @@
  */
 
 import { CalendarDay, DomainError } from './values.mjs';
+import { DEFAULT_LOCALE } from './defaults.mjs';
 
 // ---------------------------------------------------------------------------
 // value objects
@@ -61,12 +62,12 @@ export class Locale {
   constructor(value) {
     const v = String(value ?? '').trim();
     if (!/^[a-z]{2,3}(-[A-Z][a-z]{3})?(-[A-Z]{2})?$/.test(v))
-      throw new DomainError(`Not a locale: "${value}" — expected en-NZ, mi, ja`);
+      throw new DomainError(`Not a locale: "${value}" — expected something like en-NZ, en-US, mi, ja`);
     this.#value = v;
   }
 
   static of(value) { return new Locale(value); }
-  static get DEFAULT() { return new Locale('en-NZ'); }
+  static get DEFAULT() { return new Locale(DEFAULT_LOCALE); }
   get value() { return this.#value; }
   get language() { return this.#value.split('-')[0]; }
   equals(other) { return other instanceof Locale && other.value === this.#value; }
@@ -118,7 +119,7 @@ export const PublicationStatus = Object.freeze({
  * previous revision rather than reconstructing anything.
  */
 export class Publication {
-  constructor({ id = null, entryId, entryKind, revisionId, path, locale = 'en-NZ',
+  constructor({ id = null, entryId, entryKind, revisionId, path, locale = DEFAULT_LOCALE,
                 organisationId, status = PublicationStatus.LIVE,
                 publishedAt = null, scheduledFor = null, publishedBy = null,
                 supersededAt = null, withdrawnAt = null }) {

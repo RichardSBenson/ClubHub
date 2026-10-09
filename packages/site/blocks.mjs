@@ -15,6 +15,7 @@
  */
 
 import { esc, groupSessions, time } from './render.mjs';
+import { DEFAULT_LOCALE } from '../core/domain/defaults.mjs';
 
 // ---------------------------------------------------------------------------
 // schema
@@ -202,7 +203,7 @@ function renderBlock(b, ctx) {
       return `<ul class="events">${evs.map((e) => {
         const d = new Date(e.starts_at);
         return `<li><div class="d"><b>${d.getDate()}</b>
-          <span>${d.toLocaleDateString('en-NZ', { month: 'short' })}</span></div>
+          <span>${d.toLocaleDateString(DEFAULT_LOCALE, { month: 'short' })}</span></div>
           <div><h3><a href="/events/${esc(e.slug)}">${esc(e.title)}</a></h3>
           <p>${esc(e.venue_name ?? e.from_org ?? '')}</p></div></li>`;
       }).join('')}</ul>`;

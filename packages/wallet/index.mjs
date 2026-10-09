@@ -15,6 +15,7 @@
  */
 
 import crypto from 'node:crypto';
+import { DEFAULT_LOCALE } from '../core/domain/defaults.mjs';
 
 // ---------------------------------------------------------------------------
 // the verification token
@@ -181,7 +182,7 @@ export function googleClass(federation, config) {
     ...(config.logoUrl && {
       logo: { sourceUri: { uri: config.logoUrl },
               contentDescription: { defaultValue: {
-                language: 'en-NZ', value: `${federation.name} crest` } } },
+                language: DEFAULT_LOCALE, value: `${federation.name} crest` } } },
     }),
   };
 }
@@ -205,7 +206,7 @@ export function googleObject(member, federation, config) {
   };
 }
 
-const text = (v) => ({ defaultValue: { language: 'en-NZ', value: v } });
+const text = (v) => ({ defaultValue: { language: DEFAULT_LOCALE, value: v } });
 
 /** The JWT Google Wallet expects. Signed with the issuer service account key. */
 export function googleJwt(objects, config, signer) {

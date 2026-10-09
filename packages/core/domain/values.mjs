@@ -50,7 +50,7 @@ export class MemberNumber {
     const v = String(value ?? '').trim().toUpperCase();
     if (!/^[A-Z]{2}-\d{4,6}$/.test(v))
       throw new DomainError(
-        `Member number must look like NZ-0417, got "${value}"`);
+        `Member number must look like AB-0417, got "${value}"`);
     this.#value = v;
   }
 

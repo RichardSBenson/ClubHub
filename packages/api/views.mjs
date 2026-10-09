@@ -49,7 +49,7 @@ const VOCABULARY = (() => {
 })();
 
 import { esc } from '../core/domain/html.mjs';
-import { DEFAULT_TIMEZONE } from '../core/domain/time.mjs';
+import { DEFAULT_TIMEZONE, DEFAULT_LOCALE, DEFAULT_CURRENCY, ADULT_AGE } from '../core/domain/defaults.mjs';
 import { money as cents, dollars as money } from '../core/domain/money.mjs';
 
 const V = VOCABULARY;
@@ -265,7 +265,7 @@ function page({ title, me, body, csrf, query = '', wide = false, head = '' }) {
       <input type="hidden" name="_csrf" value="${esc(csrf ?? '')}">
       <button>Sign out</button></form></span>` : '';
 
-  return `<!DOCTYPE html><html lang="en-NZ"><head>
+  return `<!DOCTYPE html><html lang="${DEFAULT_LOCALE}"><head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>${esc(title)} — Honbu</title><link rel="manifest" href="/manifest.webmanifest"><meta name="theme-color" content="#3451D1"><link rel="apple-touch-icon" href="/icons/icon-192.png">${head}<style>${CSS}</style></head><body>
 <a class="skip" href="#main">Skip to the content</a>
@@ -522,7 +522,7 @@ export const roster = ({ me, csrf, org, roster, total = null, canRegister = fals
     <tbody>${roster.map((p) => `<tr>
       ${canManage ? `<td>${p.is_dan || p.isInstructor ? `<input class="pick" type="checkbox" name="pick_${esc(p.id)}" aria-label="Choose ${esc(p.first_name)} ${esc(p.last_name)}"${filter.all ? ' checked' : ''}>` : ''}</td>` : ''}
       <td><a href="/p/${p.id}">${esc(p.first_name)} ${esc(p.last_name)}</a>
-        <span class="muted">${esc(p.display_number ?? '')}</span>${p.age != null && p.age < 18 ? ' <span class="tag">junior</span>' : ''}</td>
+        <span class="muted">${esc(p.display_number ?? '')}</span>${p.age != null && p.age < ADULT_AGE ? ' <span class="tag">junior</span>' : ''}</td>
       <td>${p.grade ? `<span class="tag ${p.is_dan ? 'dan' : 'ok'}">${esc(p.grade)}</span>`
         : '<span class="tag no">ungraded</span>'}</td>
       <td class="hide-sm">${nextCell(p.nextGrading)}</td>
@@ -712,7 +712,7 @@ export const person = ({ me, csrf, person, history, affiliations, eligibility,
       whose address bounces or who is standing in front of you.</p>
   </form>` : ''}
 
-  ${canEdit && guardians && (guardians.length || (person.age != null && person.age < 18)) ? `
+  ${canEdit && guardians && (guardians.length || (person.age != null && person.age < ADULT_AGE)) ? `
   <h2>Parents and guardians</h2>
   ${guardians.length ? `<table><tbody>${guardians.map((g) => `<tr>
     <td><a href="/p/${esc(g.person_id)}">${esc(g.first_name)} ${esc(g.last_name)}</a></td>
@@ -734,7 +734,7 @@ export const person = ({ me, csrf, person, history, affiliations, eligibility,
     <div class="row">
       <div><label for="guardian_number">Their member number
         <span class="hint">They need to be on the register too, so add them first if they are not.</span></label>
-        <input id="guardian_number" name="guardian_number" maxlength="20" placeholder="MOKNZ-0012"></div>
+        <input id="guardian_number" name="guardian_number" maxlength="20" placeholder="Member number"></div>
       <div><label for="relationship">Related as</label>
         <select id="relationship" name="relationship">${Object.entries(FAMILY_LABELS)
           .map(([v, l]) => option(v, l, 'parent')).join('')}</select></div>
@@ -1208,7 +1208,7 @@ const readable = (instant, zone, withTime = true) => {
   const d = instant instanceof Date ? instant : new Date(instant);
   if (Number.isNaN(d.getTime())) return '';
   try {
-    return new Intl.DateTimeFormat('en-NZ', {
+    return new Intl.DateTimeFormat(DEFAULT_LOCALE, {
       weekday: 'short', day: 'numeric', month: 'short', year: 'numeric',
       ...(withTime ? { hour: 'numeric', minute: '2-digit', hour12: true } : {}),
       timeZone: zone || 'UTC',
@@ -1745,7 +1745,7 @@ export const enterCompetitors = ({ me, csrf, org, host, event, disciplines = [],
  * paper it replaces.
  */
 export const entryPreview = ({ me, csrf, org, event, rows = [], text,
-                               total = null, currency = 'NZD', error }) => {
+                               total = null, currency = DEFAULT_CURRENCY, error }) => {
   const ready = rows.filter((r) => r.ready);
   const stuck = rows.filter((r) => !r.ready);
 
@@ -3258,7 +3258,7 @@ export const myPerson = ({ me, csrf, how, person, private: priv = {}, grade, mem
   </form>` });
 };
 
-const when = (instant, zone) => new Intl.DateTimeFormat('en-NZ', {
+const when = (instant, zone) => new Intl.DateTimeFormat(DEFAULT_LOCALE, {
   timeZone: zone || DEFAULT_TIMEZONE, weekday: 'short', day: 'numeric', month: 'short',
   year: 'numeric', hour: 'numeric', minute: '2-digit' }).format(new Date(instant));
 
@@ -3592,7 +3592,7 @@ export const paymentsScreen = ({ me, csrf, org, rows = [], totals = [], methods 
       <div><label for="kind">For</label>
         <select id="kind" name="kind">${PAY_ASKABLE.map((k) => `<option value="${k}"${values?.kind === k ? ' selected' : ''}>${
           esc(PAY_KINDS[k].label)}${PAY_KINDS[k].payee === 'federation' ? ' (paid to the federation)' : ''}</option>`).join('')}</select></div>
-      <div><label for="amount">Amount (NZD)</label>
+      <div><label for="amount">Amount (${DEFAULT_CURRENCY})</label>
         <input id="amount" name="amount" required inputmode="decimal" maxlength="12" value="${v('amountText')}"></div>
     </div>
     <label for="description">What it is <span class="muted">(optional, e.g. “Gi, size 150”)</span></label>
@@ -3668,7 +3668,7 @@ export const renewalsScreen = ({ me, csrf, org, today, rows = [], prices = [], a
         `<option value="${k}"${values?.appliesTo === k ? ' selected' : ''}>${esc(l)}</option>`).join('')}</select></div>
       <div><label for="period">How often</label><select id="period" name="period">${Object.entries(FEE_PERIODS).map(([k, l]) =>
         `<option value="${k}"${values?.period === k ? ' selected' : ''}>${esc(l.label)}</option>`).join('')}</select></div>
-      <div><label for="amount">Amount (NZD)</label><input id="amount" name="amount" required inputmode="decimal" maxlength="12" value="${v('amountText')}"></div>
+      <div><label for="amount">Amount (${DEFAULT_CURRENCY})</label><input id="amount" name="amount" required inputmode="decimal" maxlength="12" value="${v('amountText')}"></div>
       <div><label for="effectiveFrom">From <span class="muted">(optional)</span></label><input id="effectiveFrom" name="effectiveFrom" maxlength="10" placeholder="${esc(today)}" value="${v('effectiveFrom')}"></div>
     </div>
     <p class="muted">A new price for the same people and period takes over from its start date; the old one ends the day before.</p>
@@ -3801,7 +3801,7 @@ export const rollScreen = ({ me, csrf, org, session, date, members = [], visitor
     <input type="hidden" name="date" value="${esc(date)}">
     <fieldset><legend>Who came?</legend>
       ${members.length ? members.map((m) => `<label class="check"><input type="checkbox" name="here_${esc(m.person_id)}" value="1"${m.present ? ' checked' : ''}>
-        ${esc(m.name)}${m.age != null && m.age < 18 ? ` <span class="muted">(${m.age})</span>` : ''}</label>`).join('')
+        ${esc(m.name)}${m.age != null && m.age < ADULT_AGE ? ` <span class="muted">(${m.age})</span>` : ''}</label>`).join('')
         : '<p class="muted">Nobody is on the roll yet.</p>'}
     </fieldset>
     ${visitors.length ? `<fieldset><legend>Visitors already here</legend>${visitors.map((v) => `<label class="check">
@@ -3915,7 +3915,7 @@ export const reportScreen = ({ me, csrf, org, report }) => {
 // ---------------------------------------------------------------------------
 
 const nz = (iso, tz = DEFAULT_TIMEZONE) => iso
-  ? new Date(iso).toLocaleString('en-NZ', { timeZone: tz, dateStyle: 'medium', timeStyle: 'short' }) : '';
+  ? new Date(iso).toLocaleString(DEFAULT_LOCALE, { timeZone: tz, dateStyle: 'medium', timeStyle: 'short' }) : '';
 
 export const gradingEventsScreen = ({ me, csrf, org, events = [] }) => page({
   title: `${org.name} — grading events`, me, csrf, body: `
@@ -4657,7 +4657,7 @@ export const growthScreen = ({ me, csrf, org, settings, trials = [], referrals =
     <div><strong>${report.referrals}</strong> referrals</div>
     <div><strong>${report.referralMembers}</strong> became members</div>
     <div><strong>${report.rewarded}</strong> rewards earned</div>
-    <div><strong>${esc(cents(report.revenueCents, 'NZD'))}</strong> paid by referred members</div>
+    <div><strong>${esc(cents(report.revenueCents, DEFAULT_CURRENCY))}</strong> paid by referred members</div>
   </div>
   ${top.length ? `<p class="muted">Top referrers: ${top.map((t) => `${esc(t.name)} (${t.n})`).join(', ')}.</p>` : ''}
 
@@ -4743,7 +4743,7 @@ export const termRoster = ({ me, csrf, org, term, rows = [] }) => page({
   <h1>${esc(term.name)} ${esc(term.year)}</h1><p class="sub">${esc(term.starts)} to ${esc(term.ends)}</p>
   ${rows.length ? `<table><thead><tr><th>Child</th><th>Age</th><th>Enrolled</th><th>Price</th><th></th></tr></thead><tbody>${rows.map((r) => `<tr>
     <td><a href="/p/${esc(r.person_id)}">${esc(r.name)}</a></td><td>${r.age ?? ''}</td><td>${esc(r.enrolled_on)}</td>
-    <td>${esc(cents(r.fee_cents, 'NZD'))}${r.price_note && r.price_note !== 'The full term' ? ` <span class="muted">${esc(r.price_note)}</span>` : ''}</td>
+    <td>${esc(cents(r.fee_cents, DEFAULT_CURRENCY))}${r.price_note && r.price_note !== 'The full term' ? ` <span class="muted">${esc(r.price_note)}</span>` : ''}</td>
     <td>${r.status === 'withdrawn' ? 'Withdrawn' : r.paid ? '<span class="tag ok">Paid</span>' : '<span class="tag wait">Not paid</span>'}</td></tr>`).join('')}</tbody></table>`
     : '<p class="muted">Nobody is enrolled yet.</p>'}` });
 
@@ -4754,7 +4754,7 @@ export const myTerms = ({ me, csrf, groups = [], error, done }) => page({
   ${groups.some((g) => g.items.length) ? groups.filter((g) => g.items.length).map((g) => `<h2>${esc(g.person.first_name)} <span class="muted">· ${esc(g.club)}</span></h2>
     <table><tbody>${g.items.map((i) => `<tr><td><strong>${esc(i.term.name)}</strong> ${esc(i.term.year)}<div class="muted">${esc(i.term.starts)} to ${esc(i.term.ends)}</div></td>
       <td>${i.enrolment?.status === 'enrolled' ? `<span class="tag ok">Enrolled</span>${i.enrolment.paid ? '' : ' <span class="tag wait">Not paid</span>'}`
-        : i.mayEnrol ? `${i.price.cents ? esc(cents(i.price.cents, 'NZD')) : 'Free'} <span class="muted">${esc(i.price.note)}</span>`
+        : i.mayEnrol ? `${i.price.cents ? esc(cents(i.price.cents, DEFAULT_CURRENCY)) : 'Free'} <span class="muted">${esc(i.price.note)}</span>`
         : i.state === 'upcoming' ? '<span class="muted">Opens soon</span>' : '<span class="muted">Not available</span>'}</td>
       <td>${i.mayEnrol ? `<form method="post" action="/me/terms/${esc(i.term.id)}/${esc(g.person.id)}"><input type="hidden" name="_csrf" value="${esc(csrf ?? '')}"><button class="btn" type="submit">Enrol</button></form>`
         : i.enrolment?.status === 'enrolled' && i.state !== 'current' ? `<form method="post" action="/me/terms/${esc(i.term.id)}/${esc(g.person.id)}/withdraw"><input type="hidden" name="_csrf" value="${esc(csrf ?? '')}"><button class="btn quiet" type="submit">Withdraw</button></form>` : ''}</td></tr>`).join('')}</tbody></table>`).join('')
@@ -4768,7 +4768,7 @@ export const galleryScreen = ({ me, csrf, org, items = [], total = 0, years = []
                                 done, error, rebuild }) => {
   const base = `/o/${esc(org.slug)}/gallery`;
   const nowYear = new Date().getFullYear();
-  const day = (d) => new Date(d).toLocaleDateString('en-NZ', { day: 'numeric', month: 'short', year: 'numeric' });
+  const day = (d) => new Date(d).toLocaleDateString(DEFAULT_LOCALE, { day: 'numeric', month: 'short', year: 'numeric' });
   const eventOptions = (selected, { keep = false } = {}) =>
     (keep ? '<option value="">— leave as it is —</option>' : '<option value="">No event</option>')
     + (keep ? '<option value="none">Take out of its event</option>' : '')

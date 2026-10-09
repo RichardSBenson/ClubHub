@@ -5,6 +5,8 @@
  * parent sends a child's, a grown member sends their own. What the file is gets decided from its bytes, never
  * from the name it arrived with.
  */
+import { ADULT_AGE } from './defaults.mjs';
+
 export const MAX_DOCUMENT_BYTES = 5 * 1024 * 1024;
 
 /** `%PDF-` at the start. A PDF is the one non-image document a phone or an email attachment commonly gives us. */
@@ -25,4 +27,4 @@ export function problemsWithDocument({ title, awardedOn, expiresOn, hasQualifica
 }
 
 /** Photographs on a record need somebody's yes only for a child: an adult speaks for themselves. */
-export const photoNeedsConsent = (age) => age == null || age < 18;
+export const photoNeedsConsent = (age) => age == null || age < ADULT_AGE;

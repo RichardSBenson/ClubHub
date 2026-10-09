@@ -22,6 +22,8 @@
  * birth" is an audit entry. "Updated person" is a row in a table.
  */
 
+import { DEFAULT_LOCALE, DEFAULT_CURRENCY } from '../core/domain/defaults.mjs';
+
 const quote = (s) => `"${s}"`;
 
 /** Whatever this entry was about, named as a person would name it. */
@@ -148,18 +150,18 @@ export function describe(entry) {
         + `address${a.recipients === 1 ? '' : 'es'}${a.skipped ? `, ${a.skipped} skipped` : ''})`;
     }
     case 'payment_requested':
-      return `asked ${a.person ?? 'a member'} for ${(a.amountCents / 100).toLocaleString('en-NZ', { style: 'currency', currency: 'NZD' })}`
+      return `asked ${a.person ?? 'a member'} for ${(a.amountCents / 100).toLocaleString(DEFAULT_LOCALE, { style: 'currency', currency: DEFAULT_CURRENCY })}`
         + ` — ${a.description ?? 'a payment'}`;
     case 'payment_made':
-      return `took a payment of ${((a.amountCents ?? 0) / 100).toLocaleString('en-NZ', { style: 'currency', currency: 'NZD' })}`;
+      return `took a payment of ${((a.amountCents ?? 0) / 100).toLocaleString(DEFAULT_LOCALE, { style: 'currency', currency: DEFAULT_CURRENCY })}`;
     case 'payment_failed':
       return 'a payment did not go through';
     case 'payment_recorded':
-      return `recorded ${((a.amountCents ?? 0) / 100).toLocaleString('en-NZ', { style: 'currency', currency: 'NZD' })} received by ${
+      return `recorded ${((a.amountCents ?? 0) / 100).toLocaleString(DEFAULT_LOCALE, { style: 'currency', currency: DEFAULT_CURRENCY })} received by ${
         a.method === 'cash' ? 'cash' : 'bank transfer'}${a.receipt ? ` (receipt ${a.receipt})` : ''}`
         + (a.paidUntil ? `, fees now paid to ${a.paidUntil}` : '');
     case 'fee_set':
-      return `set the price ${a.label ? quote(a.label) : ''} at ${((a.amountCents ?? 0) / 100).toLocaleString('en-NZ', { style: 'currency', currency: 'NZD' })}`.trim();
+      return `set the price ${a.label ? quote(a.label) : ''} at ${((a.amountCents ?? 0) / 100).toLocaleString(DEFAULT_LOCALE, { style: 'currency', currency: DEFAULT_CURRENCY })}`.trim();
     case 'fee_removed':
       return `removed the price ${a.label ? quote(a.label) : ''}`.trim();
     case 'fee_exemption':

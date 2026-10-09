@@ -17,6 +17,7 @@ import { requirePort, Refused, NotPermitted,
          EVENT_BUS, CLOCK } from './ports.mjs';
 
 import { MANAGE } from '../domain/access.mjs';
+import { DEFAULT_LOCALE } from '../domain/defaults.mjs';
 
 const MAY_PUBLISH = MANAGE;
 
@@ -30,7 +31,7 @@ export class PublishRevision {
   }
 
   async execute({ actorId, entryId, revisionId = null, path = null,
-                  locale = 'en-NZ', scheduledFor = null }) {
+                  locale = DEFAULT_LOCALE, scheduledFor = null }) {
     const entry = await this.entries.byId(entryId);
     if (!entry) throw new Refused('No such entry');
 

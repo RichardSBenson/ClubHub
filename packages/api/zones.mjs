@@ -17,6 +17,8 @@
  * daylight-saving rule, and it ships with Node.
  */
 
+import { DEFAULT_LOCALE } from '../core/domain/defaults.mjs';
+
 const FIELDS = {
   year: 'numeric', month: '2-digit', day: '2-digit',
   hour: '2-digit', minute: '2-digit', second: '2-digit',
@@ -93,5 +95,5 @@ export function toReadable(instant, zone, { withTime = true } = {}) {
     ...(withTime ? { hour: 'numeric', minute: '2-digit', hour12: true } : {}),
     ...(isKnownZone(zone) ? { timeZone: zone } : { timeZone: 'UTC' }),
   };
-  return new Intl.DateTimeFormat('en-NZ', options).format(d);
+  return new Intl.DateTimeFormat(DEFAULT_LOCALE, options).format(d);
 }

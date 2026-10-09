@@ -26,7 +26,7 @@
  * Blank is allowed (not everybody's roll has it). Anything else is not
  * guessed at: it is reported so a registrar can fix it.
  */
-import { todayIso } from './time.mjs';
+import { todayIso, ADULT_AGE } from './defaults.mjs';
 
 export const GENDERS = Object.freeze({ M: 'M', F: 'F' });
 export function normaliseGender(value) {
@@ -139,7 +139,7 @@ export function ageOn(dateOfBirth, on) {
  * definition — which is a change to make when a federation actually asks for
  * it, not before.
  */
-export function needsGuardian(dateOfBirth, on = null, { adultAt = 18 } = {}) {
+export function needsGuardian(dateOfBirth, on = null, { adultAt = ADULT_AGE } = {}) {
   const age = ageOn(dateOfBirth, on);
   return age == null ? false : age < adultAt;
 }

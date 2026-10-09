@@ -11,6 +11,8 @@
  *  - Answers are checked against the form as it stood: a choice must be one of the choices, a required question must be answered.
  */
 
+import { ADULT_AGE } from './defaults.mjs';
+
 export const FIELD_TYPES = Object.freeze({
   agree:      'A statement to agree to (a tick)',
   text:       'Short answer',
@@ -68,14 +70,14 @@ const ageOn = (dob, day) => {
   if (b.getUTCMonth() < a.getUTCMonth() || (b.getUTCMonth() === a.getUTCMonth() && b.getUTCDate() < a.getUTCDate())) y -= 1;
   return y;
 };
-export const isMinor = (dob, day) => { const a = ageOn(dob, day); return a != null && a < 18; };
+export const isMinor = (dob, day) => { const a = ageOn(dob, day); return a != null && a < ADULT_AGE; };
 
 /** Is this form asked of this person at all? Unknown age counts as an adult for 'seniors' only. */
 export function appliesTo(form, { dob }, day) {
   if (form.audience === 'all' || !form.audience) return true;
   const a = ageOn(dob, day);
-  if (form.audience === 'juniors') return a != null && a < 18;
-  if (form.audience === 'seniors') return a == null || a >= 18;
+  if (form.audience === 'juniors') return a != null && a < ADULT_AGE;
+  if (form.audience === 'seniors') return a == null || a >= ADULT_AGE;
   return true;
 }
 

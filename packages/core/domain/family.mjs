@@ -10,7 +10,9 @@
  */
 import { ageOn } from './people.mjs';
 
-export const AGE_OF_MAJORITY = 18;
+import { ADULT_AGE } from './defaults.mjs';
+
+export const AGE_OF_MAJORITY = ADULT_AGE;
 
 export const RELATIONSHIPS = Object.freeze({
   parent: 'Parent',

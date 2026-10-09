@@ -20,7 +20,7 @@ import { CalendarDay } from '../core/domain/values.mjs';
 import { makeShowcase, SHOWCASE_CSS } from './showcase.mjs';
 import { esc } from '../core/domain/html.mjs';
 import { tidyMoney } from '../core/domain/money.mjs';
-import { DEFAULT_TIMEZONE } from '../core/domain/time.mjs';
+import { DEFAULT_TIMEZONE, DEFAULT_LOCALE, DEFAULT_CURRENCY, DEFAULT_COUNTRY } from '../core/domain/defaults.mjs';
 
 
 const DAYS = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
@@ -33,19 +33,19 @@ const time = (t) => {
   return m ? `${hr}.${String(m).padStart(2,'0')}${ampm}` : `${hr}${ampm}`;
 };
 
-const date = (d, tz = DEFAULT_TIMEZONE) => new Date(d).toLocaleDateString('en-NZ',
+const date = (d, tz = DEFAULT_TIMEZONE) => new Date(d).toLocaleDateString(DEFAULT_LOCALE,
   { weekday:'long', day:'numeric', month:'long', timeZone: tz });
 
 /** The day of the month and the short month, as people read them where the event is: never the server's own clock. */
-const dayNum = (d, tz = DEFAULT_TIMEZONE) => new Date(d).toLocaleDateString('en-NZ', { day: 'numeric', timeZone: tz });
-const monthShort = (d, tz = DEFAULT_TIMEZONE) => new Date(d).toLocaleDateString('en-NZ', { month: 'short', timeZone: tz });
+const dayNum = (d, tz = DEFAULT_TIMEZONE) => new Date(d).toLocaleDateString(DEFAULT_LOCALE, { day: 'numeric', timeZone: tz });
+const monthShort = (d, tz = DEFAULT_TIMEZONE) => new Date(d).toLocaleDateString(DEFAULT_LOCALE, { month: 'short', timeZone: tz });
 
-const clock = (d, tz = DEFAULT_TIMEZONE) => new Date(d).toLocaleTimeString('en-NZ',
+const clock = (d, tz = DEFAULT_TIMEZONE) => new Date(d).toLocaleTimeString(DEFAULT_LOCALE,
   { hour: 'numeric', minute: '2-digit', hour12: true, timeZone: tz }).replace(/\s/g, '').toLowerCase();
 
 /** "3 October", or "3–5 October" across days, or "30 Oct – 2 Nov" across months. */
 function shortRange(starts, ends, tz = DEFAULT_TIMEZONE) {
-  const f = (d, o) => new Date(d).toLocaleDateString('en-NZ', { timeZone: tz, ...o });
+  const f = (d, o) => new Date(d).toLocaleDateString(DEFAULT_LOCALE, { timeZone: tz, ...o });
   const a = new Date(starts);
   if (!ends || f(starts, { dateStyle: 'short' }) === f(ends, { dateStyle: 'short' })) return `${f(a, { day: 'numeric' })} ${f(a, { month: 'long' })}`;
   if (f(starts, { month: 'long' }) === f(ends, { month: 'long' }))
@@ -124,7 +124,7 @@ export function dojoJsonLd(dojo, federation, origin, base = '') {
     sport: disciplineOf(federation),
   };
   if (dojo.venue_name || dojo.city) {
-    ld.address = { '@type': 'PostalAddress', addressCountry: dojo.country_code ?? 'NZ' };
+    ld.address = { '@type': 'PostalAddress', addressCountry: dojo.country_code ?? DEFAULT_COUNTRY };
     if (dojo.address_line) ld.address.streetAddress = dojo.address_line;
     if (dojo.suburb) ld.address.addressLocality = dojo.suburb;
     if (dojo.city) ld.address.addressRegion = dojo.city;
@@ -429,7 +429,7 @@ export function layout({ title, description, canonical, body, jsonLd = [],
     .map((f) => `family=${f.replace(/ /g, '+')}:wght@400;500;700`), 'family=Anton'].join('&');
 
   return `<!DOCTYPE html>
-<html lang="en-NZ">
+<html lang="${DEFAULT_LOCALE}">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -877,7 +877,7 @@ export function findADojoPage({ dojos, federation, origin, fonts, nav,
  * order goes to the member's own dojo, which collects the money and may add its own items (a tournament tee).
  */
 export function shopPage({ products = [], federation, origin, fonts, nav, base = '', vocabulary = {} }) {
-  const shopPrice = (c, cur = 'NZD') => tidyMoney(c, esc(cur));
+  const shopPrice = (c, cur = DEFAULT_CURRENCY) => tidyMoney(c, esc(cur));
   const html = `
 <p class="shoplead">Gear for training and grading, ordered through your dojo. You pay your dojo when you collect it.</p>
 ${products.length ? `<ul class="shopgrid">${products.map((p) => `<li>
