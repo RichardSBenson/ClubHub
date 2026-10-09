@@ -30,7 +30,11 @@ export const people = {
   /** Roster for one organisation. Private detail only for registrars and above. */
   async roster(actor, orgId, { includePrivate = false, subtree = false } = {}) {
     await assertRole(actor, orgId, TEACH);
-    if (includePrivate) await assertRole(actor, orgId, REGISTER);
+    if (includePrivate) {
+      await assertRole(actor, orgId, REGISTER);
+      await pool.query(`insert into audit_log (account_id, organisation_id, action, entity, entity_id)
+        values ($1,$2,'roster_private_viewed','organisation',$2)`, [actor, orgId]);
+    }
 
     // A national grading draws candidates from every club beneath it, not from
     // the federation's own roll — which is empty, because members affiliate to
@@ -61,7 +65,8 @@ export const people = {
       left join person_current_grade cg on cg.person_id = p.id
       ${includePrivate ? 'left join person_private pv on pv.person_id = p.id' : ''}
       where ${scope} and a.ends is null /* security-ok: scope is one of two fixed fragments chosen just above */
-      order by cg.rank_order desc nulls last, p.last_name`, [orgId]);
+      order by cg.rank_order desc nulls last, p.last_name`, [orgId])
+      .then((rows) => includePrivate ? rows.map((r) => ({ ...r, emergency_name: unseal(r.emergency_name), emergency_phone: unseal(r.emergency_phone) })) : rows);
   },
 
   /** One person, with their whole grading history. Follows them between club. */
@@ -121,7 +126,9 @@ export const people = {
       order by case role when 'member' then 0 else 1 end limit 1`, [personId]);
     if (!home) throw new NotFound('Person');
     await assertRole(actor, home.organisation_id, REGISTER);
-    return one('select * from person_private where person_id = $1', [personId]);
+    const priv = await one('select * from person_private where person_id = $1', [personId]);
+    return priv && { ...priv, emergency_name: unseal(priv.emergency_name), emergency_phone: unseal(priv.emergency_phone),
+      medical_notes: unseal(priv.medical_notes) };
   },
 
   /** The membership that is running now, if there is one. */
@@ -203,7 +210,7 @@ export const people = {
           on conflict (person_id) do update
             set emergency_name = excluded.emergency_name,
                 emergency_phone = excluded.emergency_phone`,
-          [person.id, emergencyName || null, emergencyPhone || null]);
+          [person.id, seal(emergencyName || null), seal(emergencyPhone || null)]);
       }
 
       await client.query(`
@@ -418,7 +425,7 @@ export const people = {
           await client.query(`
             insert into person_private (person_id, emergency_name, emergency_phone)
             values ($1,$2,$3)`,
-            [person.id, v.emergencyName || null, v.emergencyPhone || null]);
+            [person.id, seal(v.emergencyName || null), seal(v.emergencyPhone || null)]);
         }
 
         await client.query(`
@@ -560,8 +567,8 @@ export const people = {
             emergency_phone = coalesce($3, person_private.emergency_phone),
             updated_at = now()`,
           [personId,
-           fields.emergencyName === undefined ? null : (fields.emergencyName || null),
-           fields.emergencyPhone === undefined ? null : (fields.emergencyPhone || null)]);
+           fields.emergencyName === undefined ? null : seal(fields.emergencyName || null),
+           fields.emergencyPhone === undefined ? null : seal(fields.emergencyPhone || null)]);
       }
 
       if (touchesAffiliation) {
@@ -1035,6 +1042,8 @@ export const myself = {
     const priv = await one(`select address_line, suburb, city, postcode, emergency_name,
       emergency_phone, medical_notes from person_private where person_id=$1`, [personId]) ?? {};
     priv.medical_notes = unseal(priv.medical_notes);
+    priv.emergency_name = unseal(priv.emergency_name);
+    priv.emergency_phone = unseal(priv.emergency_phone);
     const grade = await one(`select cg.label, cg.rank_order, cg.awarded_on::text as awarded_on,
         (select n.label from grade g join grade n on n.organisation_id = g.organisation_id
            and n.rank_order = g.rank_order + 1 where g.id = cg.grade_id) as next_label,
@@ -1078,7 +1087,7 @@ export const myself = {
           emergency_name=excluded.emergency_name, emergency_phone=excluded.emergency_phone,
           medical_notes=excluded.medical_notes, updated_at=now()`,
         [personId, input.address_line, input.suburb, input.city, input.postcode,
-         input.emergency_name, input.emergency_phone, seal(input.medical_notes)]);
+         seal(input.emergency_name), seal(input.emergency_phone), seal(input.medical_notes)]);
 
       // Which fields, never what they said: medical notes are the most
       // sensitive thing on the register and the history is read by more people
@@ -1220,9 +1229,14 @@ export const memberDocuments = {
 
   async file(actor, personId, docId) {
     const official = await this._isOfficial(actor, personId);
-    if (!official && !(await family.mayActFor(actor, personId))) throw new Forbidden();
-    const d = await one('select mime, bytes, filename from member_document where id = $1 and person_id = $2', [docId, personId]);
+    const own = await family.mayActFor(actor, personId);
+    if (!official && !own) throw new Forbidden();
+    const d = await one('select mime, bytes, filename, title from member_document where id = $1 and person_id = $2', [docId, personId]);
     if (!d) throw new NotFound('Document');
+    // Somebody opening another person's document is the thing worth being able to answer for later.
+    if (official && !own)
+      await pool.query(`insert into audit_log (account_id, organisation_id, action, entity, entity_id, after)
+        values ($1,$2,'document_opened','person',$3,$4)`, [actor, official, personId, JSON.stringify({ documentId: docId, title: d.title })]);
     return { ...d, bytes: openBytes(d.bytes) };
   },
 

@@ -150,7 +150,7 @@ console.log('\nSHE SEES AND CHANGES HER CHILD\'S SAFETY DETAILS');
   const row = await one(`select p.first_name, p.date_of_birth::text dob, p.phone,
     pp.emergency_name, pp.medical_notes from person p
     join person_private pp on pp.person_id=p.id where p.id=$1`, [kid.id]);
-  ok('what she changed is saved', row.phone === '021 000 000' && row.emergency_name === 'Nana Rose'
+  ok('what she changed is saved', row.phone === '021 000 000' && unseal(row.emergency_name) === 'Nana Rose'
     && /Asthma/.test(unseal(row.medical_notes)));
   ok('what the register owns is not', row.first_name === 'Kahu' && row.dob === '2015-05-05');
   const log = await one(`select after from audit_log where action='self_update' and entity_id=$1

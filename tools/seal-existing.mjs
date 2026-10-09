@@ -1,5 +1,5 @@
 /**
- * Seals what was stored before sealing was switched on: medical notes (people and newcomers) and sent documents.
+ * Seals what was stored before sealing was switched on: medical notes and emergency contacts (people and newcomers) and sent documents.
  * Safe to run any number of times; anything already sealed is left alone. Runs on every deploy after the
  * migrations, and does nothing at all when there is no key or no database.
  */
@@ -16,9 +16,12 @@ await client.connect();
 let notes = 0, files = 0;
 try {
   for (const [table, idCol] of [['person_private', 'person_id'], ['newcomer', 'id']]) {
-    const { rows } = await client.query(`select ${idCol} as id, medical_notes from ${table} where medical_notes is not null and medical_notes <> '' and medical_notes not like 'enc:v1:%'`);  // security-ok: table and idCol come from the fixed pair list just above
+    // security-ok: table and idCol come from the fixed pair list just above
+    const { rows } = await client.query(`select ${idCol} as id, medical_notes, emergency_name, emergency_phone from ${table} where (medical_notes is not null and medical_notes <> '' and medical_notes not like 'enc:v1:%')
+      or (emergency_name is not null and emergency_name <> '' and emergency_name not like 'enc:v1:%')
+      or (emergency_phone is not null and emergency_phone <> '' and emergency_phone not like 'enc:v1:%')`);  // security-ok: table and idCol come from the fixed pair list just above
     for (const r of rows) {
-      await client.query(`update ${table} set medical_notes = $2 where ${idCol} = $1`, [r.id, seal(r.medical_notes)]);  // security-ok: table and idCol come from the fixed pair list just above
+      await client.query(`update ${table} set medical_notes = $2, emergency_name = $3, emergency_phone = $4 where ${idCol} = $1`, [r.id, seal(r.medical_notes), seal(r.emergency_name), seal(r.emergency_phone)]);  // security-ok: table and idCol come from the fixed pair list just above
       notes += 1;
     }
   }
@@ -30,4 +33,4 @@ try {
     }
   }
 } finally { await client.end(); }
-console.log(`seal-existing: sealed ${notes} medical note(s) and ${files} document(s).`);
+console.log(`seal-existing: sealed ${notes} record(s) of medical notes and emergency contacts and ${files} document(s).`);

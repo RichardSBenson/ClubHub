@@ -52,6 +52,10 @@ console.log('\nIN THE DATABASE');
   await myself.update(acc, p.id, form);
   const raw = await one('select medical_notes from person_private where person_id=$1', [p.id]);
   ok('the database holds it sealed', isSealed(raw.medical_notes) && !/epilepsy/.test(raw.medical_notes));
+  const rawEc = await one('select emergency_name, emergency_phone from person_private where person_id=$1', [p.id]);
+  ok('the emergency contact is sealed in the database too', isSealed(rawEc.emergency_name) && isSealed(rawEc.emergency_phone) && !/Mum|021/.test(rawEc.emergency_name + rawEc.emergency_phone));
+  const readBack = (await myself.get(acc, p.id)).private;
+  ok('and the screen reads it plainly', readBack.emergency_name === 'Mum' && readBack.emergency_phone === '021 000 000');
   ok('the screen reads it plainly', (await myself.get(acc, p.id)).private.medical_notes === 'epilepsy, takes medication at 8am');
   await myself.update(acc, p.id, { ...form, medical_notes: 'epilepsy, takes medication at 8am' });
   const hist = await one(`select after from audit_log where action='update' and entity_id=$1 order by at desc limit 1`, [p.id]);
@@ -63,15 +67,17 @@ console.log('\nIN THE DATABASE');
   ok('and the person can still open it', (await memberDocuments.file(acc, p.id, doc.id)).bytes.toString().includes('vetting certificate'));
 
   console.log('\nSEALING WHAT WAS THERE BEFORE');
-  await pool.query(`update person_private set medical_notes = 'plain old note' where person_id=$1`, [p.id]);
+  await pool.query(`update person_private set medical_notes = 'plain old note', emergency_name = 'Old Aunt', emergency_phone = '021 555' where person_id=$1`, [p.id]);
   await pool.query(`update member_document set bytes = $2 where id = $1`, [doc.id, Buffer.from('%PDF-1.4 unsealed old file ..............................')]);
   const out = execFileSync('node', ['tools/seal-existing.mjs'], { cwd: new URL('../..', import.meta.url).pathname,
     env: { ...process.env, HONBU_DATA_KEY: KEY, DATABASE_URL: LOCAL_DB } }).toString();
   const after = await one('select medical_notes from person_private where person_id=$1', [p.id]);
+  const afterEc = await one('select emergency_name, emergency_phone from person_private where person_id=$1', [p.id]);
+  ok('and an old plain emergency contact', isSealed(afterEc.emergency_name) && open(afterEc.emergency_phone) === '021 555');
   ok('an old plain note is sealed by the tool', isSealed(after.medical_notes) && open(after.medical_notes) === 'plain old note', out);
   ok('and an old file', (await one('select substring(bytes from 1 for 4) b from member_document where id=$1', [doc.id])).b.toString() === 'HNB1');
   const again = execFileSync('node', ['tools/seal-existing.mjs'], { cwd: new URL('../..', import.meta.url).pathname, env: { ...process.env, HONBU_DATA_KEY: KEY, DATABASE_URL: LOCAL_DB } }).toString();
-  ok('running it again changes nothing', /sealed 0 medical note\(s\) and 0 document\(s\)/.test(again), again);
+  ok('running it again changes nothing', /sealed 0 record\(s\) of medical notes and emergency contacts and 0 document\(s\)/.test(again), again);
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

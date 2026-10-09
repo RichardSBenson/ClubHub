@@ -46,6 +46,11 @@ console.log('\nSENDING A DOCUMENT');
   ok('"something else" needs a name', /what this document is/.test(await refused(() => memberDocuments.add(aa, adult.id, { file })) ?? ''));
   ok('a stranger cannot read it', /./.test(await refused(() => memberDocuments.file(oa, adult.id, a1.id)) ?? ''));
   ok('the person can read it back', (await memberDocuments.file(aa, adult.id, a1.id)).mime === 'application/pdf');
+  const opened = async (who) => (await one(`select count(*)::int n from audit_log where action='document_opened' and account_id=$1`, [who])).n;
+  ok('the person opening their own is not logged', await opened(aa) === 0);
+  await memberDocuments.file(doug.id, adult.id, a1.id);
+  ok('an official opening it is logged, with which document', await opened(doug.id) === 1
+    && JSON.stringify((await one(`select after from audit_log where action='document_opened' and account_id=$1`, [doug.id])).after).includes(a1.id));
   ok('the club sees one waiting per person', (await memberDocuments.waiting(doug.id, wh.id)).length === 2);
   await memberDocuments.review(doug.id, adult.id, a1.id, { accept: true });
   const award = await one(`select qa.expires_on::text e from qualification_award qa where person_id=$1`, [adult.id]);

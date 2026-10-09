@@ -11,6 +11,7 @@ import './reset.mjs';
 import http from 'node:http';
 import handler from './server.mjs';
 import { pool } from './data.mjs';
+import { open as unseal } from '../infrastructure/crypto/vault.mjs';
 import * as auth from './auth.mjs';
 
 process.env.HONBU_STORE = 'postgres';
@@ -42,6 +43,11 @@ async function req(path, { method = 'GET', form } = {}) {
            html: await res.text() };
 }
 
+// Emergency contacts are sealed in the database when there is a key, so compare what they open to.
+const emergencyIs = async (personId, which, expected) => {
+  const r = (await pool.query('select emergency_name, emergency_phone from person_private where person_id = $1', [personId])).rows[0];
+  return unseal(r?.[`emergency_${which}`]) === expected;
+};
 const count = async (sql, args = []) =>
   (await pool.query(sql, args)).rows[0].n;
 
@@ -137,9 +143,7 @@ console.log('\nCONFIRMING WRITES IT, ONCE');
     ngaio?.display_number);
   ok('the phone came across', ngaio?.phone === '0211234567');
 
-  ok('the emergency contact was stored', await count(
-    `select count(*)::int n from person_private
-     where person_id = $1 and emergency_name = 'Kiri Harrison'`, [ngaio.id]) === 1);
+  ok('the emergency contact was stored', await emergencyIs(ngaio.id, 'name', 'Kiri Harrison'));
 
   ok('the one entered twice was only created once', await count(
     `select count(*)::int n from person where email = 'tomas@example.nz'`) === 1);
@@ -285,9 +289,7 @@ console.log('\nCORRECTING A RECORD');
   ok('and the date of birth did not shift a day',
     after.date_of_birth === '2012-05-04', String(after.date_of_birth));
 
-  ok('the emergency phone was corrected — it used to be unchangeable',
-    await count(`select count(*)::int n from person_private
-      where person_id = $1 and emergency_phone = '0270000000'`, [p.id]) === 1);
+  ok('the emergency phone was corrected — it used to be unchangeable', await emergencyIs(p.id, 'phone', '0270000000'));
 
   ok('and the paid-until date moved', await count(`
     select count(*)::int n from affiliation

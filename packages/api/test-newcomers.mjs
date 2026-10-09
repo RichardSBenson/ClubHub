@@ -85,7 +85,7 @@ ok('the trial record keeps only the consent', joined.status === 'joined' && !joi
 ok('joining twice is refused', await rejects(newcomers.join(reg, whanganui.id, sam.id), Invalid, /already/));
 const kidJoin = await newcomers.join(reg, whanganui.id, kai.id);
 const ec = await one('select emergency_name, emergency_phone from person_private where person_id=$1', [kidJoin.person.id]);
-ok('a child\'s parent becomes the emergency contact', ec.emergency_name === 'Mere Walker' && ec.emergency_phone === '021 555 9999');
+ok('a child\'s parent becomes the emergency contact', unseal(ec.emergency_name) === 'Mere Walker' && unseal(ec.emergency_phone) === '021 555 9999');
 
 console.log('\nNOT CONTINUING AND FORGETTING');
 const lee = await newcomers.add(sensei, whanganui.id, form({ firstName: 'Lee', email: 'lee@nc.test' }));

@@ -46,7 +46,7 @@ export const newcomers = {
       from newcomer n where n.organisation_id = $1
         and (n.status = 'trialling' or n.updated_at > now() - interval '30 days')
       order by (n.status = 'trialling') desc, n.created_at desc`, [orgId, org.timezone]);
-    return { org, today, newcomers: rows.map((r) => ({ ...r, medical_notes: unseal(r.medical_notes),
+    return { org, today, newcomers: rows.map((r) => ({ ...r, medical_notes: unseal(r.medical_notes), emergency_name: unseal(r.emergency_name), emergency_phone: unseal(r.emergency_phone),
       child: isChild(r.date_of_birth, today, region().adultAge), readyToTalk: r.status === 'trialling' && timeToTalk(r.visits) })) };
   },
 
@@ -78,8 +78,8 @@ export const newcomers = {
           date_of_birth, guardian_name, guardian_phone, emergency_name, emergency_phone, medical_notes, consent_by, consent_taken_by)
         values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) returning id`,
         [orgId, input.firstName, input.lastName, input.email || null, input.phone || null, input.dateOfBirth,
-         input.guardianName || null, input.guardianPhone || null, input.emergencyName || null,
-         input.emergencyPhone || null, seal(input.medicalNotes || null), input.consentName, actor]);
+         input.guardianName || null, input.guardianPhone || null, seal(input.emergencyName || null),
+         seal(input.emergencyPhone || null), seal(input.medicalNotes || null), input.consentName, actor]);
       if (sheet) await client.query(`insert into newcomer_attendance (newcomer_id, organisation_id, session_id, session_date)
         values ($1,$2,$3,$4::date)`, [n.id, orgId, sessionId, date]);
       await client.query(`insert into audit_log (account_id, organisation_id, action, entity, entity_id, after)
@@ -101,8 +101,8 @@ export const newcomers = {
     const child = isChild(n.dob, (await todayAt(await one('select timezone from organisation where id=$1', [orgId]))), region().adultAge);
     const person = await people.enrol(actor, { organisationId: orgId, firstName: n.first_name, lastName: n.last_name,
       dateOfBirth: n.dob, email: n.email, phone: n.phone, role: 'member', paidUntil,
-      emergencyName: n.emergency_name ?? (child ? n.guardian_name : null),
-      emergencyPhone: n.emergency_phone ?? (child ? n.guardian_phone : null) });
+      emergencyName: unseal(n.emergency_name) ?? (child ? n.guardian_name : null),
+      emergencyPhone: unseal(n.emergency_phone) ?? (child ? n.guardian_phone : null) });
 
     const client = await pool.connect();
     try {
@@ -354,7 +354,7 @@ export const trials = {
       ({ rows: [person] } = await client.query(`insert into person (first_name, last_name, date_of_birth, email, phone)
         values ($1,$2,$3,$4,$5) returning id`, [input.firstName, input.lastName, input.dateOfBirth, input.email, input.phone]));
       await client.query(`insert into person_private (person_id, emergency_name, emergency_phone, medical_notes) values ($1,$2,$3,$4)`,
-        [person.id, input.emergencyName, input.emergencyPhone, seal(input.medical || null)]);
+        [person.id, seal(input.emergencyName), seal(input.emergencyPhone), seal(input.medical || null)]);
       await client.query(`insert into affiliation (person_id, organisation_id, role, starts, status, paid_until)
         values ($1,$2,'member',$3::date,'trial',$4::date)`, [person.id, org.id, today, ends]);
       await client.query(`insert into account (email, person_id) values ($1,$2) on conflict (email) do nothing`, [input.email, person.id]);
