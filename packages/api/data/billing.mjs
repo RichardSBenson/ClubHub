@@ -327,8 +327,8 @@ export const fees = {
         and effective_from < $4::date and (effective_to is null or effective_to >= $4::date)`,
       [orgId, input.appliesTo, input.period, from]);
     const row = await one(`insert into fee_schedule (organisation_id, label, amount_cents, period,
-        applies_to, effective_from) values ($1,$2,$3,$4,$5,$6::date) returning id`,
-      [orgId, input.label, centsFrom(input.amountText), input.period, input.appliesTo, from]);
+        applies_to, effective_from, currency) values ($1,$2,$3,$4,$5,$6::date,$7) returning id`,
+      [orgId, input.label, centsFrom(input.amountText), input.period, input.appliesTo, from, region().currency]);
     await pool.query(`insert into audit_log (account_id, organisation_id, action, entity, entity_id, after)
       values ($1,$2,'fee_set','fee_schedule',$3,$4)`, [actor, orgId, row.id,
       JSON.stringify({ label: input.label, amountCents: centsFrom(input.amountText), period: input.period,
@@ -812,8 +812,8 @@ export const shop = {
       if (!r) throw new NotFound('Item');
       return r.id;
     }
-    return (await one(`insert into product (organisation_id, name, category, description, sizes, price_cents) values ($1,$2,$3,$4,$5,$6) returning id`,
-      [orgId, v.name, v.category, v.description, v.sizes, v.price_cents])).id;
+    return (await one(`insert into product (organisation_id, name, category, description, sizes, price_cents, currency) values ($1,$2,$3,$4,$5,$6,$7) returning id`,
+      [orgId, v.name, v.category, v.description, v.sizes, v.price_cents, region().currency])).id;
   },
 
   async setActive(actor, orgId, productId, active) {

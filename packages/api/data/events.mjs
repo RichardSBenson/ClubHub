@@ -266,11 +266,11 @@ export const competition = {
     if (!ev) throw new NotFound('Event');
     await assertRole(actor, ev.organisation_id, REGISTER);
     return one(`
-      insert into entry_price (event_id, for_count, amount_cents, members_only, label)
-      values ($1,$2,$3,$4,$5)
+      insert into entry_price (event_id, for_count, amount_cents, members_only, label, currency)
+      values ($1,$2,$3,$4,$5,$6)
       on conflict (event_id, for_count, members_only) do update set
         amount_cents = excluded.amount_cents, label = excluded.label
-      returning *`, [eventId, forCount, amountCents, membersOnly, label]);
+      returning *`, [eventId, forCount, amountCents, membersOnly, label, region().currency]);
   },
 
   /**

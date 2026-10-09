@@ -68,6 +68,15 @@ for (const f of files.filter((x) => /packages\/(api|site|content)\//.test(x)))
       fail(f, i + 1, 'uses a platform default; use region().currency / .locale / .adultAge, which is the organisation\'s own setting');
   });
 
+// 4c: money is stored with its currency, named, not left to a column default
+const CURRENCY_TABLES = ['entry_price', 'event_fee', 'fee_schedule', 'invoice', 'payment', 'product', 'shop_order'];
+for (const f of files) {
+  const text = fs.readFileSync(f, 'utf8');
+  for (const m of text.matchAll(/insert into (\w+)\s*\(([^)]*)\)/g))
+    if (CURRENCY_TABLES.includes(m[1]) && !/currency/.test(m[2]) && !/arch-ok:/.test(text.slice(m.index, m.index + 400)))
+      fail(f, text.slice(0, m.index).split('\n').length, `inserts into ${m[1]} without naming the currency (a column default would silently be NZD)`);
+}
+
 // 5: the domain does not read the clock (a default argument may; time.mjs is the one place)
 const DEFAULT_ARG = /\b\w+ = new Date\(\)(\.toISOString\(\)(\.slice\(\d+, ?\d+\))?)?\s*[,)}]/;
 for (const f of files.filter((x) => x.includes('core/domain/') && !is(x, 'defaults.mjs')))

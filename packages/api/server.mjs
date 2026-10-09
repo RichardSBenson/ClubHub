@@ -95,7 +95,7 @@ import * as R from '../site/render.mjs';
 import { requestRebuild } from '../infrastructure/publishing/rebuild.mjs';
 import { esc } from '../core/domain/html.mjs';
 import { MANAGE, REGISTER, TEACH, WRITE } from '../core/domain/access.mjs';
-import { registerRegionRoutes } from './routes-region.mjs';
+import { registerSettingsRoutes } from './routes-settings.mjs';
 import { DEFAULT_TIMEZONE } from '../core/domain/defaults.mjs';
 import { region, setRegion, withRegion } from '../infrastructure/region-context.mjs';
 
@@ -398,8 +398,8 @@ get('/o/:slug/roster', async (ctx) => {
   const ladder = ladderOwner ? await rank.ladder(ladderOwner.id) : [];
   const today = new Date().toLocaleDateString('en-CA', { timeZone: org.timezone || DEFAULT_TIMEZONE });
   for (const r of all) {
-    const above = r.rank_order != null ? ladder.find((g) => g.rank_order === r.rank_order + 1) : null;
-    r.nextGrading = r.grade ? nextGrading({ held: { label: r.grade, awardedOn: r.graded_on }, next: above ? { label: above.label } : null, today }) : null;
+    const [held, above] = [0, 1].map((d) => r.rank_order != null ? ladder.find((g) => g.rank_order === r.rank_order + d) : null);
+    r.nextGrading = r.grade ? nextGrading({ held: { awardedOn: r.graded_on, usualMonths: held?.usual_months_to_next, byInvitation: held?.next_by_invitation }, next: above ? { label: above.label } : null, today }) : null;
   }
   const shown = all.filter((r) => {
     if (filter.grade === 'dan' && !r.is_dan) return false;
@@ -2890,7 +2890,7 @@ async function appearanceScreen(ctx, org, extra = {}) {
   }));
 }
 
-registerRegionRoutes({ get, post, organisationFor, mayPublishAt, requestRebuild });
+registerSettingsRoutes({ get, post, organisationFor, mayPublishAt, requestRebuild });
 
 get('/o/:slug/appearance', async (ctx) => {
   const org = await organisationFor(ctx, { toWrite: true });

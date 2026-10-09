@@ -45,6 +45,20 @@ export const rank = {
       [orgId]);
   },
 
+  /** Set the usual gap after each grade (a guide, not a gate). `rows`: [{ gradeId, months|null, byInvitation }]. */
+  async setTimetable(actor, orgId, rows) {
+    await assertRole(actor, orgId, MANAGE);
+    const client = await pool.connect();
+    try {
+      await client.query('begin');
+      for (const r of rows)
+        await client.query(`update grade set usual_months_to_next = $3, next_by_invitation = $4 where id = $1 and organisation_id = $2`,
+          [r.gradeId, orgId, r.months, r.byInvitation]);
+      await client.query(`insert into audit_log (account_id, organisation_id, action, entity, entity_id) values ($1,$2,'grading_timetable_changed','organisation',$2)`, [actor, orgId]);
+      await client.query('commit');
+    } catch (e) { await client.query('rollback'); throw e; } finally { client.release(); }
+  },
+
   /** Who may award this grade, with what panel, ratified by whom. */
   async authorityFor(orgId, rankOrder) {
     return one(`

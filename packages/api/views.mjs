@@ -343,6 +343,7 @@ export function rail({ org, vocabulary = {}, can = {}, path = '' }) {
     link(`${base}/menu`, 'Menu'),
     !isClub && can.manage && link(`${base}/appearance`, 'Appearance'),
     can.manage && link(`${base}/region`, 'Country settings'),
+    can.manage && link(`${base}/timetable`, 'Grading timetable'),
     link(`${base}/instructors`, 'Instructors'),
     isClub ? link(`${base}/club-page`, `${club} page`)
            : link(`${base}/club-pages`, `${club} pages`),
@@ -5261,3 +5262,20 @@ export const regionSettings = ({ me, csrf, org, own, inherited, values = null, d
     <p><button class="btn" type="submit">Save</button></p>
   </form>` });
 };
+
+/** How long people usually stay at each grade. A guide shown on profiles and the roll; it never stops anyone grading. */
+export const gradingTimetable = ({ me, csrf, org, owner, ladder, done, error }) => page({ title: `Grading timetable — ${org.name}`, me, csrf, body: `
+  <h1>Grading timetable</h1>
+  <p class="sub">${esc(owner.name)} · how long people usually stay at each grade before the next. It is a guide shown on
+    profiles and the roll ("due from…"); it never stops anyone grading. Leave months blank where there is no set timetable.</p>
+  ${done ? `<div class="good">${esc(done)}</div>` : ''}
+  ${error ? `<div class="bad">${esc(error)}</div>` : ''}
+  <form method="post" class="card">
+    <input type="hidden" name="_csrf" value="${esc(csrf ?? '')}">
+    <table><thead><tr><th>Grade</th><th>Usual months before the next</th><th>Next is by invitation</th></tr></thead><tbody>
+    ${[...ladder].sort((a, b) => a.rank_order - b.rank_order).map((g) => `<tr><td>${esc(g.label)}</td>
+      <td><input name="months_${esc(g.id)}" type="number" min="1" max="240" size="4" value="${esc(g.usual_months_to_next ?? '')}" aria-label="Months after ${esc(g.label)}"></td>
+      <td><input type="checkbox" name="invite_${esc(g.id)}"${g.next_by_invitation ? ' checked' : ''} aria-label="By invitation after ${esc(g.label)}"></td></tr>`).join('')}
+    </tbody></table>
+    <p><button class="btn" type="submit">Save</button></p>
+  </form>` });

@@ -1039,9 +1039,10 @@ export const myself = {
     priv.medical_notes = unseal(priv.medical_notes);
     const grade = await one(`select cg.label, cg.rank_order, cg.awarded_on::text as awarded_on,
         (select n.label from grade g join grade n on n.organisation_id = g.organisation_id
-           and n.rank_order = g.rank_order + 1 where g.id = cg.grade_id) as next_label
-      from person_current_grade cg where cg.person_id=$1`, [personId]);
-    if (grade) grade.next_grading = nextGrading({ held: { label: grade.label, awardedOn: grade.awarded_on },
+           and n.rank_order = g.rank_order + 1 where g.id = cg.grade_id) as next_label,
+        hg.usual_months_to_next as usual_months, hg.next_by_invitation as by_invitation
+      from person_current_grade cg join grade hg on hg.id = cg.grade_id where cg.person_id=$1`, [personId]);
+    if (grade) grade.next_grading = nextGrading({ held: { awardedOn: grade.awarded_on, usualMonths: grade.usual_months, byInvitation: grade.by_invitation },
       next: grade.next_label ? { label: grade.next_label } : null, today: localNow(DEFAULT_TIMEZONE).date });
     const { rows: memberships } = await pool.query(`
       select o.name, o.slug, a.role, a.status, a.paid_until::text as paid_until

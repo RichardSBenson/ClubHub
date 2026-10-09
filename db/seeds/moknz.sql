@@ -510,3 +510,13 @@ begin
   end if;
 end $$;
 
+
+-- MOKNZ's usual gaps between gradings (a guide shown on profiles and the roll).
+update grade set usual_months_to_next = case
+    when label ~* '^(8|9|10)(st|nd|rd|th) kyu$' or label ~* '^7(st|nd|rd|th) kyu$' then 6
+    when label ~* 'kyu$' then 12
+    when label ~* '^(1st dan|shodan)$' then 36
+    when label ~* '^(2nd dan|nidan|3rd dan|sandan|4th dan|yondan)$' then 48
+    else null end,
+  next_by_invitation = coalesce(label ~* '^(2nd dan|nidan|3rd dan|sandan|4th dan|yondan)$', false)
+where organisation_id = (select id from organisation where slug = 'moknz');
