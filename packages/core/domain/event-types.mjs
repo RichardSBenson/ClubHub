@@ -9,24 +9,60 @@
  * `kind` is the broader category the register already knows (grading, camp,
  * tournament…); `key` is the specific thing the federation chose from the list.
  */
-export const EVENT_TYPES = Object.freeze([
-  { key: 'camp_north',   label: 'Training Camp — North Island', kind: 'camp',       top: 'North Island', main: 'Training Camp' },
-  { key: 'camp_south',   label: 'Training Camp — South Island', kind: 'camp',       top: 'South Island', main: 'Training Camp' },
-  { key: 'shinsa_north', label: 'Shinsa — North Island',        kind: 'grading',    top: 'North Island', main: 'Shinsa' },
-  { key: 'shinsa_south', label: 'Shinsa — South Island',        kind: 'grading',    top: 'South Island', main: 'Shinsa' },
-  { key: 'nationals',    label: 'Nationals',                    kind: 'tournament', top: 'New Zealand',  main: 'Nationals' },
-  { key: 'kyu_grading',  label: 'Kyu Grading',                  kind: 'grading',    top: 'Kyu',          main: 'Grading' },
-  { key: 'seminar',      label: 'Seminar',                      kind: 'seminar',    top: null,           main: 'Seminar' },
-  { key: 'operators',    label: 'Dojo Operators Meeting',       kind: 'other',      top: 'Dojo Operators', main: 'Meeting' },
+/** What a federation that has not listed its own kinds of event is offered. */
+export const GENERIC_EVENT_TYPES = Object.freeze([
+  { key: 'camp',       label: 'Training camp', kind: 'camp',       top: null, main: 'Training Camp' },
+  { key: 'grading',    label: 'Grading',       kind: 'grading',    top: null, main: 'Grading' },
+  { key: 'tournament', label: 'Tournament',    kind: 'tournament', top: null, main: 'Tournament' },
+  { key: 'seminar',    label: 'Seminar',       kind: 'seminar',    top: null, main: 'Seminar' },
+  { key: 'meeting',    label: 'Meeting',       kind: 'other',      top: null, main: 'Meeting' },
 ]);
 
-const BY_KEY = new Map(EVENT_TYPES.map((t) => [t.key, t]));
+export const EVENT_KINDS = Object.freeze(['grading', 'tournament', 'camp', 'seminar', 'fight_night', 'training', 'social', 'other']);
 
-export const typeFor = (key) => BY_KEY.get(key) ?? null;
+/** The organisation's own list if it has one that is valid, else the generic one. */
+export function resolveEventTypes(stored) {
+  return Array.isArray(stored) && stored.length && problemsWithEventTypes(stored).length === 0
+    ? Object.freeze(stored.map((t) => Object.freeze({ key: t.key, label: t.label, kind: t.kind, top: t.top || null, main: t.main })))
+    : GENERIC_EVENT_TYPES;
+}
+
+/** What is wrong with a list of event types, as sentences. */
+export function problemsWithEventTypes(list) {
+  const out = [], seen = new Set();
+  if (!Array.isArray(list) || !list.length) return ['Add at least one kind of event.'];
+  if (list.length > 40) out.push('That is a lot of kinds of event; 40 at most.');
+  list.forEach((t, i) => {
+    const n = i + 1;
+    if (!/^[a-z][a-z0-9_]{0,39}$/.test(String(t?.key ?? ''))) out.push(`Row ${n}: the code is lowercase letters, numbers and underscores, starting with a letter.`);
+    else if (seen.has(t.key)) out.push(`Row ${n}: the code "${t.key}" is used twice.`);
+    else seen.add(t.key);
+    if (!String(t?.label ?? '').trim()) out.push(`Row ${n}: a name is needed.`);
+    if (!EVENT_KINDS.includes(t?.kind)) out.push(`Row ${n}: choose what sort of event it is.`);
+    if (!String(t?.main ?? '').trim()) out.push(`Row ${n}: the banner needs its main word.`);
+    for (const k of ['label', 'top', 'main']) if (String(t?.[k] ?? '').length > 80) out.push(`Row ${n}: ${k} is too long.`);
+  });
+  return out;
+}
+
+/** The editor's form: rows `key_i`, `label_i`, `kind_i`, `top_i`, `main_i`; a blank row is ignored, `remove_i` drops one. */
+export function readEventTypesForm(f = {}) {
+  const rows = [];
+  for (let i = 0; i < 60; i++) {
+    if (f[`remove_${i}`] === 'on') continue;
+    const row = { key: String(f[`key_${i}`] ?? '').trim(), label: String(f[`label_${i}`] ?? '').trim(), kind: String(f[`kind_${i}`] ?? '').trim(),
+      top: String(f[`top_${i}`] ?? '').trim() || null, main: String(f[`main_${i}`] ?? '').trim() };
+    if (!row.key && !row.label && !row.main) continue;
+    rows.push(row);
+  }
+  return rows;
+}
+
+export const typeFor = (key, types = GENERIC_EVENT_TYPES) => types.find((t) => t.key === key) ?? null;
 
 /** The title to offer when somebody picks a type and has not typed one. */
-export const defaultTitle = (key) => {
-  const t = typeFor(key);
+export const defaultTitle = (key, types = GENERIC_EVENT_TYPES) => {
+  const t = typeFor(key, types);
   return t ? [t.top, t.main].filter(Boolean).join(' ') : '';
 };
 
@@ -36,14 +72,14 @@ export const defaultTitle = (key) => {
  * Shihan Tanaka" reads as itself above the word SEMINAR. An event with no
  * type shows its title and its kind.
  */
-export function bannerLines(ev) {
-  const t = typeFor(ev.type_key ?? ev.typeKey);
+export function bannerLines(ev, types = GENERIC_EVENT_TYPES) {
+  const t = typeFor(ev.type_key ?? ev.typeKey, types);
   if (!t) return { top: ev.title, main: String(ev.kind ?? '').replace('_', ' ') };
   return { top: t.top ?? ev.title, main: t.main };
 }
 
 /** Normalises a form value: a known key, or null. */
-export const readType = (v) => (BY_KEY.has(v) ? v : null);
+export const readType = (v, types = GENERIC_EVENT_TYPES) => (types.some((t) => t.key === v) ? v : null);
 
 const SAFE_URL = /^https:\/\/[^\s"'<>]+$/i;
 const EMAIL = /^[^\s@<>"']+@[^\s@<>"']+\.[^\s@<>"']+$/;

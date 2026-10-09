@@ -27,9 +27,9 @@ export const BUILT_IN = Object.freeze({
   // it is not a neutral choice and is not the default.
   'kyokushin-classic': {
     format: 'honbu-theme', version: 1,
-    name: 'Kyokushin Classic',
+    name: 'Classic dojo',
     description: 'Red and gold on near-black, with type that carries kanji. '
-      + 'The look the Mas Oyama federation launched with.',
+      + 'A traditional, high-contrast look.',
     author: 'Honbu',
     layout: 'classic',
     colours: { primary: '#CE372C', accent: '#F0CE41', ink: '#161617',

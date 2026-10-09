@@ -7,7 +7,7 @@
 
 import { pool } from '../../infrastructure/postgres/pool.mjs';
 import { DEFAULT_TIMEZONE } from '../../core/domain/defaults.mjs';
-import { region } from '../../infrastructure/region-context.mjs';
+import { region, eventTypes } from '../../infrastructure/region-context.mjs';
 import { normaliseGender } from '../../core/domain/people.mjs';
 import { readType, problemsWithDetail } from '../../core/domain/event-types.mjs';
 import { MANAGE, REGISTER, TEACH } from '../../core/domain/access.mjs';
@@ -595,7 +595,7 @@ export const eventDetails = {
   read(form) {
     const t = (k) => (String(form[k] ?? '').trim() || null);
     const n = (k) => { const v = t(k); return v == null ? null : Number(v); };
-    const d = { typeKey: readType(form.eventType), contactName: t('contactName'), contactEmail: t('contactEmail'),
+    const d = { typeKey: readType(form.eventType, eventTypes()), contactName: t('contactName'), contactEmail: t('contactEmail'),
       contactPhone: t('contactPhone'), costNote: t('costNote'), infoUrl: t('infoUrl'),
       description: (String(form.description ?? '').replace(/\r\n?/g, '\n').trim() || null),
       latitude: n('latitude'), longitude: n('longitude') };

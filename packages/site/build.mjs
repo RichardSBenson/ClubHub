@@ -209,7 +209,7 @@ for (const target of SITES) {
     continue;
   }
   // This federation's currency, language and age of adulthood apply to everything built for it.
-  enterRegion(federation.settings?.region ?? {});
+  enterRegion(federation.settings?.region ?? {}, federation.settings?.eventTypes);
 
   const orgSettings = federation.settings ?? {};
   const atRoot = target.base === '';

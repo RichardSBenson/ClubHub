@@ -1,4 +1,17 @@
-import { EVENT_TYPES, typeFor, defaultTitle, bannerLines, readType, problemsWithDetail, mapLinks } from './domain/event-types.mjs';
+import { typeFor as typeFor0, defaultTitle as defaultTitle0, bannerLines as bannerLines0, readType as readType0, problemsWithDetail, mapLinks } from './domain/event-types.mjs';
+// A federation's list, as MOKNZ keeps it in its own data. The code carries no list of its own.
+const EVENT_TYPES = [
+  { key: 'camp_north', label: 'Training Camp — North Island', kind: 'camp', top: 'North Island', main: 'Training Camp' },
+  { key: 'camp_south', label: 'Training Camp — South Island', kind: 'camp', top: 'South Island', main: 'Training Camp' },
+  { key: 'shinsa_north', label: 'Shinsa — North Island', kind: 'grading', top: 'North Island', main: 'Shinsa' },
+  { key: 'shinsa_south', label: 'Shinsa — South Island', kind: 'grading', top: 'South Island', main: 'Shinsa' },
+  { key: 'nationals', label: 'Nationals', kind: 'tournament', top: 'New Zealand', main: 'Nationals' },
+  { key: 'kyu_grading', label: 'Kyu Grading', kind: 'grading', top: 'Kyu', main: 'Grading' },
+  { key: 'seminar', label: 'Seminar', kind: 'seminar', top: null, main: 'Seminar' },
+  { key: 'operators', label: 'Dojo Operators Meeting', kind: 'other', top: 'Dojo Operators', main: 'Meeting' },
+];
+const typeFor = (k) => typeFor0(k, EVENT_TYPES), defaultTitle = (k) => defaultTitle0(k, EVENT_TYPES);
+const bannerLines = (e) => bannerLines0(e, EVENT_TYPES), readType = (v) => readType0(v, EVENT_TYPES);
 let pass = 0, fail = 0;
 const ok = (n, c) => { c ? pass++ : (fail++, console.log('  ✗', n)); };
 ok('the eight types are there', EVENT_TYPES.length === 8 && ['camp_north', 'camp_south', 'shinsa_north', 'shinsa_south', 'nationals', 'kyu_grading', 'seminar', 'operators'].every((k) => typeFor(k)));

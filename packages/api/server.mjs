@@ -97,7 +97,7 @@ import { esc } from '../core/domain/html.mjs';
 import { MANAGE, REGISTER, TEACH, WRITE } from '../core/domain/access.mjs';
 import { registerSettingsRoutes } from './routes-settings.mjs';
 import { DEFAULT_TIMEZONE } from '../core/domain/defaults.mjs';
-import { region, setRegion, withRegion } from '../infrastructure/region-context.mjs';
+import { region, setRegion, setEventTypes, eventTypes, withRegion } from '../infrastructure/region-context.mjs';
 
 const SESSION_COOKIE = 'honbu_session';
 const CSRF_COOKIE = 'honbu_csrf';
@@ -4279,7 +4279,7 @@ async function organisationFor(ctx, { toSchedule = false,
 
   if (!ctx.me.scope?.some((o) => o.id === org.id))
     throw new Forbidden(`You do not have access to ${org.name}.`);
-  setRegion(await orgs.regionOf(org.id));
+  setRegion(await orgs.regionOf(org.id)); setEventTypes(await orgs.eventTypesOf(org.id));
 
   if (toSchedule && !await mayScheduleAt(ctx, org.id)) {
     throw new Forbidden(
@@ -4367,9 +4367,9 @@ async function gradesFor(org) {
 function eventFieldsFrom(form, zone) {
   const text = (k) => (form[k]?.trim() ? form[k].trim() : null);
   const number = (k) => (form[k]?.trim() ? form[k].trim() : null);
-  const type = typeFor(readType(form.eventType));
+  const type = typeFor(readType(form.eventType, eventTypes()), eventTypes());
   return {
-    title: form.title?.trim() || (type ? defaultTitle(type.key) : ''),
+    title: form.title?.trim() || (type ? defaultTitle(type.key, eventTypes()) : ''),
     kind: type ? type.kind : form.kind,
     slug: text('slug'),
     summary: text('summary'),
@@ -4755,8 +4755,7 @@ async function handle(req, res) {
       }
     },
   };
-  if (ctx.me?.home?.id) // their own country applies until a page is about another organisation
-    setRegion(await orgs.regionOf(ctx.me.home.id));
+  if (ctx.me?.home?.id) setRegion(await orgs.regionOf(ctx.me.home.id)), setEventTypes(await orgs.eventTypesOf(ctx.me.home.id));
 
   // A demonstration session may look at anything it can see and change
   // nothing. Enforced here rather than in each route, so a route written next

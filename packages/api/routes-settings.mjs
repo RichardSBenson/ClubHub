@@ -7,6 +7,7 @@ import { orgs, rank, Forbidden, Invalid } from './data.mjs';
 import * as V from './views.mjs';
 import { readRegionForm } from '../core/domain/region.mjs';
 import { readTimetable } from '../core/domain/next-grading.mjs';
+import { readEventTypesForm, problemsWithEventTypes } from '../core/domain/event-types.mjs';
 
 export function registerSettingsRoutes({ get, post, organisationFor, mayPublishAt, requestRebuild }) {
   async function regionPage(ctx, org, extra = {}) {
@@ -53,5 +54,24 @@ export function registerSettingsRoutes({ get, post, organisationFor, mayPublishA
     if (problems.length) return timetablePage(ctx, org, { status: 422, error: problems.join(' ') });
     await rank.setTimetable(ctx.me.accountId, owner.id, rows);
     return ctx.redirect(`/o/${org.slug}/timetable?done=${encodeURIComponent('Saved.')}`);
+  });
+
+  /** The kinds of event this federation runs, and how each is announced. */
+  const typesPage = async (ctx, org, extra = {}) =>
+    ctx.send(extra.status ?? 200, V.eventTypesEditor({ me: ctx.me, csrf: ctx.csrf, org, types: extra.types ?? await orgs.eventTypesOf(org.id),
+      own: !!(await orgs.hasOwnEventTypes(org.id)), done: ctx.url.searchParams.get('done'), ...extra }));
+  get('/o/:slug/event-types', async (ctx) => {
+    const org = await organisationFor(ctx);
+    if (!await mayPublishAt(ctx, org.id)) throw new Forbidden('Changing the kinds of event needs an owner or administrator.');
+    return typesPage(ctx, org);
+  });
+  post('/o/:slug/event-types', async (ctx) => {
+    const org = await organisationFor(ctx);
+    const types = readEventTypesForm(await ctx.form());
+    const problems = problemsWithEventTypes(types);
+    if (problems.length) return typesPage(ctx, org, { status: 422, error: problems.join(' '), types });
+    await orgs.saveEventTypes(ctx.me.accountId, org.id, types);
+    await requestRebuild({ reason: 'event types' });
+    return ctx.redirect(`/o/${org.slug}/event-types?done=${encodeURIComponent('Saved.')}`);
   });
 }

@@ -21,7 +21,7 @@ import { makeShowcase, SHOWCASE_CSS } from './showcase.mjs';
 import { esc } from '../core/domain/html.mjs';
 import { tidyMoney } from '../core/domain/money.mjs';
 import { DEFAULT_TIMEZONE, DEFAULT_COUNTRY } from '../core/domain/defaults.mjs';
-import { region } from '../infrastructure/region-context.mjs';
+import { region, eventTypes } from '../infrastructure/region-context.mjs';
 
 
 const DAYS = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
@@ -60,7 +60,7 @@ function shortRange(starts, ends, tz = DEFAULT_TIMEZONE) {
  * changed line, and it stays sharp, searchable and readable by a screen reader.
  */
 function eventBanner(ev, { logoUrl = null, federationName = '', small = false, vocabulary = {} } = {}) {
-  const { top, main } = bannerLines(ev);
+  const { top, main } = bannerLines(ev, eventTypes());
   // Who is running it: the dojo's name. An event the federation itself runs does not say so twice.
   const host = ev.from_org && ev.from_org !== federationName ? `${ev.from_org} ${capitalise(clubWord(vocabulary))}` : '';
   return `<div class="evbanner${small ? ' small' : ''}">

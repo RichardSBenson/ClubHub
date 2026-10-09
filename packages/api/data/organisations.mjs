@@ -18,6 +18,7 @@ import { cents } from '../../core/domain/csv.mjs';
 import { builtInFor, builtInYears, yearToOffer, termState, mayEnrol, holidays as termHolidays, inHoliday, termPrice, readMidTerm, problemsWithMidTerm, problemsWithTerm, offersDue, CALENDARS } from '../../core/domain/terms.mjs';
 import { MANAGE, REGISTER } from '../../core/domain/access.mjs';
 import { resolveRegion, problemsWithRegion } from '../../core/domain/region.mjs';
+import { resolveEventTypes, problemsWithEventTypes } from '../../core/domain/event-types.mjs';
 import { family, people } from './people.mjs';
 import { Invalid, NotFound, PERSON_COLUMNS, WRITE_PAGES, ageOnDate, assertRole, clubMail, clubOnly, feeRows, one, q, todayAt } from './shared.mjs';
 
@@ -67,6 +68,29 @@ export const orgs = {
       order by nlevel(a.path) desc
       limit 1`, [orgId]);
     return resolveRegion(row?.region ?? {});
+  },
+  /** The kinds of event this organisation runs: the nearest list up the tree, else the generic one. */
+  async eventTypesOf(orgId) {
+    if (!orgId) return resolveEventTypes(null);
+    const row = await one(`
+      select a.settings->'eventTypes' as types
+      from organisation target
+      join organisation a on target.path <@ a.path
+      where target.id = $1 and a.settings ? 'eventTypes'
+      order by nlevel(a.path) desc
+      limit 1`, [orgId]);
+    return resolveEventTypes(row?.types);
+  },
+  /** Whether this organisation has its own list (not one inherited or the generic one). */
+  async hasOwnEventTypes(orgId) {
+    return !!(await one(`select 1 as ok from organisation where id = $1 and settings ? 'eventTypes'`, [orgId]));
+  },
+  async saveEventTypes(actor, orgId, list) {
+    await assertRole(actor, orgId, MANAGE);
+    const problems = problemsWithEventTypes(list);
+    if (problems.length) throw new Invalid(problems.join(' '));
+    await pool.query(`update organisation set settings = jsonb_set(coalesce(settings,'{}'::jsonb), '{eventTypes}', $2::jsonb) where id = $1`, [orgId, JSON.stringify(list)]);
+    await pool.query(`insert into audit_log (account_id, organisation_id, action, entity, entity_id) values ($1,$2,'event_types_changed','organisation',$2)`, [actor, orgId]);
   },
   /** What this organisation itself has set (not inherited), or null. */
   async ownRegion(orgId) {

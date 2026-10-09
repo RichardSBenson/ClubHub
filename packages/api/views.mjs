@@ -4,7 +4,7 @@ import { describe as auditDescribe, weight as auditWeight }
 import { highlight as searchHighlight, linkTo as searchLinkTo }
   from '../content/search.mjs';
 import { REASON_WORDS } from '../core/domain/repeat-entry.mjs';
-import { EVENT_TYPES } from '../core/domain/event-types.mjs';
+import { region, eventTypes } from '../infrastructure/region-context.mjs';
 import { nextGradingWords } from '../core/domain/next-grading.mjs';
 import { photoNeedsConsent } from '../core/domain/documents.mjs';
 import { ageOn as personAgeOn } from '../core/domain/people.mjs';
@@ -50,7 +50,6 @@ const VOCABULARY = (() => {
 
 import { esc } from '../core/domain/html.mjs';
 import { DEFAULT_TIMEZONE } from '../core/domain/defaults.mjs';
-import { region } from '../infrastructure/region-context.mjs';
 import { money as cents, dollars as money } from '../core/domain/money.mjs';
 
 const V = VOCABULARY;
@@ -254,7 +253,7 @@ table.writing-help code{background:var(--soft);padding:2px 6px;border-radius:4px
 const RAIL_MARKER = '<!--honbu:rail-->';
 const MENU_BUTTON_MARKER = '<!--honbu:menubutton-->';
 
-function page({ title, me, body, csrf, query = '', wide = false, head = '' }) {
+export function page({ title, me, body, csrf, query = '', wide = false, head = '' }) {
   const search = me ? `<form method="get" action="/search" class="find" role="search">
     <label class="hide-sm" for="q">Find</label>
     <input id="q" name="q" type="search" placeholder="a name, a number, anything"
@@ -344,6 +343,7 @@ export function rail({ org, vocabulary = {}, can = {}, path = '' }) {
     !isClub && can.manage && link(`${base}/appearance`, 'Appearance'),
     can.manage && link(`${base}/region`, 'Country settings'),
     can.manage && link(`${base}/timetable`, 'Grading timetable'),
+    can.manage && link(`${base}/event-types`, 'Kinds of event'),
     link(`${base}/instructors`, 'Instructors'),
     isClub ? link(`${base}/club-page`, `${club} page`)
            : link(`${base}/club-pages`, `${club} pages`),
@@ -1262,7 +1262,7 @@ export const eventForm = ({ me, csrf, org, values = {}, zone, error,
       <span class="hint">The website announces it with a banner made from this and the date.</span></label>
     <select id="eventType" name="eventType" style="max-width:360px">
       <option value="">Something else</option>
-      ${EVENT_TYPES.map((t) => option(t.key, t.label, v('eventType'))).join('')}
+      ${eventTypes().map((t) => option(t.key, t.label, v('eventType'))).join('')}
     </select>
 
     <label for="title">Title
@@ -5235,47 +5235,4 @@ export const shopAdminScreen = ({ me, csrf, org, isClub, own = [], national = []
   <h3>Add an item</h3>
   <form method="post" action="${base}/products">${tok}${fields()}<button class="btn" type="submit">Add</button></form>` });
 };
-
-/** Currency, language and the age of adulthood: set once for a federation, inherited by its clubs. */
-export const regionSettings = ({ me, csrf, org, own, inherited, values = null, done, error }) => {
-  const v = values ?? own ?? inherited;
-  return page({ title: `Country settings — ${org.name}`, me, csrf, body: `
-  <h1>Country settings</h1>
-  <p class="sub">${esc(org.name)} · what money, dates and "under age" mean here.
-    ${org.type === 'club' ? 'A club normally uses its federation\'s settings; set these only if this club differs.'
-      : 'Every club beneath this organisation uses these unless it sets its own.'}</p>
-  ${done ? `<div class="good">${esc(done)}</div>` : ''}
-  ${error ? `<div class="bad">${esc(error)}</div>` : ''}
-  <form method="post" class="card">
-    <input type="hidden" name="_csrf" value="${esc(csrf ?? '')}">
-    <div class="row">
-      <div><label for="currency">Currency</label>
-        <input id="currency" name="currency" maxlength="3" size="4" required value="${esc(v.currency)}">
-        <span class="hint">A three-letter code: NZD, AUD, USD, GBP, EUR, CAD…</span></div>
-      <div><label for="locale">Language and date style</label>
-        <input id="locale" name="locale" maxlength="20" size="8" required value="${esc(v.locale)}">
-        <span class="hint">en-NZ, en-AU, en-US, en-GB, fr-CA, ja…</span></div>
-      <div><label for="adultAge">Age of adulthood</label>
-        <input id="adultAge" name="adultAge" type="number" min="16" max="21" required value="${esc(v.adultAge)}">
-        <span class="hint">Under this age a parent or guardian signs for a person, and photographs need their consent.</span></div>
-    </div>
-    <p><button class="btn" type="submit">Save</button></p>
-  </form>` });
-};
-
-/** How long people usually stay at each grade. A guide shown on profiles and the roll; it never stops anyone grading. */
-export const gradingTimetable = ({ me, csrf, org, owner, ladder, done, error }) => page({ title: `Grading timetable — ${org.name}`, me, csrf, body: `
-  <h1>Grading timetable</h1>
-  <p class="sub">${esc(owner.name)} · how long people usually stay at each grade before the next. It is a guide shown on
-    profiles and the roll ("due from…"); it never stops anyone grading. Leave months blank where there is no set timetable.</p>
-  ${done ? `<div class="good">${esc(done)}</div>` : ''}
-  ${error ? `<div class="bad">${esc(error)}</div>` : ''}
-  <form method="post" class="card">
-    <input type="hidden" name="_csrf" value="${esc(csrf ?? '')}">
-    <table><thead><tr><th>Grade</th><th>Usual months before the next</th><th>Next is by invitation</th></tr></thead><tbody>
-    ${[...ladder].sort((a, b) => a.rank_order - b.rank_order).map((g) => `<tr><td>${esc(g.label)}</td>
-      <td><input name="months_${esc(g.id)}" type="number" min="1" max="240" size="4" value="${esc(g.usual_months_to_next ?? '')}" aria-label="Months after ${esc(g.label)}"></td>
-      <td><input type="checkbox" name="invite_${esc(g.id)}"${g.next_by_invitation ? ' checked' : ''} aria-label="By invitation after ${esc(g.label)}"></td></tr>`).join('')}
-    </tbody></table>
-    <p><button class="btn" type="submit">Save</button></p>
-  </form>` });
+export * from './views-settings.mjs';
