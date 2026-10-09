@@ -54,7 +54,8 @@ const signIn = async (email) => {
       }
     });
 };
-const find = (q) => req(`/search?q=${encodeURIComponent(q)}`);
+const find = (q) => req(`/search?q=${encodeURIComponent(q)}&list=1`);
+const findPlain = (q) => req(`/search?q=${encodeURIComponent(q)}`);
 
 // Somebody with a macron in their name, at Whanganui.
 const wh = await one(`select id from organisation where slug='whanganui'`);
@@ -183,6 +184,15 @@ console.log('\nWHAT ANOTHER CLUB CANNOT FIND');
     !email.html.includes('Doug Holloway'), 'LEAKED a person');
   ok('and gets an empty result rather than a refusal',
     email.html.includes('Nothing found'));
+}
+
+console.log('\nA SINGLE PERSON MATCHING TAKES YOU TO THEM');
+{
+  const one1 = await findPlain('Tamati');
+  const lone = await findPlain('Zzzzqqq');
+  ok('no match stays on the results page', lone.status === 200, `${lone.status}`);
+  ok('one person matching opens their profile, or lists several', one1.status === 302 ? /^\/p\//.test(one1.location) : one1.status === 200,
+    `${one1.status} ${one1.location}`);
 }
 
 console.log('\nAND SIGNED OUT, NOTHING AT ALL');

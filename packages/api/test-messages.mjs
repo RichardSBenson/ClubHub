@@ -174,6 +174,11 @@ console.log('\nOTHER AUDIENCES');
   const inst = await messages.prepare(doug.id, whanganui.id, input({ audience: 'instructors' }), { baseFrom: BASE });
   ok('instructors only', inst.recipients === 1);
 
+  const bb = await messages.prepare(doug.id, federation.id, input({ audience: 'udansha', subject: 'Black belts' }), { baseFrom: BASE }).catch((e) => e);
+  const allBb = await messages.prepare(doug.id, federation.id, input({ subject: 'Everyone' }), { baseFrom: BASE }).catch((e) => e);
+  ok('black belts only is a subset of everyone', !(bb instanceof Error) && !(allBb instanceof Error) && bb.recipients <= allBb.recipients,
+    String(bb.message ?? bb.recipients));
+
   const fed = await messages.prepare(doug.id, federation.id, input({ subject: 'To all' }), { baseFrom: BASE }).catch((e) => e);
   ok('a federation administrator reaches every club under it',
     !(fed instanceof Error) && fed.recipients >= 6, String(fed.message ?? fed.recipients));

@@ -168,7 +168,7 @@ console.log('\nAN ADDRESS THAT IS SOMEBODY ELSE\'S');
     { method: 'POST', form: { email: other.email, role: 'member' } });
   ok('taking over another account is refused', r.status === 422, String(r.status));
   ok('and says so plainly',
-    r.html.includes('already belongs to somebody else'), 'no explanation');
+    /already belongs to .+ account|already has an account on/.test(r.html), 'no explanation');
 }
 
 console.log('\nONLY PEOPLE YOU ALREADY ADMINISTER');

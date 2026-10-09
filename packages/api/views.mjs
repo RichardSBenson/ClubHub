@@ -3445,7 +3445,7 @@ export const messagesScreen = ({ me, csrf, org, history = [], events = [], sende
 };
 
 const AUDIENCE_CHOICES = [
-  ['members', 'Everyone in the club'], ['instructors', 'Instructors only'],
+  ['members', 'Everyone (every member of this organisation and the clubs under it)'], ['instructors', 'Instructors only'], ['udansha', 'Black belts only (udansha)'],
   ['event', 'People entered in an event'], ['person', 'One person'],
 ];
 const KIND_CHOICES = [['announcement', 'Announcement'], ['event', 'About an event they entered']];

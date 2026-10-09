@@ -2240,3 +2240,8 @@ create table if not exists declaration_signing (
   unique (person_id, declaration_id)
 );
 create index if not exists declaration_signing_person on declaration_signing (person_id);
+-- applied-when: select exists (select 1 from information_schema.check_constraints where constraint_name = 'message_audience_check' and check_clause like '%udansha%')
+-- A message can go to black belts only.
+alter table message drop constraint if exists message_audience_check;
+alter table message add constraint message_audience_check
+  check (audience in ('members','instructors','udansha','event','person','selected'));

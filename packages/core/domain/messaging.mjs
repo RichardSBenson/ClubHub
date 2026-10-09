@@ -12,8 +12,9 @@
  */
 
 export const AUDIENCES = Object.freeze([
-  ['members',     'Everyone in the club'],
+  ['members',     'Everyone (every member of this organisation and the clubs under it)'],
   ['instructors', 'Instructors only'],
+  ['udansha',     'Black belts only (udansha)'],
   ['event',       'People entered in an event'],
   ['person',      'One person'],
   ['selected',    'People picked from a list'],   // not offered on the compose screen

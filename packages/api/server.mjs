@@ -1775,6 +1775,9 @@ get('/search', async (ctx) => {
   ctx.requireActor();
   const raw = ctx.url.searchParams.get('q') ?? '';
   const { query, results } = await search.everything(ctx.me.accountId, raw);
+  // One person and nothing else matches: that is who was meant, so open them rather than listing one row.
+  if (results.length === 1 && results[0].kind === 'person' && ctx.url.searchParams.get('list') !== '1')
+    return ctx.redirect(`/p/${results[0].id}`);
   return ctx.send(200, V.searchResults({
     me: ctx.me, csrf: ctx.csrf, query, results,
     vocabulary: await orgs.vocabulary(ctx.me.home?.id ?? null),

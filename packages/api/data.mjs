@@ -315,6 +315,19 @@ export const people = {
     try {
       await client.query('begin');
 
+      // One enrolment at a time, so a form submitted twice (a double tap, a slow connection) is judged the second
+      // time against the first, instead of both passing the check together.
+      await client.query(`select pg_advisory_xact_lock(hashtext('enrol-person'))`);
+
+      // The same name with the same date of birth or the same email is the same person (a parent's email shared with a child is fine). Adding them twice is how a second,
+      // empty record ends up being the one somebody opens, so refuse it and say where the first one is.
+      const { rows: [twin] } = await client.query(`select display_number, first_name, last_name from person
+        where lower(first_name) = lower($1) and lower(last_name) = lower($2)
+          and (($3::date is not null and date_of_birth = $3::date)
+            or ($4::text is not null and lower(email) = lower($4)))
+        order by id limit 1`, [firstName.trim(), lastName.trim(), dateOfBirth, email?.trim() || null]);
+      if (twin) throw new Invalid(`${twin.first_name} ${twin.last_name} is already on the register as ${twin.display_number}. Open that record instead of adding them again.`);
+
       // The federation's prefix, and the next number in its sequence. Inside
       // the transaction so two registrars saving at once cannot collide.
       const { rows: [fed] } = await client.query(`
@@ -427,10 +440,16 @@ export const people = {
       // An address already used by somebody else is a different person, not
       // this one. Silently attaching it would hand over their account.
       const { rows: [clash] } = await client.query(
-        `select person_id from account where email = $1`, [address]);
+        `select a.person_id, p.first_name, p.last_name, p.display_number, p.date_of_birth::text as dob
+           from account a left join person p on p.id = a.person_id where a.email = $1`, [address]);
       if (clash && clash.person_id && clash.person_id !== personId) {
-        throw new Invalid(
-          `${address} already belongs to somebody else's account.`);
+        // Say whose it is. Most often it is the same person entered twice, and the register should say so.
+        const mine = (await client.query(`select first_name, last_name, date_of_birth::text as dob from person where id = $1`, [personId])).rows[0];
+        const same = mine && clash.first_name?.toLowerCase() === mine.first_name.toLowerCase()
+          && clash.last_name?.toLowerCase() === mine.last_name.toLowerCase() && clash.dob === mine.dob;
+        throw new Invalid(same
+          ? `${address} already has an account on ${clash.first_name} ${clash.last_name} (${clash.display_number}), who looks like the same person entered twice. Open ${clash.display_number} instead.`
+          : `${address} already belongs to ${clash.first_name} ${clash.last_name}'s account (${clash.display_number}).`);
       }
 
       const { rows: [account] } = await client.query(`
@@ -3418,6 +3437,15 @@ const peopleIn = async (org, audience, { eventId, personId, personIds }) => {
       join organisation o on o.id = e.organisation_id
       where e.id = $2 and o.path <@ $1::ltree and en.person_id is not null`,
       [org.path, eventId]);
+    return r.map((x) => x.id);
+  }
+  if (audience === 'udansha') {
+    // Black belts: whoever's current grade is a dan grade, anywhere under this organisation.
+    const r = await q(`
+      select distinct a.person_id as id from affiliation a
+      join organisation o on o.id = a.organisation_id
+      join person_current_grade cg on cg.person_id = a.person_id and cg.is_dan
+      where o.path <@ $1::ltree and a.ends is null and a.status = 'active'`, [org.path]);
     return r.map((x) => x.id);
   }
   const roles = audience === 'instructors' ? ['instructor'] : ['member', 'instructor', 'assistant', 'official'];
