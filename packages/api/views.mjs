@@ -280,6 +280,7 @@ function page({ title, me, body, csrf, query = '', wide = false, head = '' }) {
   </div>
 </div>
 <script src="/vendor/pwa.js" defer></script>
+<script src="/vendor/day-of-week.js" defer></script>
 </body></html>`;
 }
 

@@ -467,7 +467,7 @@ for (const target of SITES) {
     } catch (e) { if (e.code !== 'ENOENT') throw e; }
 
     // The installable app: manifest, icons, offline page, service worker, and the two small scripts that use them.
-    for (const f of ['pwa.js', 'push.js']) {
+    for (const f of ['pwa.js', 'push.js', 'day-of-week.js']) {
       await fs.copyFile(new URL(`../../vendor/honbu/${f}`, import.meta.url).pathname, path.join(OUT, 'vendor', f));
       written.push(`vendor/${f}`);
     }

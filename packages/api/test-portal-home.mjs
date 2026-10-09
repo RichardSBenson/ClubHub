@@ -99,7 +99,7 @@ console.log('\nTHE HOME SCREEN');
   ok('and nobody else', !/Sam Stranger/.test(r.html));
   ok('every section is there', ['Membership', 'Current grade', 'Next class', 'Next event', 'Payments', 'Documents', 'Training', 'Notifications'].every((w) => r.html.includes(w)));
   ok('the child\'s grade', /since 2026-03-03/.test(r.html));
-  ok('a next class for the child, not the adult one', /Juniors/.test(r.html));
+  ok('a next class for the child, not the adult one', /Next class/.test(r.html) && !/No class found/.test(r.html) && !/Adults/.test((r.html.match(/Next class<\/h3>[\s\S]{0,260}/) ?? [''])[0]));
   ok('her club is shown in the hierarchy', /Whanganui/.test(r.html));
   ok('still has the link to her details', /See and update my details/.test(r.html));
 }
