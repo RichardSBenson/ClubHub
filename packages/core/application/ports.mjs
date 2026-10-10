@@ -514,3 +514,27 @@ export const PAYMENT_LEDGER = {
     'convertTrial', 'promoteReferral', 'referralAwaitingReward', 'nextReceipt', 'voidUnpaid', 'organisationById', 'personByNumber',
     'clubHomeOf', 'federationAbove', 'createRequest', 'audit'],
 };
+
+/**
+ * A club's prices and who owes them: the fee schedule, the roll with where each member's fees stand, reminders, exemptions.
+ * `atomically(work)` runs `work(store)` as one unit.
+ *   clubById(id)                      — the organisation row or null
+ *   todayAt(organisation)             — 'YYYY-MM-DD' where it is
+ *   feeRows(clubId)                   — the club's prices
+ *   endFeesBefore({ clubId, appliesTo, period, from }) — stops any price running past the day before `from`
+ *   addFee({ clubId, label, cents, period, appliesTo, from, currency }) — { id }
+ *   removeFee(clubId, feeId)          — { label, amount_cents } or null
+ *   rosterRows(clubId, timezone)      — each member with status, fee_exempt, paid_until, age, asked, auto_renew, last_reminded
+ *   remindersEnabled(clubId) / setReminders(clubId, enabled)
+ *   requestRenewal({ clubId, personId, cents, currency, actorId, affiliationId, months, description }) — the payment id
+ *   setExemption({ clubId, affiliationId, exempt, reason }) — the person id, or null
+ *   voidAskedFor(affiliationId)       — withdraws any unpaid renewal request
+ *   personName(personId)
+ *   affiliationOf(clubId, affiliationId) — { id, person_id, fee_exempt } or null
+ *   audit({ actorId, organisationId, action, entity, entityId, after })
+ */
+export const RENEWAL_STORE = {
+  name: 'RenewalStore',
+  methods: ['atomically', 'clubById', 'todayAt', 'feeRows', 'endFeesBefore', 'addFee', 'removeFee', 'rosterRows', 'remindersEnabled',
+    'setReminders', 'requestRenewal', 'setExemption', 'voidAskedFor', 'personName', 'affiliationOf', 'audit'],
+};

@@ -9,11 +9,12 @@ import { pool } from '../../infrastructure/postgres/pool.mjs';
 import { region, words } from '../../infrastructure/region-context.mjs';
 const clubWord = () => words().club.toLowerCase();
 import { isTestProvider } from '../../infrastructure/payments/providers.mjs';
-import { dueForReminder, reminderText, PERIODS, standing, feeFor, problemsWithFee, problemsWithExemption, whyNotMethod } from '../../core/domain/membership.mjs';
-import { centsFrom } from '../../core/domain/payments.mjs';
+import { dueForReminder, reminderText, PERIODS, feeFor } from '../../core/domain/membership.mjs';
 import { chargeDue, afterFailure, problemsWithSetup, cardLabel, METHODS as AUTO_METHODS, PERIOD_CHOICES, CHARGE_LEAD_DAYS, MAX_FAILURES } from '../../core/domain/autorenew.mjs';
 import { readBasket, readNote, mayMoveOrder, ORDER_STATUSES } from '../../core/domain/shop.mjs';
 import { SettlePayment, ListPaymentsFor, ListOwed, ViewPayment, PayPayment, CompleteTestPayment, PaymentsReceived, RecordManualPayment, RequestPayment, CancelPaymentRequest, renewMembership } from '../../core/application/payments.mjs';
+import { ListFees, SaveFee, RemoveFee, RenewalRoster, RemindMembers, SetReminders, AskToRenew, SetExemption, CarryExemptMemberOn } from '../../core/application/renewals.mjs';
+import { PostgresRenewalStore } from '../../infrastructure/postgres/renewal-store.mjs';
 import { PostgresPaymentLedger } from '../../infrastructure/postgres/payment-ledger.mjs';
 import { PostgresAuthorisation } from '../../infrastructure/postgres/repositories.mjs';
 import { MANAGE, REGISTER } from '../../core/domain/access.mjs';
@@ -118,181 +119,48 @@ export const payments = {
   cancel: (actor, orgId, paymentId) => speakingForThisLayer(() => cancelPaymentRequest.execute({ actorId: actor, organisationId: orgId, paymentId })),
 };
 
+const renewalDeps = { store: new PostgresRenewalStore(pool, pool, { feeRows }), auth: new PostgresAuthorisation(pool), adultAge: () => region().adultAge, currency: () => region().currency };
+const listFees = new ListFees(renewalDeps);
+const saveFee = new SaveFee(renewalDeps);
+const removeFee = new RemoveFee(renewalDeps);
+const renewalRoster = new RenewalRoster(renewalDeps);
+const remindMembers = new RemindMembers(renewalDeps);
+const setReminders = new SetReminders(renewalDeps);
+const askToRenew = new AskToRenew({ ...renewalDeps, recordManual: (x) => recordManualPayment.execute(x) });
+const setExemption = new SetExemption(renewalDeps);
+const carryExemptMemberOn = new CarryExemptMemberOn({ ...renewalDeps, carryOn: (id, months) => renewMembershipNow(id, months) });
+
 export const fees = {
   /** Anybody who runs renewals may see the prices; setting them is for administrators. */
-  async list(actor, orgId) {
-    await assertRole(actor, orgId, REGISTER);
-    await clubOnly(orgId);
-    return feeRows(orgId);
-  },
-
-  async save(actor, orgId, input) {
-    await assertRole(actor, orgId, MANAGE);
-    const org = await clubOnly(orgId);
-    const problems = problemsWithFee(input, centsFrom);
-    if (problems.length) throw new Invalid(problems.join(' '));
-    const today = (await one(`select to_char((now() at time zone $1)::date,'YYYY-MM-DD') as d`, [org.timezone])).d;
-    const from = input.effectiveFrom || today;
-    // A new price for the same people and period replaces the old one from its
-    // start date; the old one stops the day before, so there is never an
-    // ambiguity about which applies.
-    await pool.query(`update fee_schedule set effective_to = ($4::date - 1)
-      where organisation_id=$1 and applies_to=$2 and period=$3
-        and effective_from < $4::date and (effective_to is null or effective_to >= $4::date)`,
-      [orgId, input.appliesTo, input.period, from]);
-    const row = await one(`insert into fee_schedule (organisation_id, label, amount_cents, period,
-        applies_to, effective_from, currency) values ($1,$2,$3,$4,$5,$6::date,$7) returning id`,
-      [orgId, input.label, centsFrom(input.amountText), input.period, input.appliesTo, from, region().currency]);
-    await pool.query(`insert into audit_log (account_id, organisation_id, action, entity, entity_id, after)
-      values ($1,$2,'fee_set','fee_schedule',$3,$4)`, [actor, orgId, row.id,
-      JSON.stringify({ label: input.label, amountCents: centsFrom(input.amountText), period: input.period,
-        appliesTo: input.appliesTo })]);
-    return row;
-  },
-
-  async remove(actor, orgId, feeId) {
-    await assertRole(actor, orgId, MANAGE);
-    const row = await one(`delete from fee_schedule where id=$1 and organisation_id=$2
-      returning label, amount_cents`, [feeId, orgId]);
-    if (!row) throw new NotFound('Price');
-    await pool.query(`insert into audit_log (account_id, organisation_id, action, entity, after)
-      values ($1,$2,'fee_removed','fee_schedule',$3)`, [actor, orgId,
-      JSON.stringify({ label: row.label, amountCents: row.amount_cents })]);
-  },
+  list: (actor, orgId) => speakingForThisLayer(() => listFees.execute({ actorId: actor, organisationId: orgId })),
+  save: (actor, orgId, input) => speakingForThisLayer(() => saveFee.execute({ actorId: actor, organisationId: orgId, input })),
+  remove: (actor, orgId, feeId) => speakingForThisLayer(() => removeFee.execute({ actorId: actor, organisationId: orgId, feeId })),
 };
 
-async function rosterFor(orgId) {
-  const org = await clubOnly(orgId);
-    const rows = await q(`
-      select a.id as affiliation_id, a.role, a.status, a.fee_exempt, a.fee_exempt_reason,
-             a.paid_until::text as paid_until, p.id as person_id, p.display_number,
-             nullif(trim(concat_ws(' ', p.first_name, p.last_name)), '') as name,
-             case when p.date_of_birth is null then null
-                  else date_part('year', age((now() at time zone $2)::date, p.date_of_birth))::int end as age,
-             exists (select 1 from payment_line l join payment py on py.id = l.payment_id
-                      where l.renews_affiliation_id = a.id and py.status in ('pending','awaiting','failed')) as asked,
-             exists (select 1 from payment_agreement g where g.affiliation_id = a.id and g.status = 'active') as auto_renew,
-             (select max(mr.sent_at)::date::text from message_recipient mr join message m on m.id = mr.message_id
-               where m.kind = 'renewal' and mr.status = 'sent' and (mr.person_id = p.id or mr.about_id = p.id)) as last_reminded
-      from affiliation a join person p on p.id = a.person_id
-      where a.organisation_id = $1 and a.ends is null
-        and a.role in ('member','instructor','assistant') and a.status in ('active','lapsed','pending','trial')
-      order by p.last_name, p.first_name`, [orgId, org.timezone]);
-    const today = (await one(`select to_char((now() at time zone $1)::date,'YYYY-MM-DD') as d`, [org.timezone])).d;
-    return { today, rows: rows.map((r) => ({ ...r, standing: r.status === 'trial' ? 'trial' : standing({ paidUntil: r.paid_until, exempt: r.fee_exempt }, today) })) };
-}
+const rosterFor = (orgId) => speakingForThisLayer(() => renewalRoster.forTheDailyJob(orgId));
 
 export const renewals = {
   /** Everybody at the club, and where their fees stand. */
-  async roster(actor, orgId) {
-    await assertRole(actor, orgId, REGISTER);
-    return rosterFor(orgId);
-  },
+  roster: (actor, orgId) => speakingForThisLayer(() => renewalRoster.execute({ actorId: actor, organisationId: orgId })),
 
   /** Write to the ticked members about their fees, as the club. */
-  async remind(actor, orgId, { affiliationIds, subject, body }, { baseFrom }) {
-    await assertRole(actor, orgId, REGISTER);
-    const { rows } = await rosterFor(orgId);
-    const people = rows.filter((r) => affiliationIds.includes(r.affiliation_id) && !r.fee_exempt)
-      .map((r) => r.person_id);
-    if (!people.length) throw new Invalid('Tick the people to remind. Anybody who is not charged is left out.');
-    return messages.prepare(actor, orgId, { audience: 'selected', kind: 'renewal', personIds: people,
-      subject: String(subject ?? '').replace(/\s+/g, ' ').trim().slice(0, 150),
-      body: String(body ?? '').trim().slice(0, 10_000), eventId: null, personNumber: null },
-      { baseFrom, trusted: true });
-  },
+  remind: (actor, orgId, { affiliationIds, subject, body }, { baseFrom }) => speakingForThisLayer(() => remindMembers.execute({
+    actorId: actor, organisationId: orgId, affiliationIds, subject, body,
+    prepareMessage: (a, o, input) => messages.prepare(a, o, input, { baseFrom, trusted: true }) })),
 
   /** Whether this club writes its own reminders automatically. */
-  async reminderSetting(orgId) {
-    return (await one(`select coalesce((settings->'reminders'->>'enabled')::boolean, false) as on
-      from organisation where id=$1`, [orgId])).on;
-  },
+  reminderSetting: (orgId) => renewalDeps.store.remindersEnabled(orgId),
+  setReminders: (actor, orgId, enabled) => speakingForThisLayer(() => setReminders.execute({ actorId: actor, organisationId: orgId, enabled })),
 
-  async setReminders(actor, orgId, enabled) {
-    await assertRole(actor, orgId, MANAGE);
-    await clubOnly(orgId);
-    await pool.query(`update organisation set settings = coalesce(settings,'{}'::jsonb) || jsonb_build_object('reminders',
-      coalesce(settings->'reminders','{}'::jsonb) || jsonb_build_object('enabled', $2::boolean)), updated_at = now() where id = $1`, [orgId, !!enabled]);
-    await pool.query(`insert into audit_log (account_id, organisation_id, action, entity, entity_id, after)
-      values ($1,$2,'reminders_setting','organisation',$2,$3)`, [actor, orgId, JSON.stringify({ enabled: !!enabled })]);
-  },
-
-  /**
-   * Ask a set of members to renew, at the club's own price for each. Nothing is
-   * charged by asking. Returns who was asked and who was not, and why.
-   */
-  async ask(actor, orgId, { affiliationIds, period, received = null }) {
-    await assertRole(actor, orgId, REGISTER);
-    await clubOnly(orgId);
-    if (!PERIODS[period] || !PERIODS[period].months) throw new Invalid('Choose how long to renew for.');
-    if (!affiliationIds?.length) throw new Invalid('Tick the people to ask.');
-    if (received && whyNotMethod(received)) throw new Invalid(whyNotMethod(received));
-
-    const { today, rows } = await renewals.roster(actor, orgId);
-    const schedule = await feeRows(orgId);
-    const chosen = rows.filter((r) => affiliationIds.includes(r.affiliation_id));
-    let asked = 0; const skipped = [];
-    for (const r of chosen) {
-      if (r.fee_exempt) { skipped.push({ name: r.name, reason: 'not charged' }); continue; }
-      if (r.asked) { skipped.push({ name: r.name, reason: 'already asked' }); continue; }
-      const fee = feeFor(schedule, { adultAge: region().adultAge, ageYears: r.age, period, today });
-      if (!fee) { skipped.push({ name: r.name, reason: `no ${r.age != null && r.age < region().adultAge ? 'junior' : 'adult'} price for “${PERIODS[period].label.toLowerCase()}”` }); continue; }
-      const client = await pool.connect();
-      try {
-        await client.query('begin');
-        const { rows: [pay] } = await client.query(`insert into payment (organisation_id, person_id,
-            amount_cents, currency, status, requested_by) values ($1,$2,$3,$4,'pending',$5) returning id`,
-          [orgId, r.person_id, fee.amount_cents, fee.currency ?? region().currency, actor]);
-        await client.query(`insert into payment_line (payment_id, kind, description, amount_cents,
-            renews_affiliation_id, renews_months) values ($1,'club_fee',$2,$3,$4,$5)`,
-          [pay.id, `${fee.label} — membership ${PERIODS[period].label.toLowerCase()}`, fee.amount_cents,
-           r.affiliation_id, PERIODS[period].months]);
-        await client.query(`insert into audit_log (account_id, organisation_id, action, entity, entity_id, after)
-          values ($1,$2,'payment_requested','payment',$3,$4)`, [actor, orgId, pay.id,
-          JSON.stringify({ kind: 'club_fee', amountCents: fee.amount_cents, person: r.name,
-            description: `${fee.label} renewal` })]);
-        await client.query('commit'); asked++;
-        if (received) await payments.recordManual(actor, pay.id, received);
-      } catch (e) { await client.query('rollback'); throw e; } finally { client.release(); }
-    }
-    return { asked, skipped };
-  },
+  /** Ask a set of members to renew, at the club's own price for each. Nothing is charged by asking. */
+  ask: (actor, orgId, { affiliationIds, period, received = null }) =>
+    speakingForThisLayer(() => askToRenew.execute({ actorId: actor, organisationId: orgId, affiliationIds, period, received })),
 
   /** The club decides somebody does not pay — and says why. */
-  async setExemption(actor, orgId, affiliationId, input) {
-    await assertRole(actor, orgId, MANAGE);
-    await clubOnly(orgId);
-    const problems = problemsWithExemption(input);
-    if (problems.length) throw new Invalid(problems.join(' '));
-    const row = await one(`update affiliation set fee_exempt=$3, fee_exempt_reason=$4
-      where id=$1 and organisation_id=$2 and ends is null returning person_id`,
-      [affiliationId, orgId, input.exempt, input.exempt ? input.reason : null]);
-    if (!row) throw new NotFound('Member');
-    // Anything already asked of them is withdrawn: they were never to be asked.
-    if (input.exempt) await pool.query(`update payment set status='void', updated_at=now()
-      where status in ('pending','failed') and id in
-        (select payment_id from payment_line where renews_affiliation_id = $1)`, [affiliationId]);
-    const who = await one(`select nullif(trim(concat_ws(' ', first_name, last_name)), '') as name
-      from person where id=$1`, [row.person_id]);
-    await pool.query(`insert into audit_log (account_id, organisation_id, action, entity, entity_id, after)
-      values ($1,$2,'fee_exemption','person',$3,$4)`, [actor, orgId, row.person_id,
-      JSON.stringify({ exempt: input.exempt, reason: input.reason || null, person: who?.name })]);
-  },
+  setExemption: (actor, orgId, affiliationId, input) => speakingForThisLayer(() => setExemption.execute({ actorId: actor, organisationId: orgId, affiliationId, input })),
 
   /** An exempt member's membership carried on a year, with no payment. */
-  async carryOn(actor, orgId, affiliationId) {
-    await assertRole(actor, orgId, REGISTER);
-    await clubOnly(orgId);
-    const a = await one(`select a.id, a.person_id, a.fee_exempt from affiliation a
-      where a.id=$1 and a.organisation_id=$2 and a.ends is null`, [affiliationId, orgId]);
-    if (!a) throw new NotFound('Member');
-    if (!a.fee_exempt) throw new Invalid('Only somebody who is not charged can be renewed without paying.');
-    const until = await renewMembershipNow(affiliationId, 12);
-    await pool.query(`insert into audit_log (account_id, organisation_id, action, entity, entity_id, after)
-      values ($1,$2,'membership_carried_on','person',$3,$4)`, [actor, orgId, a.person_id,
-      JSON.stringify({ paidUntil: until })]);
-    return until;
-  },
+  carryOn: (actor, orgId, affiliationId) => speakingForThisLayer(() => carryExemptMemberOn.execute({ actorId: actor, organisationId: orgId, affiliationId })),
 };
 
 const AGREEMENT_SELECT = `select g.id, g.organisation_id, g.affiliation_id, g.person_id, g.period, g.method, g.label, g.status, g.failures,
