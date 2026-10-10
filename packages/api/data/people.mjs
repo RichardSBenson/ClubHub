@@ -24,6 +24,8 @@ import { MANAGE, REGISTER, TEACH } from '../../core/domain/access.mjs';
 import { EnrolPerson } from '../../core/application/enrol-person.mjs';
 import { LinkGuardian, SetGuardianContact, UnlinkGuardian, ListGuardians } from '../../core/application/guardians.mjs';
 import { PostgresGuardianRegister } from '../../infrastructure/postgres/guardian-register.mjs';
+import { InstructorReadiness, InstructorStates, ListInstructorProfiles, SaveInstructorProfile, RemoveInstructorProfile, BulkInstructors } from '../../core/application/instructor-profiles.mjs';
+import { PostgresInstructorProfileStore } from '../../infrastructure/postgres/instructor-profile-store.mjs';
 import { CheckMayChangePhoto, SetPhoto, ClearPhoto, SetAbout, OpenPhoto } from '../../core/application/photos.mjs';
 import { SetInstructor } from '../../core/application/instructor-role.mjs';
 import { PostgresPhotoStore } from '../../infrastructure/postgres/photo-store.mjs';
@@ -365,209 +367,28 @@ export const registerImport = {
 // core/domain/instructing.mjs.
 // ---------------------------------------------------------------------------
 
+const profileStore = new PostgresInstructorProfileStore(pool);
+const profileDeps = { store: profileStore, auth, adultAge: () => region().adultAge, validateBio: (bio) => validate(bio),
+  setInstructor: (actor, personId, on) => instructorRole.set(actor, personId, on) };
+const instructorReadiness = new InstructorReadiness(profileDeps);
+const instructorStates = new InstructorStates(profileDeps);
+const listInstructorProfiles = new ListInstructorProfiles(profileDeps);
+const saveInstructorProfile = new SaveInstructorProfile(profileDeps);
+const removeInstructorProfile = new RemoveInstructorProfile(profileDeps);
+const bulkInstructors = new BulkInstructors(profileDeps);
+
 export const instructors = {
-  /**
-   * Why somebody cannot be shown on their club's website yet, or an empty list if they can. Shown only when
-   * they are 18 or over, every check the federation requires of instructors is current, and they have written
-   * their few words. `never` is set when the reason is one nothing can fix by waiting for paperwork (a minor).
-   */
-  async readiness(clubId, personId) {
-    const who = await one(`select date_of_birth::text as dob, nullif(about, '') as about from person where id=$1`, [personId]);
-    const org = await one('select settings from organisation where id=$1', [clubId]);
-    const why = reasonNotToPublish({ person: { dateOfBirth: who?.dob }, isInstructor: true,
-      on: new Date().toISOString().slice(0, 10), settings: org?.settings ?? {} });
-    if (why) return { never: /under/.test(why) ? `under ${region().adultAge}` : 'no date of birth recorded', missing: [] };
-    const required = await q(`select q.id, q.label ${CATALOGUE_FROM} and 'instruct' = any(q.required_for) order by q.label`, [clubId]);
-    const awards = await q(`${AWARD_SELECT} where qa.person_id = $1`, [personId]);
-    const c = clearance(required, awards, await qualToday(clubId));
-    const missing = c.barred.map((b) => (b.state === 'expired' ? `${b.label} (expired)` : b.label));
-    if (!who?.about) missing.push('a write-up about themselves');
-    return { never: null, missing };
-  },
-
+  /** Why somebody cannot be shown on their club's website yet (see InstructorReadiness). */
+  readiness: (clubId, personId) => instructorReadiness.execute({ clubId, personId }),
   /** For the roll: who holds the instructor role, whether the website shows them, and what holds them back. */
-  async stateFor(personIds) {
-    const out = new Map();
-    if (!personIds.length) return out;
-    const rows = await q(`
-      select a.person_id, a.organisation_id as club_id, coalesce(ip.published, false) as published
-      from affiliation a
-      left join instructor_profile ip on ip.person_id = a.person_id and ip.organisation_id = a.organisation_id
-      where a.person_id = any($1::uuid[]) and a.role = 'instructor' and a.ends is null and a.status = 'active'`, [personIds]);
-    for (const r of rows) {
-      const ready = r.published ? { never: null, missing: [] } : await this.readiness(r.club_id, r.person_id);
-      out.set(r.person_id, { published: r.published, ...ready });
-    }
-    return out;
-  },
-
-  /**
-   * Make several people instructors in one go, optionally showing them on the website, or take the role away.
-   * `scopeOrgId` is where the actor is working (a club, a region or the federation): people must be on the roll
-   * of a club beneath it, and each is dealt with at their own club. Nobody is skipped silently.
-   */
-  async bulk(actor, scopeOrgId, personIds, mode) {
-    await assertRole(actor, scopeOrgId, MANAGE);
-    const ids = [...new Set(personIds)];
-    const homes = new Map((await q(`
-      select distinct on (a.person_id) a.person_id, a.organisation_id
-      from affiliation a join organisation o on o.id = a.organisation_id
-      join organisation scope on scope.id = $1 and o.path <@ scope.path
-      where a.role = 'member' and a.ends is null and a.status = 'active' and a.person_id = any($2::uuid[])
-      order by a.person_id, a.starts desc`, [scopeOrgId, ids])).map((r) => [r.person_id, r.organisation_id]));
-    const out = { changed: 0, shown: 0, skipped: [] };
-    for (const id of ids) {
-      const who = await one(`select first_name || ' ' || last_name as name from person where id=$1`, [id]);
-      const club = homes.get(id);
-      if (!who || !club) { out.skipped.push({ name: who?.name ?? 'Someone', reason: 'not on the roll here' }); continue; }
-      if (mode === 'off') {
-        if ((await instructorRole.set(actor, id, false)).changed) out.changed += 1;
-        continue;
-      }
-      if ((await instructorRole.set(actor, id, true)).changed) out.changed += 1;
-      if (mode !== 'show') continue;
-
-      // Shown only when ready; anything missing is named, not just refused.
-      const r = await this.readiness(club, id);
-      if (r.never) { out.skipped.push({ name: who.name, reason: `an instructor, but not shown on the website: ${r.never}` }); continue; }
-      if (r.missing.length) { out.skipped.push({ name: who.name, reason: 'an instructor, not shown yet. Still needs ' + r.missing.join(', ') }); continue; }
-
-      const cur = await one(`select bio, teaches, sort_order, started_year, show_checks, published from instructor_profile
-        where organisation_id=$1 and person_id=$2`, [club, id]);
-      await this.save(actor, club, id, { bio: cur?.bio ?? { blocks: [] }, teaches: cur?.teaches ?? null, published: true,
-        sortOrder: cur?.sort_order ?? 0, startedYear: cur?.started_year ?? null, showChecks: true });
-      if (!cur?.published) out.shown += 1;
-    }
-    return out;
-  },
-
+  stateFor: (personIds) => instructorStates.execute({ personIds }),
+  /** Make several people instructors in one go, show them, or take the role away (see BulkInstructors). */
+  bulk: (actor, scopeOrgId, personIds, mode) => speakingForThisLayer(() => bulkInstructors.execute({ actorId: actor, scopeOrgId, personIds, mode })),
   /** Where this person is an instructor, and whether the club's website shows them yet. */
-  async siteStatus(personId) {
-    return one(`select o.slug, o.name, coalesce(ip.published, false) as published
-      from affiliation a join organisation o on o.id = a.organisation_id
-      left join instructor_profile ip on ip.person_id = a.person_id and ip.organisation_id = a.organisation_id
-      where a.person_id = $1 and a.role = 'instructor' and a.ends is null and a.status = 'active'
-      order by o.path limit 1`, [personId]);
-  },
-
-  /**
-   * Everybody holding the instructor role here, with their profile if they
-   * have one. Instructors without a profile are included deliberately: the
-   * screen's job is partly to show who could be listed and is not.
-   */
-  async listFor(actor, orgId) {
-    await assertRole(actor, orgId, MANAGE);
-    const { rows } = await pool.query(`
-      select p.id as person_id, p.first_name, p.last_name, p.date_of_birth,
-             p.photo_asset_id,
-             cg.label as grade, cg.is_dan,
-             ct.label as title, ct.address_as,
-             ip.id as profile_id, ip.bio, ip.teaches, ip.published,
-             ip.published_at, ip.sort_order, ip.started_year, ip.show_checks
-      from affiliation a
-      join person p on p.id = a.person_id
-      left join person_current_grade cg on cg.person_id = p.id
-      left join person_current_title ct on ct.person_id = p.id
-      left join instructor_profile ip
-             on ip.person_id = p.id and ip.organisation_id = $1
-      where a.organisation_id = $1 and a.ends is null
-        and a.role = 'instructor' and a.status = 'active'
-      order by ip.sort_order nulls last, cg.rank_order desc nulls last,
-               p.last_name`, [orgId]);
-    return rows;
-  },
-
-  /**
-   * Add somebody to the site, or change what it says about them.
-   *
-   * Publishing is checked against the domain rule every time, not only when
-   * the box is first ticked — somebody's birthday does not move, but a
-   * federation raising its minimum age should take effect on the next save.
-   */
-  async save(actor, orgId, personId, { bio, teaches, published, sortOrder = 0, startedYear = null, showChecks = false }) {
-    await assertRole(actor, orgId, MANAGE);
-
-    const person = await one(`
-      select p.id, p.date_of_birth,
-             exists (select 1 from affiliation a
-                     where a.person_id = p.id and a.organisation_id = $2
-                       and a.ends is null and a.role = 'instructor'
-                       and a.status = 'active') as is_instructor
-      from person p where p.id = $1`, [personId, orgId]);
-    if (!person) throw new NotFound('Person');
-
-    const org = await one('select settings from organisation where id=$1', [orgId]);
-    const today = new Date().toISOString().slice(0, 10);
-
-    if (published) {
-      // Throws a DomainError naming the reason, which the route shows as-is.
-      assertMayPublish({
-        person: { dateOfBirth: person.date_of_birth },
-        isInstructor: person.is_instructor,
-        on: today,
-        settings: org?.settings ?? {},
-      });
-    }
-
-    const { doc } = validate(bio ?? { blocks: [] });
-
-    const year = startedYear == null || startedYear === '' ? null : Number(startedYear);
-    if (year != null && !(Number.isInteger(year) && year >= 1930 && year <= new Date().getFullYear()))
-      throw new Invalid('"Training since" must be a year, such as 1998.');
-
-    const row = await one(`
-      insert into instructor_profile (organisation_id, person_id, bio, teaches,
-                                      published, published_by, published_at,
-                                      sort_order, started_year, show_checks)
-      values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
-      on conflict (organisation_id, person_id) do update set
-        bio = excluded.bio,
-        started_year = excluded.started_year,
-        show_checks = excluded.show_checks,
-        teaches = excluded.teaches,
-        published = excluded.published,
-        -- Only stamped when it becomes published, so the record keeps who
-        -- first agreed rather than whoever last edited a typo.
-        published_by = case when excluded.published and not instructor_profile.published
-                            then excluded.published_by
-                            else instructor_profile.published_by end,
-        published_at = case when excluded.published and not instructor_profile.published
-                            then excluded.published_at
-                            else instructor_profile.published_at end,
-        sort_order = excluded.sort_order
-      returning *`,
-      [orgId, personId, doc, teaches?.trim() || null, !!published,
-       published ? actor : null, published ? new Date() : null, sortOrder, year, !!showChecks]);
-
-    await pool.query(`
-      insert into audit_log (account_id, organisation_id, action, entity,
-                             entity_id, after)
-      values ($1,$2,$3,'instructor_profile',$4,$5)`,
-      [actor, orgId, published ? 'instructor_publish' : 'instructor_save',
-       row.id, JSON.stringify({ personId, published: !!published })]);
-
-    return row;
-  },
-
-  /**
-   * Take somebody off the site.
-   *
-   * Deletes the profile rather than flipping a flag, because "remove me from
-   * your website" should not leave a row that somebody can tick again without
-   * asking. They remain an instructor on the roll.
-   */
-  async remove(actor, orgId, personId) {
-    await assertRole(actor, orgId, MANAGE);
-    const row = await one(`delete from instructor_profile
-      where organisation_id=$1 and person_id=$2 returning *`, [orgId, personId]);
-    if (!row) throw new NotFound('Instructor profile');
-    await pool.query(`
-      insert into audit_log (account_id, organisation_id, action, entity,
-                             entity_id, before)
-      values ($1,$2,'instructor_remove','instructor_profile',$3,$4)`,
-      [actor, orgId, row.id, JSON.stringify({ personId, was: row.published })]);
-    return row;
-  },
+  siteStatus: (personId) => profileStore.siteStatus(personId),
+  listFor: (actor, orgId) => speakingForThisLayer(() => listInstructorProfiles.execute({ actorId: actor, organisationId: orgId })),
+  save: (actor, orgId, personId, fields) => speakingForThisLayer(() => saveInstructorProfile.execute({ actorId: actor, organisationId: orgId, personId, ...fields })),
+  remove: (actor, orgId, personId) => speakingForThisLayer(() => removeInstructorProfile.execute({ actorId: actor, organisationId: orgId, personId })),
 };
 
 export const family = {

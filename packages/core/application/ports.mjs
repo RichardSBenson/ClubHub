@@ -365,3 +365,26 @@ export const INSTRUCTOR_STORE = {
   name: 'InstructorStore',
   methods: ['atomically', 'homeOf', 'isInstructor', 'currentGrade', 'appoint', 'resign', 'audit'],
 };
+
+/**
+ * Instructor profiles for the club website. `atomically(work)` runs `work(store)` as one unit.
+ *   personForReadiness(personId)            — { dob, about } | null
+ *   settingsOf(organisationId)              — the organisation's settings object
+ *   todayAt(organisationId)                 — 'YYYY-MM-DD' in that organisation's timezone
+ *   instructorQualifications(clubId)        — [{ id, label }] the federation requires of instructors
+ *   awardsOf(personId)                      — their qualification awards, in the shape the clearance rule reads
+ *   instructorRows(personIds)               — [{ person_id, club_id, published }] for current instructors
+ *   membersWithin(scopeOrgId, personIds)    — Map<personId, clubId> of active members on rolls beneath the scope
+ *   nameOf(personId)
+ *   profileOf(clubId, personId)             — the stored profile or null
+ *   personForProfile(personId, clubId)      — { id, date_of_birth, is_instructor } | null
+ *   saveProfile({ clubId, personId, bio, teaches, published, publishedBy, sortOrder, year, showChecks }) — the row
+ *   removeProfile(clubId, personId)         — the deleted row | null
+ *   siteStatus(personId) / profilesFor(clubId)
+ *   audit({ actorId, organisationId, action, entity, entityId, before, after })
+ */
+export const INSTRUCTOR_PROFILE_STORE = {
+  name: 'InstructorProfileStore',
+  methods: ['atomically', 'personForReadiness', 'settingsOf', 'todayAt', 'instructorQualifications', 'awardsOf', 'instructorRows',
+            'membersWithin', 'nameOf', 'profileOf', 'personForProfile', 'saveProfile', 'removeProfile', 'siteStatus', 'profilesFor', 'audit'],
+};
