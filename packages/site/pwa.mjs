@@ -111,13 +111,42 @@ export function crestIconPng(crestBuf, size, { colour = '#FFFFFF', maskable = fa
   return encode(size, raw);
 }
 
-function encode(size, raw) {
+/**
+ * The small icon in the phone's status bar and at the corner of a notification.
+ *
+ * Android uses only this picture's transparency and paints it one colour, so it has to be a white shape on a clear
+ * background — a full-colour square comes out as a plain white block, which looks like no icon at all. The shape is the
+ * crest's own outline when there is one, otherwise the same H the app icon uses.
+ */
+export function badgePng(crestBuf, size = 96) {
+  const img = crestBuf ? readPng(crestBuf) : null;
+  const raw = Buffer.alloc((size * 4 + 1) * size);
+  const cover = (x, y) => {
+    if (img) {
+      const fit = 0.92 * size, k = Math.min(fit / img.w, fit / img.h);
+      const u = Math.floor((x + 0.5 - (size - img.w * k) / 2) / k), v = Math.floor((y + 0.5 - (size - img.h * k) / 2) / k);
+      return u < 0 || v < 0 || u >= img.w || v >= img.h ? 0 : img.px[(v * img.w + u) * 4 + 3];
+    }
+    const u = x / size, v = y / size;
+    return v >= 0.2 && v <= 0.8 && ((u >= 0.25 && u <= 0.38) || (u >= 0.62 && u <= 0.75) || (u >= 0.25 && u <= 0.75 && v >= 0.45 && v <= 0.55)) ? 255 : 0;
+  };
+  for (let y = 0; y < size; y++) {
+    const row = y * (size * 4 + 1);
+    for (let x = 0; x < size; x++) {
+      const p = row + 1 + x * 4;
+      raw[p] = raw[p + 1] = raw[p + 2] = 255; raw[p + 3] = cover(x, y);
+    }
+  }
+  return encode(size, raw, 6);
+}
+
+function encode(size, raw, colourType = 2) {
   const chunk = (type, data) => {
     const t = Buffer.from(type), len = Buffer.alloc(4); len.writeUInt32BE(data.length);
     const crc = Buffer.alloc(4); crc.writeUInt32BE(zlib.crc32(Buffer.concat([t, data])) >>> 0);
     return Buffer.concat([len, t, data, crc]);
   };
-  const ihdr = Buffer.alloc(13); ihdr.writeUInt32BE(size, 0); ihdr.writeUInt32BE(size, 4); ihdr[8] = 8; ihdr[9] = 2;
+  const ihdr = Buffer.alloc(13); ihdr.writeUInt32BE(size, 0); ihdr.writeUInt32BE(size, 4); ihdr[8] = 8; ihdr[9] = colourType;
   return Buffer.concat([Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]), chunk('IHDR', ihdr), chunk('IDAT', zlib.deflateSync(raw)), chunk('IEND', Buffer.alloc(0))]);
 }
 

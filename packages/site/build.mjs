@@ -487,6 +487,8 @@ for (const target of SITES) {
       const drawn = crest ? PWA.crestIconPng(crest, size, { colour: tokens.ink ?? '#161617', maskable }) : null;
       await fs.writeFile(path.join(OUT, 'icons', file), drawn ?? PWA.iconPng(size, { maskable }));
     }
+    await fs.writeFile(path.join(OUT, 'icons', 'badge-96.png'), PWA.badgePng(crest, 96));
+    written.push('icons/badge-96.png');
     written.push('sw.js', 'icons/icon-192.png', 'icons/icon-512.png', 'icons/icon-maskable-192.png', 'icons/icon-maskable-512.png');
   }
 
