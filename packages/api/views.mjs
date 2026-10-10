@@ -473,7 +473,7 @@ export const roster = ({ me, csrf, org, roster, total = null, canRegister = fals
   };
   return page({
   title: `${org.name} roster`, me, csrf, body: `
-  <h1>${esc(org.name)}</h1>
+  <h1>${esc(org.name)} roll</h1>
   <p class="sub">${total ?? roster.length} on the roll ·
     <a href="/o/${esc(org.slug)}/grading">Run a grading</a> ·
     <a href="/o/${esc(org.slug)}/history">History</a> ·
