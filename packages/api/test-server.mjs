@@ -197,7 +197,7 @@ console.log('\nPERMISSION IS ENFORCED AT THE ROUTE');
   const theirs = await req('/o/whanganui/roster');
   ok('but not Whanganui', theirs.status === 403, theirs.status);
   ok('with a plain message, not a stack trace',
-    theirs.html.includes('Not permitted') && !theirs.html.includes('at Object'));
+    /Not permitted|do not have access/.test(theirs.html) && !theirs.html.includes('at Object'));
 
   const dash = await req('/dashboard');
   ok('and his dashboard shows only his dojo',

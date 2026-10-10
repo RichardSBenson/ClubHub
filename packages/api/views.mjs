@@ -109,6 +109,7 @@ a{color:var(--accent-ink)}
 .top .find label{color:var(--muted);font-size:13px;margin:0;font-weight:500}
 .top .find .btn{padding:7px 14px;font-size:14px}
 .shell:has(.rail) .top .brand{display:none}
+.top .msgbtn{margin-left:auto;font-weight:600}
 .top .who{font-size:14px;color:var(--muted);display:flex;align-items:center;gap:10px}
 .top .who form{display:inline;margin:0}
 .top .who button{background:none;border:1px solid var(--line-2);color:var(--ink-2);
@@ -229,7 +230,8 @@ table.writing-help code{background:var(--soft);padding:2px 6px;border-radius:4px
     border-radius:8px;background:var(--canvas)}
   .railbtn i{display:block;width:20px;height:2px;background:var(--ink);border-radius:2px}
   .top{padding:10px 16px;flex-wrap:wrap}
-  .shell:has(.rail) .top .brand{display:block;order:0;flex:1 1 calc(100% - 70px)}
+  .shell:has(.rail) .top .brand{display:block;order:0;flex:1 1 0;min-width:0}
+  .top > .msgbtn{order:1;margin:0}
   .top > .btn,.top .who{order:2}
   .top .find{margin-left:0;flex:1 1 100%;order:3}
   .top .find input{min-width:0;flex:1}
@@ -365,7 +367,9 @@ export function rail({ org, vocabulary = {}, can = {}, path = '' }) {
 }
 
 /** The button that opens the menu on a phone. Only where there is a menu to open. */
-export const menuButton = () => '<label class="railbtn" for="railtoggle" aria-hidden="true"><i></i><i></i><i></i></label>';
+// The menu button, and — for anybody who may write to this organisation's people — one tap to do it, on every page.
+export const menuButton = (rail = null) => `${rail?.can?.manage
+  ? `<a class="btn msgbtn" href="/o/${esc(rail.org.slug)}/messages">Send message</a>` : ''}<label class="railbtn" for="railtoggle" aria-hidden="true"><i></i><i></i><i></i></label>`;
 
 export { RAIL_MARKER, MENU_BUTTON_MARKER };
 
@@ -439,6 +443,7 @@ export const dashboard = ({ me, csrf, orgs, parents = [], groups = [], platformO
 
   ${parents.map((o) => `<div class="card">
     <h3>${esc(o.name)}</h3>
+    ${o.canMessage ? `<p><a class="btn" href="/o/${esc(o.slug)}/messages">Send a message</a></p>` : ''}
     <p>${esc(o.type)} · <a href="/o/${esc(o.slug)}/roster">Members</a>
        · <a href="/o/${esc(o.slug)}/events">Events</a>
        · <a href="/o/${esc(o.slug)}/grading">Grading</a>
@@ -450,6 +455,7 @@ export const dashboard = ({ me, csrf, orgs, parents = [], groups = [], platformO
   <div class="grid">${group.clubs.map((o) => `<div class="card">
     <h3><a href="/o/${esc(o.slug)}/roster">${esc(o.name)}</a></h3>
     <p>${o.members} member${Number(o.members) === 1 ? '' : 's'}</p>
+    ${o.canMessage ? `<p><a class="btn" href="/o/${esc(o.slug)}/messages">Send a message</a></p>` : ''}
   </div>`).join('')}</div>`).join('')}` });
 };
 
@@ -478,7 +484,7 @@ export const roster = ({ me, csrf, org, roster, total = null, canRegister = fals
     <a href="/o/${esc(org.slug)}/grading">Run a grading</a> ·
     <a href="/o/${esc(org.slug)}/history">History</a> ·
     <a href="/o/${esc(org.slug)}/events">Events</a> ·${canManage ? `
-    <a href="/o/${esc(org.slug)}/messages">Messages</a> ·
+    <a href="/o/${esc(org.slug)}/messages"><strong>Send a message</strong></a> ·
     <a href="/o/${esc(org.slug)}/declaration">Declaration</a> ·` : ''}
     <a href="/o/${esc(org.slug)}/pages">Website</a></p>
 

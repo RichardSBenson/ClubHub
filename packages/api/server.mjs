@@ -310,6 +310,8 @@ get('/dashboard', async (ctx) => {
   if (ctx.me.grants.length && ctx.me.grants.every((g) => g.role === 'member') && ctx.me.personId)
     return ctx.redirect('/me');
   const rows = await lookups.visibleOrgs(ctx.me.accountId);
+  // Whoever may write to an organisation's people gets the one-tap button on its card.
+  await Promise.all(rows.map(async (r) => { r.canMessage = await mayPublishAt(ctx, r.id); }));
 
   // Every other screen looks at one federation, so one vocabulary does. This
   // one does not: an account can span federations in different arts, and a
@@ -346,9 +348,7 @@ get('/dashboard', async (ctx) => {
 // ---- the federation's declaration: written once here ------------------------------
 
 async function declarationAdminPage(ctx, extra = {}) {
-  ctx.requireActor();
-  const org = await orgs.bySlug(ctx.params.slug);
-  if (!org) throw new NotFound('Organisation');
+  const org = await organisationFor(ctx);
   const owner = await declarations.ownerOf(org.id);
   if (!(await mayRegisterAt(ctx, owner.id))) throw new Forbidden('Only the federation\'s officials can write its declaration.');
   const { current, signed } = await declarations.counts(org.id);
@@ -374,9 +374,8 @@ post('/o/:slug/declaration', async (ctx) => {
 // ---- roster ---------------------------------------------------------------
 
 get('/o/:slug/roster', async (ctx) => {
-  ctx.requireActor();
-  const org = await orgs.bySlug(ctx.params.slug);
-  if (!org) throw new NotFound('Organisation');
+  // organisationFor also builds the side menu — without it the roll was the one page with no menu at all.
+  const org = await organisationFor(ctx);
   const q = ctx.url.searchParams;
   const filter = { grade: q.get('grade') || 'all', band: ['junior', 'senior'].includes(q.get('band')) ? q.get('band') : '',
                    show: ['instructors', 'due'].includes(q.get('show')) ? q.get('show') : '', all: q.get('all') === '1' };
@@ -4636,7 +4635,7 @@ async function handle(req, res) {
       if (typeof html === 'string' && html.includes(V.RAIL_MARKER))
         html = html.replace(V.RAIL_MARKER, () => this.rail ? V.rail(this.rail) : '');
       if (typeof html === 'string' && html.includes(V.MENU_BUTTON_MARKER))
-        html = html.replace(V.MENU_BUTTON_MARKER, () => this.rail ? V.menuButton() : '');
+        html = html.replace(V.MENU_BUTTON_MARKER, () => this.rail ? V.menuButton(this.rail) : '');
       res.writeHead(status, {
         'content-type': 'text/html; charset=utf-8',
         // Pages answered here are about the person looking at them. No shared cache keeps one, and the
