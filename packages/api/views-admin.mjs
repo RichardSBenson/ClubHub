@@ -60,7 +60,7 @@ export const clubsScreen = ({ me, csrf, org, clubs = [], values = {}, error,
   ${done ? `<div class="good">${esc(done)}</div>` : ''}
   ${error ? `<div class="bad">${esc(error)}</div>` : ''}
   ${added ? `<div class="good"><strong>${esc(added.name)}</strong> is added.
-    <a href="/o/${esc(added.slug)}/roster">Open it</a>.
+    <a href="/o/${esc(added.slug)}/roll">Open it</a>.
     It has no page on the website yet — the club asks for that from its own
     screen and you approve it under ${ClubWord()} pages.
     ${adminName ? `<br>${esc(adminName)} can run it. ${link
@@ -100,7 +100,7 @@ export const clubsScreen = ({ me, csrf, org, clubs = [], values = {}, error,
   ${clubs.length ? `<table><thead><tr><th>Club</th><th class="hide-sm">Town</th>
     <th>Members</th><th>Administrator</th><th>Website</th></tr></thead><tbody>${
     clubs.map((c) => `<tr>
-      <td><a href="/o/${esc(c.slug)}/roster"><strong>${esc(c.name)}</strong></a></td>
+      <td><a href="/o/${esc(c.slug)}/roll"><strong>${esc(c.name)}</strong></a></td>
       <td class="hide-sm">${esc(c.city)}</td>
       <td>${c.members}</td>
       <td>${c.has_administrator ? 'Yes' : '<span class="tag no">Nobody yet</span>'}</td>
@@ -133,7 +133,7 @@ export const clubProfileScreen = ({ me, csrf, org, club, parent, administrators 
   ${rebuild ? `<div class="note">${esc(rebuild)}</div>` : ''}
 
   <div class="row">
-    <div><a href="/o/${esc(org.slug)}/roster"><strong>${counts.members ?? 0}</strong> members</a></div>
+    <div><a href="/o/${esc(org.slug)}/roll"><strong>${counts.members ?? 0}</strong> members</a></div>
     <div><strong>${counts.instructors ?? 0}</strong> instructors</div>
     <div><a href="/o/${esc(org.slug)}/events"><strong>${counts.upcoming ?? 0}</strong> upcoming events</a></div>
     <div><a href="/o/${esc(org.slug)}/club-page">Edit the club's page</a></div>

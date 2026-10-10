@@ -175,7 +175,7 @@ console.log('\nSHE SEES NOBODY ELSE AND NO ADMINISTRATION');
   ok('cannot change another family\'s child', (await one('select phone from person where id=$1',
     [otherKid.id])).phone !== '000' && post.status !== 302);
 
-  for (const p of [`/p/${kid.id}`, `/p/${otherKid.id}`, '/o/whanganui/roster', '/o/whanganui/members/new',
+  for (const p of [`/p/${kid.id}`, `/p/${otherKid.id}`, '/o/whanganui/roll', '/o/whanganui/members/new',
       '/o/whanganui/events/new', '/o/whanganui/grading', '/o/whanganui/history', '/o/whanganui/news',
       '/o/whanganui/pages', '/o/whanganui/club-page', '/o/whanganui/profile', `/p/${kid.id}/edit`]) {
     const r = await req(p);

@@ -72,7 +72,7 @@ export function readQuery(raw = '') {
 export function linkTo(result) {
   switch (result.kind) {
     case 'person':       return `/p/${result.id}`;
-    case 'organisation': return `/o/${result.slug}/roster`;
+    case 'organisation': return `/o/${result.slug}/roll`;
     case 'event':        return `/o/${result.orgSlug}/events/${result.slug}`;
     case 'page':         return `/o/${result.orgSlug}/pages/${result.id}`;
     case 'article':      return `/o/${result.orgSlug}/news/${result.id}`;

@@ -102,6 +102,7 @@ const PUBLIC = new Map([
   ['GET /api/v1/events', 'the same'],
   ['POST /signout', 'leaving must always work'],
   ['GET /dashboard', 'shows only what the signer-in may see'],
+  ['GET /o/:slug/roster', 'nobody: it only redirects to /o/:slug/roll, which does its own check'],
   ['GET /o/:slug/bookings', 'a teacher or official of that club; booking.forClub asserts the role'],
   ['POST /o/:slug/bookings/:sessionId/places', 'an official of that club; the class must belong to it'],
   ['GET /o/:slug/shop', 'an official of that club (or of the federation, for the national range); shop.forOrg asserts the role'],
@@ -499,7 +500,7 @@ console.log('\nNOR CAN THEY REACH UP THE TREE');
 {
   // A club administrator is not a federation administrator. Their grant
   // reaches down from Wellington, and the national body is above it.
-  const up = await req(`/o/${federation.slug}/roster`);
+  const up = await req(`/o/${federation.slug}/roll`);
   ok('the national roll is refused', up.status === 403, String(up.status));
 
   const pages = await req(`/o/${federation.slug}/pages`);
@@ -510,7 +511,7 @@ console.log('\nWHAT THEY *CAN* DO STILL WORKS');
 {
   // An isolation test that passes because everything is broken proves
   // nothing. Their own club must still be entirely theirs.
-  const own = await req(`/o/${mine.slug}/roster`);
+  const own = await req(`/o/${mine.slug}/roll`);
   ok('their own roll opens', own.status === 200, String(own.status));
 
   const ownPages = await req(`/o/${mine.slug}/pages`);

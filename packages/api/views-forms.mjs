@@ -33,7 +33,7 @@ export const declarationSign = ({ me, csrf, person, how, status, next = null, do
 export const declarationAdmin = ({ me, csrf, org, owner, current, signed = 0, starter = '', values = null, done = null, error = null }) => page({
   title: 'Declaration', me, csrf, body: `
   <h1>Federation declaration</h1>
-  <p class="sub">${esc(owner.name)} · <a href="/o/${esc(org.slug)}/roster">Back to the roll</a></p>
+  <p class="sub">${esc(owner.name)} · <a href="/o/${esc(org.slug)}/roll">Back to the roll</a></p>
   ${done ? `<div class="good">${esc(done)}</div>` : ''}
   ${error ? `<div class="bad">${esc(error)}</div>` : ''}
   <p>One waiver and consent for the whole federation. Each member, or a parent or guardian for a child, signs it once, and it covers every class, grading, seminar, camp and tournament.

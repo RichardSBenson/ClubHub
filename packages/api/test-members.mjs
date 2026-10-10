@@ -83,7 +83,7 @@ console.log('\nSIGNED IN AS THE REGISTRAR');
   const { token } = await auth.requestLink('doug@example.nz');
   ok('the session is live', (await req(`/signin/${token}`, { method: 'POST', form: {} })).status === 302);
 
-  const roll = await req('/o/whanganui/roster');
+  const roll = await req('/o/whanganui/roll');
   ok('the roll opens', roll.status === 200);
   ok('and offers both ways in',
     roll.html.includes('/members/new') && roll.html.includes('/members/import'));
@@ -127,7 +127,7 @@ console.log('\nCONFIRMING WRITES IT, ONCE');
   const r = await req('/o/whanganui/members/import',
     { method: 'POST', form: { text: SPREADSHEET, confirm: 'yes' } });
   ok('it redirects to the roll',
-    r.status === 302 && r.location.startsWith('/o/whanganui/roster'), r.location);
+    r.status === 302 && r.location.startsWith('/o/whanganui/roll'), r.location);
   ok('saying how many went in',
     decodeURIComponent(r.location).includes('3 added'),
     decodeURIComponent(r.location ?? ''));
@@ -322,7 +322,7 @@ console.log('\nSEEING THE ROLL IS NOT PERMISSION TO CHANGE IT');
   await req(`/signin/${token}`, { method: 'POST', form: {} });
 
   ok('another club\'s roll is refused',
-    (await req('/o/whanganui/roster')).status === 403);
+    (await req('/o/whanganui/roll')).status === 403);
   ok('so is its import page',
     (await req('/o/whanganui/members/import')).status === 403);
 

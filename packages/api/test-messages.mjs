@@ -295,7 +295,7 @@ console.log('\nPEOPLE I TICK, AND BY PHONE ALONE');
   await signIn(adminAcc.email);
   const screen = await req('/o/whanganui/messages');
   ok('and offers it, with the phone-only choice', /name="pick_/.test(screen.html) && /value="selected"/.test(screen.html) && /value="app"/.test(screen.html));
-  const roll = await req('/o/whanganui/roster');
+  const roll = await req('/o/whanganui/roll');
   ok('the roll has the side menu and the one-tap Send message button, on a phone too', /class="rail"/.test(roll.html) && /railbtn/.test(roll.html.split('</style>')[1]) && /class="btn msgbtn" href="\/o\/whanganui\/messages"/.test(roll.html));
   const dash = await req('/dashboard');
   ok('and so does the dashboard', /Send a message/.test(dash.html));

@@ -57,7 +57,7 @@ const wh = await one(`select id, slug from organisation where slug='whanganui'`)
 
 console.log('\nTHE WEBSITE FOLLOWS THE ROLL');
 {
-  const r = await req('/o/whanganui/roster?show=instructors');
+  const r = await req('/o/whanganui/roll?show=instructors');
   ok('the roll renders, filtered to instructors', r.status === 200);
   ok('it lists people who hold the instructor role',
     /Instructor/.test(r.html));
@@ -95,7 +95,7 @@ console.log('\nNOBODY UNDER EIGHTEEN GOES ON A PUBLIC WEBSITE');
     insert into affiliation (person_id, organisation_id, role, status, starts)
     values ($1,$2,'member','active', current_date)`, [teen.id, wh.id]);
 
-  const screen = await req('/o/whanganui/roster?band=junior');
+  const screen = await req('/o/whanganui/roll?band=junior');
   ok('they are on the roll, marked as a junior', screen.html.includes('Mere') && /junior/.test(screen.html));
   const picked = await req('/o/whanganui/instructors/bulk', { method: 'POST', form: { action: 'show', [`pick_${teen.id}`]: 'on' } });
   ok('showing them on the website is declined, saying why', /Mere/.test(decodeURIComponent(picked.location)) && /under 18/.test(decodeURIComponent(picked.location)));

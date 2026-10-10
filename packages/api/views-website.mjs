@@ -20,7 +20,7 @@ export const pageList = ({ me, csrf, org, pages = [], canPublish = false,
     <a href="/o/${esc(org.slug)}/instructors">Instructors</a> ·
     <a href="/o/${esc(org.slug)}/media">Images</a> ·
     <a href="/o/${esc(org.slug)}/menu">Menu</a> ·
-    <a href="/o/${esc(org.slug)}/roster">Back to the roll</a></p>
+    <a href="/o/${esc(org.slug)}/roll">Back to the roll</a></p>
 
   ${done ? `<div class="good">${esc(done)}</div>` : ''}
   ${error ? `<div class="bad">${esc(error)}</div>` : ''}
@@ -346,7 +346,7 @@ export const history = ({ me, csrf, org, entries = [], actors = [],
   return page({ title: `History — ${org.name}`, me, csrf, body: `
   <h1>History</h1>
   <p class="sub">${esc(org.name)} ·
-    <a href="/o/${esc(org.slug)}/roster">Back to the roll</a></p>
+    <a href="/o/${esc(org.slug)}/roll">Back to the roll</a></p>
 
   <form method="get" action="/o/${esc(org.slug)}/history" class="card">
     <div class="row">

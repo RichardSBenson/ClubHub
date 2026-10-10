@@ -104,25 +104,25 @@ const rowsOf = (html) => (html.match(/name="pick_[0-9a-f-]+"/g) ?? []).length;
 console.log('\nTHE ROLL: FILTER IT, TICK FROM IT');
 await signIn('doug@example.nz');
 {
-  let r = await req('/o/whanganui/roster');
+  let r = await req('/o/whanganui/roll');
   ok('the roll has the tickboxes, and only for black belts', r.status === 200 && (r.html.match(/class="pick"/g) ?? []).length >= 3 && !new RegExp(`pick_${kyuC.id}`).test(r.html) && !new RegExp(`pick_${nobelt.id}`).test(r.html) && /Make instructors and show on the website/.test(r.html));
   ok('the whole roll is there by default, highest grade first', r.html.indexOf('Aroha 3rd dan') < r.html.indexOf('Cal Kyu') && /Nan Newbie/.test(r.html));
   ok('another dojo\'s black belt is not on it', !/Wendy Away/.test(r.html));
-  r = await req('/o/whanganui/roster?grade=dan');
+  r = await req('/o/whanganui/roll?grade=dan');
   const idx = order(r.html, ['Aroha 3rd dan', 'Ben 1st dan', 'Tia Teen']);
   ok('black belts only, highest grade first', idx.every((i) => i >= 0) && idx[0] < idx[1] && !/Cal Kyu/.test(r.html));
-  r = await req(`/o/whanganui/roster?grade=${await gid('3rd dan')}`);
+  r = await req(`/o/whanganui/roll?grade=${await gid('3rd dan')}`);
   ok('one grade only', /Aroha 3rd dan/.test(r.html) && !/Ben 1st dan/.test(r.html));
-  r = await req('/o/whanganui/roster?band=junior');
+  r = await req('/o/whanganui/roll?band=junior');
   ok('juniors', /Tia Teen/.test(r.html) && !/Aroha 3rd dan/.test(r.html));
-  r = await req('/o/whanganui/roster?band=senior');
+  r = await req('/o/whanganui/roll?band=senior');
   ok('seniors', /Aroha 3rd dan/.test(r.html) && !/Tia Teen/.test(r.html));
-  r = await req('/o/whanganui/roster');
+  r = await req('/o/whanganui/roll');
   ok('nobody is ticked to begin with', !/class="pick" type="checkbox"[^>]* checked/.test(r.html));
-  r = await req('/o/whanganui/roster?grade=dan&all=1');
+  r = await req('/o/whanganui/roll?grade=dan&all=1');
   ok('"select everyone shown" ticks them all, with no script needed', (r.html.match(/class="pick" type="checkbox"[^>]* checked/g) ?? []).length === rowsOf(r.html) && rowsOf(r.html) >= 3);
   r = await req('/o/whanganui/instructors');
-  ok('the old Instructors address lands on the roll, filtered to instructors', r.status === 302 && /roster\?show=instructors/.test(r.location));
+  ok('the old Instructors address lands on the roll, filtered to instructors', r.status === 302 && /roll\?show=instructors/.test(r.location));
 }
 
 console.log('\nMANY AT ONCE');
@@ -154,8 +154,8 @@ console.log('\nMANY AT ONCE');
   await pool.query(`update qualification_award set expires_on='2035-01-01' where person_id=$1 and qualification_id=$2`, [shodanB.id, qid('Police vetting')]);
   await req('/o/whanganui/instructors/bulk', { method: 'POST', form: { action: 'show', [`pick_${shodanB.id}`]: 'on' } });
   ok('somebody from another dojo is refused by name', /Wendy Away/.test(msg) && !(await one(`select 1 x from affiliation where person_id=$1 and role='instructor' and ends is null`, [away.id])));
-  ok('the roll keeps the filter it was on', /roster\?grade=dan/.test(loc));
-  r = await req('/o/whanganui/roster?show=instructors');
+  ok('the roll keeps the filter it was on', /roll\?grade=dan/.test(loc));
+  r = await req('/o/whanganui/roll?show=instructors');
   ok('the roll now says who is shown, and what holds the others back', /Instructor · on the website/.test(r.html) && /Instructor · not shown/.test(r.html) && /needs/.test(r.html));
   ok('and "instructors only" leaves out everybody else', !/Nan Newbie/.test(r.html));
   r = await req('/o/whanganui/instructors/bulk', { method: 'POST', form: { action: 'off', [`pick_${extra.id}`]: 'on' } });
@@ -169,10 +169,10 @@ console.log('\nMANY AT ONCE');
 console.log('\nFROM THE FEDERATION');
 {
   await signIn('doug@example.nz');
-  let r = await req('/o/moknz/roster?grade=dan');
+  let r = await req('/o/moknz/roll?grade=dan');
   ok('the federation roll can be filtered across every dojo, with the dojo shown', r.status === 200 && /Aroha 3rd dan/.test(r.html) && /Wendy Away/.test(r.html) && /Wellington/.test(r.html) && /Whanganui/.test(r.html));
   r = await req('/o/moknz/instructors/bulk', { method: 'POST', form: { action: 'role', grade: 'dan', [`pick_${away.id}`]: 'on' } });
-  ok('and the federation can pick from it, each person dealt with at their own dojo', /roster/.test(r.location) && !/error/.test(r.location) && !!(await one(`select 1 x from affiliation where person_id=$1 and organisation_id=$2 and role='instructor' and ends is null`, [away.id, wn.id])));
+  ok('and the federation can pick from it, each person dealt with at their own dojo', /roll/.test(r.location) && !/error/.test(r.location) && !!(await one(`select 1 x from affiliation where person_id=$1 and organisation_id=$2 and role='instructor' and ends is null`, [away.id, wn.id])));
 }
 
 console.log('\nTHE 280-CHARACTER WRITE-UP');
@@ -197,11 +197,11 @@ console.log('\nTHE 280-CHARACTER WRITE-UP');
 
 console.log('\nTHE ROLL: WHO IS DUE TO GRADE');
 {
-  const r = await req('/o/whanganui/roster');
+  const r = await req('/o/whanganui/roll');
   ok('the roll has a Next grading column', /<th class="hide-sm">Next grading<\/th>/.test(r.html));
   ok('Cal (3rd kyu since 2015) is marked due now, with the grade he is going for', /Cal Kyu[\s\S]*?due now<\/span> <span class="muted">2nd kyu/.test(r.html));
   ok('Aroha (3rd dan) is due for 4th dan, by invitation', /Aroha 3rd dan[\s\S]*?4th dan[^<]*by invitation/.test(r.html));
-  const d = await req('/o/whanganui/roster?show=due');
+  const d = await req('/o/whanganui/roll?show=due');
   ok('"Due to grade" lists those who are due', /Cal Kyu/.test(d.html) && /Aroha 3rd dan/.test(d.html));
   ok('and leaves out the ungraded and those not yet due', !/Nan Newbie/.test(d.html) && !/Tia Teen/.test(d.html));
 }

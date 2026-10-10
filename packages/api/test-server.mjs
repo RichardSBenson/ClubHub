@@ -50,7 +50,7 @@ console.log('\nEVERYTHING IS BEHIND SIGN-IN');
 {
   const r = await req('/dashboard');
   ok('dashboard redirects when signed out', r.status === 302 && r.location === '/signin');
-  ok('roster too', (await req('/o/whanganui/roster')).status === 302);
+  ok('roster too', (await req('/o/whanganui/roll')).status === 302);
   const s = await req('/signin');
   ok('the sign-in page itself is public', s.status === 200);
   ok('and asks only for an email',
@@ -167,7 +167,7 @@ console.log('\nONE ACCOUNT, TWO ARTS');
 
 console.log('\nROSTER AND PERSON');
 {
-  const r = await req('/o/whanganui/roster');
+  const r = await req('/o/whanganui/roll');
   ok('roster renders', r.status === 200 && r.html.includes('Aroha'));
   ok('grades shown', r.html.includes('4th kyu'));
 
@@ -191,10 +191,10 @@ console.log('\nPERMISSION IS ENFORCED AT THE ROUTE');
   const { token } = await auth.requestLink('tane@example.nz');
   await req(`/signin/${token}`, { method: 'POST', form: {} });
 
-  const mine = await req('/o/wellington/roster');
+  const mine = await req('/o/wellington/roll');
   ok('Tane can see Wellington', mine.status === 200);
 
-  const theirs = await req('/o/whanganui/roster');
+  const theirs = await req('/o/whanganui/roll');
   ok('but not Whanganui', theirs.status === 403, theirs.status);
   ok('with a plain message, not a stack trace',
     /Not permitted|do not have access/.test(theirs.html) && !theirs.html.includes('at Object'));

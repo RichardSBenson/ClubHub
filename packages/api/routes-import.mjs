@@ -58,7 +58,7 @@ export function registerImportRoutes({ get, post, memberFieldsFrom }) {
 
     try {
       const result = await people.importRoll(ctx.me.accountId, org.id, preview.plan);
-      return ctx.redirect(`/o/${org.slug}/roster?done=` + encodeURIComponent(
+      return ctx.redirect(`/o/${org.slug}/roll?done=` + encodeURIComponent(
         `${result.added} added to the roll`
         + (result.graded ? `, ${result.graded} with the grade they already held` : '')
         + '.'));

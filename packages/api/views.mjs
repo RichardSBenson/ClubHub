@@ -281,7 +281,7 @@ export function rail({ org, vocabulary = {}, can = {}, path = '' }) {
   <div class="here"><strong>${esc(org.name)}</strong>
     <span>${isClub ? esc(club) : 'Federation'}</span></div>
   ${group('People', [
-    link(`${base}/roster`, 'Roll'),
+    link(`${base}/roll`, 'Roll'),
     can.register && link(`${base}/members/new`, 'Add a member'),
     can.register && link(`${base}/members/import`, 'Import a roll'),
     can.register && link(`${base}/enquiries`, 'Enquiries'),
@@ -404,7 +404,7 @@ export const dashboard = ({ me, csrf, orgs, parents = [], groups = [], platformO
   ${parents.map((o) => `<div class="card">
     <h3>${esc(o.name)}</h3>
     ${o.canMessage ? `<p><a class="btn" href="/o/${esc(o.slug)}/messages">Send a message</a></p>` : ''}
-    <p>${esc(o.type)} · <a href="/o/${esc(o.slug)}/roster">Roll</a>
+    <p>${esc(o.type)} · <a href="/o/${esc(o.slug)}/roll">Roll</a>
        · <a href="/o/${esc(o.slug)}/events">Events</a>
        · <a href="/o/${esc(o.slug)}/grading">Grading</a>
        · <a href="/o/${esc(o.slug)}/pages">Website</a>${platformOwner && !String(o.path).includes('.') ? ` · <a href="/platform">Platform</a>` : ''}</p>
@@ -413,7 +413,7 @@ export const dashboard = ({ me, csrf, orgs, parents = [], groups = [], platformO
   ${groups.map((group) => `
   <h2>${heading(group)}</h2>
   <div class="grid">${group.clubs.map((o) => `<div class="card">
-    <h3><a href="/o/${esc(o.slug)}/roster">${esc(o.name)}</a></h3>
+    <h3><a href="/o/${esc(o.slug)}/roll">${esc(o.name)}</a></h3>
     <p>${o.members} member${Number(o.members) === 1 ? '' : 's'}</p>
     ${o.canMessage ? `<p><a class="btn" href="/o/${esc(o.slug)}/messages">Send a message</a></p>` : ''}
   </div>`).join('')}</div>`).join('')}` });
@@ -421,7 +421,7 @@ export const dashboard = ({ me, csrf, orgs, parents = [], groups = [], platformO
 
 export const roster = ({ me, csrf, org, roster, total = null, canRegister = false, canManage = false, unlinked = [], waitingDocs = [],
                         filter = {}, ladder = [], dueCount = 0, declarationUnsigned = 0, done, error, rebuild }) => {
-  const here = `/o/${esc(org.slug)}/roster`;
+  const here = `/o/${esc(org.slug)}/roll`;
   const withClub = org.type !== 'club';
   const q = (extra = {}) => new URLSearchParams(Object.entries({ grade: filter.grade !== 'all' ? filter.grade : '', band: filter.band, show: filter.show, ...extra })
     .filter(([, v]) => v)).toString();
@@ -757,7 +757,7 @@ export const memberForm = ({ me, csrf, org, values = {}, error, isNew = true,
   <h1>${isNew ? `Add someone to ${esc(org.name)}`
               : `${esc(person.first_name)} ${esc(person.last_name)}`}</h1>
   <p class="sub">${isNew
-    ? `<a href="/o/${esc(org.slug)}/roster">Back to the roll</a>
+    ? `<a href="/o/${esc(org.slug)}/roll">Back to the roll</a>
        · <a href="/o/${esc(org.slug)}/members/import">Import a spreadsheet instead</a>`
     : `${esc(person.display_number ?? '')} ·
        <a href="/p/${esc(person.id)}">Back to their record</a>`}</p>
@@ -864,7 +864,7 @@ export const memberForm = ({ me, csrf, org, values = {}, error, isNew = true,
     <div class="actions">
       <button class="btn" type="submit">${isNew ? 'Add them to the roll'
                                                 : 'Save changes'}</button>
-      <a class="btn quiet" href="${isNew ? `/o/${esc(org.slug)}/roster`
+      <a class="btn quiet" href="${isNew ? `/o/${esc(org.slug)}/roll`
                                          : `/p/${esc(person.id)}`}">Cancel</a>
     </div>
   </form>` });
@@ -887,7 +887,7 @@ export const importRoll = ({ me, csrf, org, text = '', preview = null, error,
     title: `Import — ${org.name}`, me, csrf, body: `
   <h1>Bring in an existing roll</h1>
   <p class="sub">${esc(org.name)} ·
-    <a href="/o/${esc(org.slug)}/roster">Back to the roll</a></p>
+    <a href="/o/${esc(org.slug)}/roll">Back to the roll</a></p>
 
   ${error ? `<div class="bad">${esc(error)}</div>` : ''}
 
@@ -1008,7 +1008,7 @@ export const grading = ({ me, csrf, org, candidates, ladder, done, error }) => {
   const byOrder = Object.fromEntries(ladder.map((g) => [g.rank_order, g]));
   return page({ title: `Grading — ${org.name}`, me, csrf, body: `
   <h1>Run a grading</h1>
-  <p class="sub">${esc(org.name)} · <a href="/o/${esc(org.slug)}/roster">Back to roster</a></p>
+  <p class="sub">${esc(org.name)} · <a href="/o/${esc(org.slug)}/roll">Back to the roll</a></p>
 
   ${done ? `<div class="good"><strong>${esc(done)} grading${done === '1' ? '' : 's'} recorded.</strong></div>` : ''}
   ${error ? `<div class="bad"><strong>Nothing was recorded.</strong> ${esc(error)}</div>` : ''}

@@ -21,7 +21,7 @@ export const events = ({ me, csrf, org, own = [], inherited = [], zone,
   title: `Events — ${org.name}`, me, csrf, body: `
   <h1>Events</h1>
   <p class="sub">${esc(org.name)} ·
-    <a href="/o/${esc(org.slug)}/roster">Back to roster</a></p>
+    <a href="/o/${esc(org.slug)}/roll">Back to the roll</a></p>
 
   ${done ? `<div class="good">${esc(done)}</div>` : ''}
   ${error ? `<div class="bad">${esc(error)}</div>` : ''}

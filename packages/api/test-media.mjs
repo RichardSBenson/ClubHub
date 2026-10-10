@@ -178,7 +178,7 @@ console.log('\nWHAT GOES IN COMES BACK OUT');
 console.log('\nWHAT IS REFUSED, AND WHETHER IT SAYS WHY');
 {
   const svg = Buffer.from('<svg xmlns="http://www.w3.org/2000/svg"'
-    + ' onload="fetch(\'/o/moknz/roster\')"/>');
+    + ' onload="fetch(\'/o/moknz/roll\')"/>');
   const r = await upload('/o/moknz/media', { file: svg, filename: 'logo.svg',
     type: 'image/svg+xml' });
   ok('an svg is refused', r.location.includes('error='));

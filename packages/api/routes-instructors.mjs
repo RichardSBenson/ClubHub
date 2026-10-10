@@ -10,7 +10,7 @@ export function registerInstructorRoutes({ get, post, UUID_RE, organisationFor }
   // The roll is where instructors are chosen; this address is kept so old links and menu entries still land.
   get('/o/:slug/instructors', async (ctx) => {
     const org = await organisationFor(ctx, { toWrite: true });
-    return ctx.redirect(`/o/${org.slug}/roster?show=instructors`);
+    return ctx.redirect(`/o/${org.slug}/roll?show=instructors`);
   });
 
   post('/o/:slug/instructors/bulk', async (ctx) => {
@@ -20,7 +20,7 @@ export function registerInstructorRoutes({ get, post, UUID_RE, organisationFor }
     if (form.grade && form.grade !== 'all') keep.set('grade', form.grade);
     if (form.band) keep.set('band', form.band);
     if (form.show) keep.set('show', form.show);
-    const back = `/o/${org.slug}/roster`;
+    const back = `/o/${org.slug}/roll`;
     const go = (extra) => ctx.redirect(`${back}?${keep}${keep.size ? '&' : ''}${extra}`);
     const picked = Object.keys(form).filter((k) => k.startsWith('pick_')).map((k) => k.slice(5)).filter((id) => UUID_RE.test(id));
     if (!picked.length) return go('error=' + encodeURIComponent('Tick the people first.'));

@@ -98,9 +98,9 @@ console.log('\nTHE FEDERATION ADDS A CLUB');
   delete jar.honbu_session;
   await req('/signin');
   await req(link, { method: 'POST', form: {} });
-  const own = await req('/o/taupo-karate/roster');
+  const own = await req('/o/taupo-karate/roll');
   ok('can sign in and open their own club', own.status === 200, String(own.status));
-  const other = await req('/o/whanganui/roster');
+  const other = await req('/o/whanganui/roll');
   ok('cannot open another club', other.status === 403 || other.status === 404, String(other.status));
   const up = await req(`/o/${federation.slug}/clubs`);
   ok('cannot open the federation\'s clubs screen', up.status !== 200 || !/Add a club/.test(up.html),

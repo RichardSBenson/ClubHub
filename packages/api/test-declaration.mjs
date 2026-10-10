@@ -106,7 +106,7 @@ await signIn('pam.decl@example.nz');
 }
 await signIn('doug@example.nz');
 {
-  const r = await req('/o/whanganui/roster');
+  const r = await req('/o/whanganui/roll');
   ok('the roll marks who has not signed', /Declaration not signed/.test(r.html) && /have not signed the federation declaration|has not signed the federation declaration/.test(r.html));
   const a = await req('/o/whanganui/declaration');
   ok('the official can open the declaration page', a.status === 200 && /Version <strong>2026\.1<\/strong>/.test(a.html));
