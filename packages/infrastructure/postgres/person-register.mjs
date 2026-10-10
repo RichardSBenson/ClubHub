@@ -110,6 +110,39 @@ function transactionOn(client) {
         where person_id = $1 and ends is null`, [personId, paidUntil || null, status || null]);
     },
 
+    async personForAccess(personId) {
+      const { rows: [p] } = await client.query('select *, date_of_birth::text as dob from person where id = $1', [personId]);
+      return p ?? null;
+    },
+
+    async defaultHomeFor(personId) {
+      const { rows: [r] } = await client.query(`
+        select organisation_id from affiliation where person_id = $1 and ends is null
+        order by case role when 'member' then 0 else 1 end limit 1`, [personId]);
+      return r?.organisation_id ?? null;
+    },
+
+    async accountByEmail(address) {
+      const { rows: [r] } = await client.query(
+        `select a.person_id, p.first_name, p.last_name, p.display_number, p.date_of_birth::text as dob
+           from account a left join person p on p.id = a.person_id where a.email = $1`, [address]);
+      return r ?? null;
+    },
+
+    async upsertAccount(personId, address) {
+      const { rows: [account] } = await client.query(`
+        insert into account (person_id, email) values ($1,$2)
+        on conflict (email) do update set person_id = coalesce(account.person_id, excluded.person_id)
+        returning *`, [personId, address]);
+      return account;
+    },
+
+    async grantRole({ accountId, organisationId, role, grantedBy }) {
+      await client.query(`
+        insert into grant_role (account_id, organisation_id, role, granted_by) values ($1,$2,$3,$4)
+        on conflict (account_id, organisation_id, role) do nothing`, [accountId, organisationId, role, grantedBy]);
+    },
+
     async recordHeldGrade({ personId, gradeId, awardedOn, organisationId, note }) {
       await client.query(`
         insert into grading_record (person_id, grade_id, awarded_on, awarded_by_org, result, panel, notes)

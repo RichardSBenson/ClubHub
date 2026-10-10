@@ -24,6 +24,9 @@ import { MANAGE, REGISTER, TEACH } from '../../core/domain/access.mjs';
 import { EnrolPerson } from '../../core/application/enrol-person.mjs';
 import { LinkGuardian, SetGuardianContact, UnlinkGuardian, ListGuardians } from '../../core/application/guardians.mjs';
 import { PostgresGuardianRegister } from '../../infrastructure/postgres/guardian-register.mjs';
+import { GrantAccess } from '../../core/application/grant-access.mjs';
+import { SelfService } from '../../core/application/self-service.mjs';
+import { PostgresSelfServiceReads } from '../../infrastructure/postgres/self-service-reads.mjs';
 import { ImportRoll, ReadRoll } from '../../core/application/import-roll.mjs';
 import { UpdatePerson, TransferMember } from '../../core/application/change-person.mjs';
 import { Refused, NotPermitted, Missing } from '../../core/application/ports.mjs';
@@ -55,6 +58,8 @@ const unlinkGuardian = new UnlinkGuardian({ register: guardians, auth });
 const listGuardians = new ListGuardians({ register: guardians, auth });
 const importRoll = new ImportRoll({ register, auth });
 const readRoll = new ReadRoll({ register, auth });
+const grantAccess = new GrantAccess({ register, auth });
+const selfService = new SelfService({ reads: new PostgresSelfServiceReads(pool), adultAge: () => region().adultAge });
 const enrolPerson = new EnrolPerson({
   register, auth,
   announcer: { announce: (orgId, event, data) => webhooks.emitNow(orgId, event, data) },
@@ -217,72 +222,8 @@ export const people = {
    * already administer the register, scoped to the organisations they
    * administer, and written down every time.
    */
-  async grantAccess(actor, personId, { role = 'member', email = null,
-                                       organisationId = null } = {}) {
-    const person = await one('select * from person where id = $1', [personId]);
-    if (!person) throw new NotFound('Person');
-
-    const home = organisationId ?? (await one(`
-      select organisation_id from affiliation
-      where person_id = $1 and ends is null
-      order by case role when 'member' then 0 else 1 end limit 1`,
-      [personId]))?.organisation_id;
-    if (!home) throw new NotFound('Person has no current affiliation');
-    await assertRole(actor, home, MANAGE);
-
-    const address = (email ?? person.email ?? '').trim().toLowerCase();
-    if (!address) {
-      throw new Invalid(
-        `${person.first_name} has no email address on file. Add one to their `
-        + 'record first — an account is identified by its address, even when '
-        + 'the link is handed over rather than sent.');
-    }
-    if (!/^[^\s@]+@[^\s@.]+\.[^\s@]+$/.test(address))
-      throw new Invalid(`"${address}" does not look like an email address`);
-
-    const client = await pool.connect();
-    try {
-      await client.query('begin');
-
-      // An address already used by somebody else is a different person, not
-      // this one. Silently attaching it would hand over their account.
-      const { rows: [clash] } = await client.query(
-        `select a.person_id, p.first_name, p.last_name, p.display_number, p.date_of_birth::text as dob
-           from account a left join person p on p.id = a.person_id where a.email = $1`, [address]);
-      if (clash && clash.person_id && clash.person_id !== personId) {
-        // Say whose it is. Most often it is the same person entered twice, and the register should say so.
-        const mine = (await client.query(`select first_name, last_name, date_of_birth::text as dob from person where id = $1`, [personId])).rows[0];
-        const same = mine && clash.first_name?.toLowerCase() === mine.first_name.toLowerCase()
-          && clash.last_name?.toLowerCase() === mine.last_name.toLowerCase() && clash.dob === mine.dob;
-        throw new Invalid(same
-          ? `${address} already has an account on ${clash.first_name} ${clash.last_name} (${clash.display_number}), who looks like the same person entered twice. Open ${clash.display_number} instead.`
-          : `${address} already belongs to ${clash.first_name} ${clash.last_name}'s account (${clash.display_number}).`);
-      }
-
-      const { rows: [account] } = await client.query(`
-        insert into account (person_id, email) values ($1,$2)
-        on conflict (email) do update set person_id = coalesce(account.person_id,
-          excluded.person_id)
-        returning *`, [personId, address]);
-
-      await client.query(`
-        insert into grant_role (account_id, organisation_id, role, granted_by)
-        values ($1,$2,$3,$4)
-        on conflict (account_id, organisation_id, role) do nothing`,
-        [account.id, home, role, actor]);
-
-      await client.query(`
-        insert into audit_log (account_id, organisation_id, action, entity,
-                               entity_id, after)
-        values ($1,$2,'grant_access','account',$3,$4::jsonb)`,
-        [actor, home, account.id, JSON.stringify({ personId, role, address })]);
-
-      await client.query('commit');
-      return { account, organisationId: home, role };
-    } catch (e) {
-      await client.query('rollback');
-      throw e;
-    } finally { client.release(); }
+  async grantAccess(actor, personId, { role = 'member', email = null, organisationId = null } = {}) {
+    return speakingForThisLayer(() => grantAccess.execute({ actorId: actor, personId, role, email, organisationId }));
   },
 
   /** Who already has a way in, and what they may do. */
@@ -633,46 +574,16 @@ export const family = {
   },
 
   /** The person behind an account, and the children they may act for. */
-  async mine(actor) {
-    const self = await one(`
-      select ${PERSON_COLUMNS} from account a join person p on p.id = a.person_id
-      where a.id = $1`, [actor]);
-    if (!self) return { self: null, dependants: [] };
-    const { rows: dependants } = await pool.query(`
-      select ${PERSON_COLUMNS}, gl.relationship
-      from guardian_link gl join person p on p.id = gl.child_id
-      where gl.guardian_id = $1 and gl.ended_on is null
-        and p.date_of_birth is not null
-        and p.date_of_birth > current_date - make_interval(years => $2)
-      order by p.first_name`, [self.id, region().adultAge]);
-    return { self, dependants };
-  },
+  async mine(actor) { return selfService.mine(actor); },
 
   /** 'self', 'guardian', or null. The only door every self-service screen uses. */
-  async mayActFor(actor, personId) {
-    const { self, dependants } = await this.mine(actor);
-    if (!self) return null;
-    if (self.id === personId) return 'self';
-    return dependants.some((d) => d.id === personId) ? 'guardian' : null;
-  },
+  async mayActFor(actor, personId) { return selfService.mayActFor(actor, personId); },
 
-  /**
-   * Whether this person may see and pay what the child owes. Yourself, always. A linked adult, unless the
-   * child has somebody marked as looking after the fees and it is not them.
-   */
-  async mayPayFor(actor, personId) {
-    const how = await this.mayActFor(actor, personId);
-    if (how !== 'guardian') return how === 'self';
-    const self = await one('select person_id from account where id=$1', [actor]);
-    const row = await one(`select bool_or(pays_fees) as any_set, bool_or(pays_fees and guardian_id = $2) as mine
-      from guardian_link where child_id=$1 and ended_on is null`, [personId, self.person_id]);
-    return !row?.any_set || !!row.mine;
-  },
+  /** Whether this person may see and pay what the child owes (see SelfService). */
+  async mayPayFor(actor, personId) { return selfService.mayPayFor(actor, personId); },
 
   async assertMayActFor(actor, personId) {
-    const how = await this.mayActFor(actor, personId);
-    if (!how) throw new Forbidden();
-    return how;
+    return speakingForThisLayer(() => selfService.assertMayActFor(actor, personId));
   },
 
   /** A registrar links a parent or guardian to a child at the child's club. */

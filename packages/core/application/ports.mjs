@@ -248,6 +248,11 @@ export class Refused extends Error {
  *   changeEmergencyContact(personId, { name?, phone? })  — only what is given
  *   changeAffiliation(personId, { paidUntil?, status? }) — their current affiliations
  *   endAffiliation(id, on)
+ *   personForAccess(personId)               — the person row, or null
+ *   defaultHomeFor(personId)                — organisation id of their current member (else other) affiliation, or null
+ *   accountByEmail(address)                 — { person_id, first_name, last_name, display_number, dob } | null
+ *   upsertAccount(personId, address)        — the account (an existing one keeps its person)
+ *   grantRole({ accountId, organisationId, role, grantedBy })
  *   recordHeldGrade({ personId, gradeId, awardedOn, organisationId, note })  — a grade already held, recorded as such
  *   rollOf(organisationId)                  — who is on the organisation's roll now, in the shape the import planner compares
  */
@@ -277,4 +282,16 @@ export const ANNOUNCER = {
 export const GUARDIAN_REGISTER = {
   name: 'GuardianRegister',
   methods: ['inTransaction'],
+};
+
+/**
+ * What the signed-in account may do for whom, read without a transaction:
+ *   selfOf(accountId)                       — the account's own person, or null
+ *   dependantsOf(guardianPersonId, adultAge) — the children under that age with a live link to them (+ relationship)
+ *   feePayersOf(childId)                    — { anySet, guardianIds[] } for the child's live links that look after fees
+ *   personIdOf(accountId)
+ */
+export const SELF_SERVICE_READS = {
+  name: 'SelfServiceReads',
+  methods: ['selfOf', 'dependantsOf', 'feePayersOf', 'personIdOf'],
 };

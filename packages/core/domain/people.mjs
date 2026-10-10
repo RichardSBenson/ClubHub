@@ -182,3 +182,23 @@ export function memberNumberPrefix(shortNameOrSlug) {
 export function formatMemberNumber(prefix, sequence) {
   return `${prefix}-${String(sequence).padStart(4, '0')}`;
 }
+
+/** An account is identified by its address, even when the sign-in link is handed over rather than sent. */
+export function problemsWithSignInAddress(address, person) {
+  if (!address) return [`${person.first_name} has no email address on file. Add one to their record first — an account is identified by its address, even when the link is handed over rather than sent.`];
+  if (!/^[^\s@]+@[^\s@.]+\.[^\s@]+$/.test(address)) return [`"${address}" does not look like an email address`];
+  return [];
+}
+
+/**
+ * An address already used by somebody else is a different person, not this one, and silently attaching it would hand
+ * over their account. Say whose it is: most often it is the same person entered twice.
+ * `owner` and `mine` are { first_name, last_name, dob, display_number? }.
+ */
+export function accountClashMessage(address, owner, mine) {
+  const same = mine && owner.first_name?.toLowerCase() === mine.first_name.toLowerCase()
+    && owner.last_name?.toLowerCase() === mine.last_name.toLowerCase() && owner.dob === mine.dob;
+  return same
+    ? `${address} already has an account on ${owner.first_name} ${owner.last_name} (${owner.display_number}), who looks like the same person entered twice. Open ${owner.display_number} instead.`
+    : `${address} already belongs to ${owner.first_name} ${owner.last_name}'s account (${owner.display_number}).`;
+}
