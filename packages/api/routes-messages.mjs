@@ -5,7 +5,7 @@ import { messages, emailPreferences, NotFound, Invalid } from './data.mjs';
 import * as V from './views.mjs';
 import { readMessage } from '../core/domain/messaging.mjs';
 import { messengerFrom } from '../infrastructure/messaging/messengers.mjs';
-import { sendingAddress, originOf } from './request-helpers.mjs';
+import { sendingAddress, originOf } from './route-helpers.mjs';
 
 export function registerMessageRoutes({ get, post, organisationFor }) {
   // ---- messages ----------------------------------------------------------------

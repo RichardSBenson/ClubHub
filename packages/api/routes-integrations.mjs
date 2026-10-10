@@ -4,7 +4,7 @@
 import { apiTokens, webhooks, NotFound, Invalid } from './data.mjs';
 import * as V from './views.mjs';
 import { readScopes, readEvents } from '../core/domain/integrations.mjs';
-import { originOf } from './request-helpers.mjs';
+import { originOf } from './route-helpers.mjs';
 import { organisationFor } from './access.mjs';
 
 export function registerIntegrationRoutes({ get, post, UUID_RE }) {

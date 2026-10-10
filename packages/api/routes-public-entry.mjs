@@ -8,7 +8,7 @@ import { readOutsider } from '../core/domain/outsider.mjs';
 import { signEntryToken, readEntryToken } from './entry-token.mjs';
 import { looksLikeRobot } from '../core/domain/enquiry.mjs';
 import { messengerFrom } from '../infrastructure/messaging/messengers.mjs';
-import { originOf } from './request-helpers.mjs';
+import { originOf } from './route-helpers.mjs';
 
 export function registerPublicEntryRoutes({ SESSION_COOKIE, get, post }) {
   // ---- entering an open event from outside ------------------------------------------

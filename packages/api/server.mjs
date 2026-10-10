@@ -34,52 +34,34 @@ import { STARTER_DECLARATION } from '../core/domain/declarations.mjs';
 import { nextGrading } from '../core/domain/next-grading.mjs';
 import crypto from 'node:crypto';
 import { URL } from 'node:url';
-import { lookups, declarations, photos, instructorRole, orgs, people, rank, competition, pages, assets, instructors, memberDocuments, audit, cards, checkin, appearance, family, myself, memberEvents, messages, payments, fees, renewals, reminders, attendance, newcomers, qualifications, forms, autoRenew, booking, push, apiTokens, api, platform, portal, enquiries, scheduledPublishing, TooMany, trials, referrals, growth, clubMailer, terms, Forbidden, NotFound, Invalid } from './data.mjs';
+import { lookups, declarations, photos, instructorRole, orgs, people, rank, competition, instructors, memberDocuments, audit, cards, checkin, family, myself, memberEvents, payments, attendance, forms, autoRenew, booking, push, apiTokens, api, platform, portal, TooMany, trials, referrals, growth, clubMailer, terms, Forbidden, NotFound, Invalid } from './data.mjs';
 import * as auth from './auth.mjs';
 import * as V from './views.mjs';
 import { qrSvg } from '../core/domain/qr.mjs';
 import { CHECKIN_REFRESH_SECONDS } from './card-token.mjs';
 import { readTrialSignup, normaliseCode } from '../core/domain/growth.mjs';
 import { repeatFromLast, decideQuick } from '../core/domain/repeat-entry.mjs';
-import { readEnquiry, looksLikeRobot, sameSite } from '../core/domain/enquiry.mjs';
-import { readFee, readExemption, reminderText } from '../core/domain/membership.mjs';
+import { looksLikeRobot, sameSite } from '../core/domain/enquiry.mjs';
 import { paymentProviderFrom, isTestProvider } from '../infrastructure/payments/providers.mjs';
-import { BUILT_IN } from '../site/builtin-themes.mjs';
-import { readTheme, serialise } from '../site/theme.mjs';
 import { currentStore } from '../infrastructure/factory.mjs';
 import { messengerFrom } from '../infrastructure/messaging/messengers.mjs';
 import { SendSignInLink } from '../core/application/send-sign-in-link.mjs';
-import { toLocalInput } from './zones.mjs';
 import { readMultipart, BadUpload } from './multipart.mjs';
-import { documentFromText, textFromDocument }
-  from '../content/document-text.mjs';
 import { fitFor } from '../content/image-slots.mjs';
 import { isPdf, MAX_DOCUMENT_BYTES } from '../core/domain/documents.mjs';
 import { identify, NotAnImage, MAX_BYTES } from '../content/images.mjs';
-import { Competitor, Division, placeEntry, priceFor, consentNeeded,
-         problemsWithConsent } from '../core/domain/competition.mjs';
-import { ageOn } from '../core/domain/people.mjs';
-import { looksEmpty }
-  from '../content/page-form.mjs';
-import { renderBlocks, excerpt } from '../content/blocks.mjs';
-import * as R from '../site/render.mjs';
+import { Competitor, placeEntry, priceFor, consentNeeded, problemsWithConsent } from '../core/domain/competition.mjs';
 import { requestRebuild } from '../infrastructure/publishing/rebuild.mjs';
 import { registerSettingsRoutes } from './routes-settings.mjs';
 import { registerShopRoutes } from './routes-shop.mjs';
 import { DEFAULT_TIMEZONE } from '../core/domain/defaults.mjs';
 import { region, withRegion } from '../infrastructure/region-context.mjs';
-import { sendingAddress, originOf } from './request-helpers.mjs';
+import { sendingAddress, originOf, memberFieldsFrom, slugify, ipHash } from './route-helpers.mjs';
 import { registerMediaRoutes } from './routes-media.mjs';
 import { registerNewsRoutes } from './routes-news.mjs';
 import { registerInstructorRoutes } from './routes-instructors.mjs';
 import { registerClubPageRoutes } from './routes-club-pages.mjs';
 import { registerNewClubRoutes } from './routes-new-club.mjs';
-import { registerPublicEntryRoutes } from './routes-public-entry.mjs';
-import { registerQualificationRoutes } from './routes-qualifications.mjs';
-import { registerFormRoutes } from './routes-forms.mjs';
-import { registerGradingEventRoutes } from './routes-grading-events.mjs';
-import { registerNewcomerRoutes } from './routes-newcomers.mjs';
-import { registerReportRoutes } from './routes-reports.mjs';
 import { registerClubPaymentRoutes } from './routes-club-payments.mjs';
 import { registerBookingRoutes } from './routes-bookings.mjs';
 import { registerMessageRoutes } from './routes-messages.mjs';
@@ -95,6 +77,22 @@ import { registerAuditRoutes } from './routes-audit.mjs';
 import { registerSearchRoutes } from './routes-search.mjs';
 import { registerNotificationRoutes } from './routes-notifications.mjs';
 import { registerIntegrationRoutes } from './routes-integrations.mjs';
+import { eventFor, dayOf, engineSetupFor, entryContextFor } from './event-context.mjs';
+import { registerCompetitorRoutes } from './routes-competitors.mjs';
+import { registerCompetitionRoutes } from './routes-competition.mjs';
+import { registerWebsiteRoutes } from './routes-website.mjs';
+import { registerMemberRoutes } from './routes-members.mjs';
+import { registerCronRoutes } from './routes-cron.mjs';
+import { registerEnquiryRoutes } from './routes-enquiries.mjs';
+import { registerAppearanceRoutes } from './routes-appearance.mjs';
+import { registerPaymentActionRoutes } from './routes-payment-actions.mjs';
+import { registerRenewalRoutes } from './routes-renewals.mjs';
+import { registerNewcomerRoutes } from './routes-newcomers.mjs';
+import { registerReportRoutes } from './routes-reports.mjs';
+import { registerGradingEventRoutes } from './routes-grading-events.mjs';
+import { registerFormRoutes } from './routes-forms.mjs';
+import { registerQualificationRoutes } from './routes-qualifications.mjs';
+import { registerPublicEntryRoutes } from './routes-public-entry.mjs';
 
 const SESSION_COOKIE = 'honbu_session';
 const CSRF_COOKIE = 'honbu_csrf';
@@ -1289,307 +1287,9 @@ registerShopRoutes({ get, post, organisationFor, UUID_RE });
 
 registerNotificationRoutes({ get, post, UUID_RE, providerNow, payView });
 
-// ---- adding and correcting a member ---------------------------------------
+registerMemberRoutes({ get, post });
 
-
-/** Fields shared by the add and edit forms, read out of a submitted form. */
-const memberFieldsFrom = (form) => ({
-  firstName: form.firstName?.trim() ?? '',
-  lastName: form.lastName?.trim() ?? '',
-  preferredName: form.preferredName?.trim() || null,
-  dateOfBirth: form.dateOfBirth?.trim() || null,
-  gender: form.gender?.trim() || null,
-  email: form.email?.trim() || null,
-  phone: form.phone?.trim() || null,
-  emergencyName: form.emergencyName?.trim() || null,
-  emergencyPhone: form.emergencyPhone?.trim() || null,
-  paidUntil: form.paidUntil?.trim() || null,
-});
-
-get('/o/:slug/members/new', async (ctx) => {
-  const org = await organisationFor(ctx, { toRegister: true });
-  return ctx.send(200, V.memberForm({
-    me: ctx.me, org, csrf: ctx.csrf, isNew: true,
-    vocabulary: await orgs.vocabulary(org.id),
-    values: { role: 'member' },
-  }));
-});
-
-post('/o/:slug/members/new', async (ctx) => {
-  const org = await organisationFor(ctx, { toRegister: true });
-  const form = await ctx.form();
-
-  try {
-    const person = await people.enrol(ctx.me.accountId, {
-      organisationId: org.id,
-      ...memberFieldsFrom(form),
-      role: form.role || 'member',
-      starts: form.starts?.trim() || null,
-    });
-    return ctx.redirect(`/p/${person.id}`);
-  } catch (e) {
-    return ctx.send(e.status ?? 422, V.memberForm({
-      me: ctx.me, org, csrf: ctx.csrf, isNew: true, error: e.message,
-      vocabulary: await orgs.vocabulary(org.id), values: form,
-    }));
-  }
-});
-
-// ---- the website ----------------------------------------------------------
-
-
-/** A title becomes a web address when nobody typed one. */
-const slugify = (text) => String(text ?? '').toLowerCase().trim()
-  .replace(/['']/g, '')
-  .replace(/[^a-z0-9]+/g, '-')
-  .replace(/^-+|-+$/g, '')
-  .slice(0, 120);
-
-get('/o/:slug/pages', async (ctx) => {
-  const org = await organisationFor(ctx, { toWrite: true });
-  return ctx.send(200, V.pageList({
-    me: ctx.me, org, csrf: ctx.csrf,
-    pages: await pages.list(ctx.me.accountId, org.id),
-    canPublish: await mayPublishAt(ctx, org.id),
-    done: ctx.url.searchParams.get('done'),
-    error: ctx.url.searchParams.get('error'),
-    rebuild: ctx.url.searchParams.get('rebuild'),
-  }));
-});
-
-get('/o/:slug/pages/new', async (ctx) => {
-  const org = await organisationFor(ctx, { toWrite: true });
-  return ctx.send(200, V.pageEditor({
-    me: ctx.me, org, csrf: ctx.csrf,
-    images: await assets.list(ctx.me.accountId, org.id),
-    values: { body: '' },
-    canPublish: await mayPublishAt(ctx, org.id),
-  }));
-});
-
-/**
- * One handler for every button on the editor.
- *
- * Moving a block, removing one, adding one, saving, publishing — all of them
- * post the whole form, because the page has no JavaScript to do it any other
- * way. The structural operations re-render without touching the database;
- * only save, publish and unpublish write.
- */
-async function editorPost(ctx, { org, page = null }) {
-  const form = await ctx.form();
-  const op = String(form.op ?? 'save');
-  const canPublish = await mayPublishAt(ctx, org.id);
-
-  // One box of text, parsed into blocks. What comes back out still goes
-  // through the whitelist in pages.save, so the editor is not a way past it.
-  const images = await assets.list(ctx.me.accountId, org.id);
-  const body = String(form.body ?? '');
-  // Pictures are referred to by filename in the box and by id in the
-  // document, so the list is needed on the way in as well as out.
-  const doc = documentFromText(body, { images });
-
-  const title = String(form.title ?? '').trim();
-  const slug = slugify(form.slug || title);
-
-  const render = async (extra = {}) => ctx.send(extra.status ?? 200, V.pageEditor({
-    me: ctx.me, org, page, csrf: ctx.csrf, canPublish, images,
-    scheduledFor: page ? await pages.scheduledFor(page.id) : null,
-    today: new Date().toISOString().slice(0, 10),
-    values: { body, title, slug,
-              metaDescription: form.metaDescription ?? '' },
-    ...extra,
-  }));
-
-  if (!title) return render({ status: 422, error: 'The page needs a title.' });
-  if (!slug) return render({ status: 422,
-    error: 'The page needs a web address. Give it a title with some letters '
-      + 'in it, or type one.' });
-
-  // Said before the save rather than after, so a half-written page comes back
-  // with everything still in it instead of being refused by the database.
-  if (looksEmpty(doc)) {
-    return render({ status: 422,
-      error: 'There is nothing on this page yet. Add something and type into '
-        + 'it before saving.' });
-  }
-
-  try {
-    const { page: saved, dropped } = await pages.save(ctx.me.accountId, {
-      pageId: page?.id ?? null,
-      organisationId: page ? null : org.id,
-      slug, title, body: doc,
-      metaTitle: null,
-      metaDescription: form.metaDescription?.trim() || null,
-      note: page ? null : 'Created',
-    });
-
-    if (op === 'publish' || op === 'unpublish') {
-      if (!canPublish) {
-        return render({ status: 403, page: saved,
-          error: 'Your changes are saved. Putting a page in front of the '
-            + 'public needs an owner or administrator.' });
-      }
-      if (op === 'publish') await pages.publish(ctx.me.accountId, saved.id);
-      else await pages.unpublish(ctx.me.accountId, saved.id);
-
-      // Saved first, rebuild asked for second, and the answer is passed on
-      // whatever it is. Reporting "published" while the site is unchanged is
-      // worse than not publishing at all.
-      const rebuild = await requestRebuild({
-        reason: `${op} ${org.slug}/${slug}` });
-
-      return ctx.redirect(`/o/${org.slug}/pages?done=`
-        + encodeURIComponent(op === 'publish'
-          ? `"${saved.title}" is published.` : `"${saved.title}" is off the site.`)
-        + '&rebuild=' + encodeURIComponent(rebuild.detail));
-    }
-
-    if (op === 'schedule' || op === 'unschedule') {
-      if (!canPublish) return render({ status: 403, page: saved,
-        error: 'Your changes are saved. Scheduling needs an owner or administrator.' });
-      if (op === 'schedule') await pages.schedule(ctx.me.accountId, saved.id, String(form.publishOn ?? ''));
-      else await pages.unschedule(ctx.me.accountId, saved.id);
-      return ctx.redirect(`/o/${org.slug}/pages/${saved.id}?done=`
-        + encodeURIComponent(op === 'schedule' ? `Scheduled for ${String(form.publishOn)}.` : 'No longer scheduled.'));
-    }
-
-    if (dropped.length) {
-      return render({ page: saved, dropped,
-        done: 'Saved as a draft.' });
-    }
-    return ctx.redirect(`/o/${org.slug}/pages/${saved.id}?done=`
-      + encodeURIComponent('Saved as a draft.'));
-  } catch (e) {
-    return render({ status: e.status ?? 422, error: e.message });
-  }
-}
-
-post('/o/:slug/pages/new', async (ctx) => {
-  const org = await organisationFor(ctx, { toWrite: true });
-  return editorPost(ctx, { org });
-});
-
-get('/o/:slug/pages/:pageId', async (ctx) => {
-  const org = await organisationFor(ctx, { toWrite: true });
-  const pg = await pages.byId(ctx.me.accountId, ctx.params.pageId);
-  const doc = pg.body ?? { blocks: [] };
-
-  const images = await assets.list(ctx.me.accountId, org.id);
-  return ctx.send(200, V.pageEditor({
-    me: ctx.me, org, page: pg, csrf: ctx.csrf, images,
-    scheduledFor: await pages.scheduledFor(pg.id), today: new Date().toISOString().slice(0, 10),
-    values: { body: textFromDocument(doc, { images }),
-              title: pg.title, slug: pg.slug,
-              metaDescription: pg.meta_description ?? '' },
-    revisions: await pages.revisions(ctx.me.accountId, pg.id),
-    canPublish: await mayPublishAt(ctx, org.id),
-    done: ctx.url.searchParams.get('done'),
-  }));
-});
-
-post('/o/:slug/pages/:pageId', async (ctx) => {
-  const org = await organisationFor(ctx, { toWrite: true });
-  const pg = await pages.byId(ctx.me.accountId, ctx.params.pageId);
-  return editorPost(ctx, { org, page: pg });
-});
-
-post('/o/:slug/pages/:pageId/restore', async (ctx) => {
-  const org = await organisationFor(ctx, { toWrite: true });
-  const form = await ctx.form();
-  const back = `/o/${org.slug}/pages/${ctx.params.pageId}`;
-  try {
-    await pages.restore(ctx.me.accountId, form.revisionId);
-    return ctx.redirect(`${back}?done=`
-      + encodeURIComponent('Put back to that version. It is a draft until you '
-        + 'publish it again.'));
-  } catch (e) {
-    return ctx.redirect(`${back}?done=${encodeURIComponent(e.message)}`);
-  }
-});
-
-/**
- * The page as a visitor will see it.
- *
- * Rendered by the SAME function the published site uses, with the same blocks,
- * the same layout, the same live data pulled in. A preview that renders a
- * second way is a preview of something nobody will ever see, and it drifts —
- * the only question is when somebody notices.
- *
- * This is also what makes a static site bearable to edit: the published page
- * takes a minute to rebuild, and nobody waits on it, because this is exact.
- */
-get('/o/:slug/pages/:pageId/preview', async (ctx) => {
-  const org = await organisationFor(ctx, { toWrite: true });
-  const pg = await pages.byId(ctx.me.accountId, ctx.params.pageId);
-
-  const { repositories } = await import('../infrastructure/factory.mjs');
-  const { site } = await repositories();
-
-  // The federation whose site this page belongs to, and its own words for
-  // things — a taekwondo club's preview must not say "club".
-  const root = await lookups.rootOf(org.id);
-  const federation = root ?? org;
-
-  const [brand, clubRows, evs] = await Promise.all([
-    site.brand(federation.id),
-    site.clubs(federation.slug),
-    site.eventsFor(federation.slug),
-  ]);
-
-  const origin = process.env.VERCEL_PROJECT_PRODUCTION_URL
-    ? `https://${process.env.VERCEL_PROJECT_PRODUCTION_URL}`
-    : `${ctx.secure ? 'https' : 'http'}://${ctx.req.headers.host}`;
-
-  // The preview points at /a/:id, which serves from the database behind a
-  // sign-in. The build writes the same images out as files and points at
-  // those. Different addresses, same bytes — and the preview has to resolve
-  // them at all, or somebody checks a page, sees no image, and assumes the
-  // block is broken rather than the preview.
-  const previewAssets = Object.fromEntries(
-    (await assets.list(ctx.me.accountId, org.id)).map((a) => [a.id, `/a/${a.id}`]));
-
-  const html = renderBlocks(pg.body, { clubs: clubRows, events: evs, assets: previewAssets, enquiryAction: `/enquire/${org.slug}` },
-    { origin });
-
-  const body = R.authoredPage({
-    page: pg, html, federation,
-    origin, base: '',
-    fonts: brand?.fonts ?? { display: 'Bitter', body: 'Source Sans 3' },
-    nav: [],
-    vocabulary: await orgs.vocabulary(org.id),
-    description: excerpt(pg.body),
-  });
-
-  // The preview is the real page, so it must never be mistaken for the real
-  // page by anything that indexes or caches.
-  ctx.res.writeHead(200, {
-    'content-type': 'text/html; charset=utf-8',
-    'x-robots-tag': 'noindex, nofollow',
-    'cache-control': 'no-store',
-    'x-frame-options': 'SAMEORIGIN',
-  });
-  return ctx.res.end(previewBanner(org, pg) + body);
-});
-
-/**
- * A strip across the top saying this is a preview.
- *
- * Added after the page rather than inside the renderer, because the renderer
- * must produce exactly what gets published and nothing else. Somebody looking
- * at a draft that is indistinguishable from the live site will eventually
- * tell their club a page is up when it is not.
- */
-const previewBanner = (org, pg) => `
-<div style="position:sticky;top:0;z-index:99;background:#161617;color:#F5F5F5;
-  font:14px/1.5 system-ui,sans-serif;padding:10px 18px;display:flex;
-  gap:16px;align-items:center;flex-wrap:wrap">
-  <strong>Preview</strong>
-  <span style="color:#BDBDBF">${pg.status === 'published'
-    ? 'This page is live. You are seeing your unsaved draft of it.'
-    : 'This page is a draft. Nobody else can see it.'}</span>
-  <a href="/o/${org.slug}/pages/${pg.id}"
-    style="margin-left:auto;color:#F0CE41">Back to editing</a>
-</div>`;
+registerWebsiteRoutes({ get, post });
 
 registerSearchRoutes({ get });
 
@@ -1607,62 +1307,7 @@ registerBookingRoutes({ get, post, UUID_RE, mayRegisterAt, organisationFor });
 
 registerClubPaymentRoutes({ get, post, UUID_RE, providerNow, organisationFor });
 
-// ---- renewals: the club's own prices, who is due, who is not charged -----------
-
-async function renewalsScreen(ctx, org, extra = {}) {
-  const actor = ctx.me.accountId;
-  const { today, rows } = await renewals.roster(actor, org.id);
-  const canSetPrices = await mayManageAt(ctx, org.id);
-  return ctx.send(extra.status ?? 200, V.renewalsScreen({
-    me: ctx.me, org, csrf: ctx.csrf, today, rows, prices: await fees.list(actor, org.id),
-    auto: await autoRenew.forClub(actor, org.id),
-    canSetPrices, canExempt: canSetPrices, reminderText: reminderText('due'),
-    autoReminders: await renewals.reminderSetting(org.id),
-    done: ctx.url.searchParams.get('done'), ...extra }));
-}
-
-get('/o/:slug/renewals', async (ctx) => {
-  const org = await organisationFor(ctx);
-  if (org.type !== 'club') return ctx.redirect(`/o/${org.slug}/clubs`);
-  return renewalsScreen(ctx, org);
-});
-
-post('/o/:slug/renewals', async (ctx) => {
-  const org = await organisationFor(ctx);
-  const form = await ctx.form();
-  const ids = Object.keys(form).filter((k) => k.startsWith('pick_') && form[k] === '1')
-    .map((k) => k.slice(5)).filter((id) => UUID_RE.test(id));
-  if (form.action === 'remind') {
-    try {
-      const made = await renewals.remind(ctx.me.accountId, org.id,
-        { affiliationIds: ids, subject: form.subject, body: form.body }, { baseFrom: sendingAddress() });
-      await messages.sendBatch(ctx.me.accountId, org.id, made.message.id,
-        { messenger: messengerFrom(), origin: originOf(ctx), trusted: true });
-      return ctx.redirect(`/o/${org.slug}/messages/${made.message.id}`);
-    } catch (e) {
-      if (e instanceof Invalid) return renewalsScreen(ctx, org, { status: 422, error: e.message });
-      throw e;
-    }
-  }
-  try {
-    const out = await renewals.ask(ctx.me.accountId, org.id,
-      { affiliationIds: ids, period: form.period, received: form.received });
-    const notes = out.skipped.map((s) => `${s.name}: ${s.reason}`);
-    return renewalsScreen(ctx, org, { done: `${out.asked} renewal${out.asked === 1 ? '' : 's'} ${
-      form.received ? 'recorded' : 'asked for'}.`, notes });
-  } catch (e) {
-    if (e instanceof Invalid) return renewalsScreen(ctx, org, { status: 422, error: e.message });
-    throw e;
-  }
-});
-
-post('/o/:slug/renewals/reminders', async (ctx) => {
-  const org = await organisationFor(ctx);
-  const form = await ctx.form();
-  await renewals.setReminders(ctx.me.accountId, org.id, form.enabled === '1');
-  return ctx.redirect(`/o/${org.slug}/renewals?done=${encodeURIComponent(
-    form.enabled === '1' ? 'Automatic reminders are on.' : 'Automatic reminders are off.')}`);
-});
+registerRenewalRoutes({ get, post, UUID_RE });
 
 registerNewcomerRoutes({ get, post, UUID_RE, organisationFor });
 
@@ -1676,309 +1321,19 @@ registerQualificationRoutes({ get, post, UUID_RE, organisationFor, mayManageAt }
 
 registerPublicEntryRoutes({ SESSION_COOKIE, get, post });
 
-// ---- website enquiries -----------------------------------------------------------
-//
-// The public door is /enquire/:slug. Anybody may post to it; it is protected
-// by a same-site check, a hidden honeypot box, rate limits and length limits.
-
-const ipHash = (ip) => crypto.createHmac('sha256', process.env.ENQUIRY_SALT ?? process.env.CRON_SECRET ?? 'honbu')
-  .update(String(ip ?? '')).digest('hex').slice(0, 32);
-
-async function enquiryClub(slug) {
-  const org = await lookups.activeClub(slug);
-  if (!org) throw new NotFound('Organisation');
-  return org;
-}
-
-get('/enquire/:slug/thanks', async (ctx) => {
-  const org = await enquiryClub(ctx.params.slug);
-  return ctx.send(200, V.enquiryPage({ csrf: ctx.csrf, club: org.name, sent: true }));
-});
-
-get('/enquire/:slug', async (ctx) => {
-  const org = await enquiryClub(ctx.params.slug);
-  const kind = ctx.url.searchParams.get('kind') === 'trial' ? 'trial' : 'contact';
-  return ctx.send(200, V.enquiryPage({ csrf: ctx.csrf, club: org.name, kind, action: `/enquire/${org.slug}` }));
-});
-
-post('/enquire/:slug', async (ctx) => {
-  const form = await ctx.publicForm();
-  const org = await enquiryClub(ctx.params.slug);
-  // A robot filled the hidden box. Say thank you and keep nothing.
-  if (looksLikeRobot(form)) return ctx.redirect(`/enquire/${org.slug}/thanks`);
-  const input = readEnquiry(form);
-  try {
-    await enquiries.submit({ slug: org.slug, input, ipHash: ipHash(ctx.ip),
-      messenger: messengerFrom(), baseFrom: sendingAddress() });
-    return ctx.redirect(`/enquire/${org.slug}/thanks`);
-  } catch (e) {
-    if (e instanceof Invalid || e instanceof TooMany)
-      return ctx.send(e.status ?? 422, V.enquiryPage({ csrf: ctx.csrf, club: org.name, kind: input.kind,
-        action: `/enquire/${org.slug}`, values: input, error: e.message }));
-    throw e;
-  }
-});
-
-async function enquiriesScreen(ctx, org, extra = {}) {
-  return ctx.send(extra.status ?? 200, V.enquiriesScreen({ me: ctx.me, org, csrf: ctx.csrf,
-    ...(await enquiries.inbox(ctx.me.accountId, org.id)),
-    done: ctx.url.searchParams.get('done'), ...extra }));
-}
-
-get('/o/:slug/enquiries', async (ctx) => {
-  const org = await organisationFor(ctx, { toRegister: true });
-  return enquiriesScreen(ctx, org);
-});
-
-post('/o/:slug/enquiries/:id/handled', async (ctx) => {
-  const org = await organisationFor(ctx, { toRegister: true });
-  const form = await ctx.form();
-  if (!UUID_RE.test(ctx.params.id)) throw new NotFound('Enquiry');
-  await enquiries.mark(ctx.me.accountId, org.id, ctx.params.id, form.handled === '1');
-  return ctx.redirect(`/o/${org.slug}/enquiries`);
-});
-
-post('/o/:slug/enquiries/:id/delete', async (ctx) => {
-  const org = await organisationFor(ctx, { toRegister: true });
-  await ctx.form();
-  if (!UUID_RE.test(ctx.params.id)) throw new NotFound('Enquiry');
-  await enquiries.remove(ctx.me.accountId, org.id, ctx.params.id);
-  return ctx.redirect(`/o/${org.slug}/enquiries?done=${encodeURIComponent('Deleted.')}`);
-});
+registerEnquiryRoutes({ get, post, UUID_RE });
 
 // Scheduled publishing. Same lock as the renewals door.
-get('/cron/publish', async (ctx) => {
-  const secret = process.env.CRON_SECRET;
-  const given = String(ctx.req.headers.authorization ?? '').replace(/^Bearer /, '');
-  const a = Buffer.from(given), b = Buffer.from(secret ?? '');
-  if (!secret || a.length !== b.length || !crypto.timingSafeEqual(a, b))
-    throw new Forbidden('Not permitted');
-  const made = await scheduledPublishing.run();
-  const rebuild = made.length ? await requestRebuild({ reason: `scheduled: ${made.length} item(s)` }) : null;
-  return ctx.send(200, `<pre>${JSON.stringify({ published: made, rebuild: rebuild?.detail ?? null }, null, 1).replace(/</g, '&lt;')}</pre>`);
-});
+registerCronRoutes({ get, signInLinkFor, providerNow });
 
-// The scheduler's door. Open to nobody without the shared secret, and shut
-// entirely when none is configured — "no secret set" must never mean "no lock".
-get('/cron/renewals', async (ctx) => {
-  const secret = process.env.CRON_SECRET;
-  const given = String(ctx.req.headers.authorization ?? '').replace(/^Bearer /, '');
-  const a = Buffer.from(given), b = Buffer.from(secret ?? '');
-  if (!secret || a.length !== b.length || !crypto.timingSafeEqual(a, b))
-    throw new Forbidden('Not permitted');
-  const autoReport = await autoRenew.run({ provider: providerNow(), messenger: messengerFrom(), baseFrom: sendingAddress(),
-    origin: process.env.VERCEL_PROJECT_PRODUCTION_URL ? `https://${process.env.VERCEL_PROJECT_PRODUCTION_URL}` : originOf(ctx) });
-  const forgotten = await newcomers.purgeStale();
-  const enquiriesDeleted = await enquiries.tidy();
-  const qualReport = await qualifications.remind({ messenger: messengerFrom(), baseFrom: sendingAddress(),
-    origin: process.env.VERCEL_PROJECT_PRODUCTION_URL ? `https://${process.env.VERCEL_PROJECT_PRODUCTION_URL}` : originOf(ctx) });
-  const origin = process.env.VERCEL_PROJECT_PRODUCTION_URL ? `https://${process.env.VERCEL_PROJECT_PRODUCTION_URL}` : originOf(ctx);
-  const report = await reminders.run({ messenger: messengerFrom(), baseFrom: sendingAddress(), origin });
-  const termsReport = await terms.run({ messenger: messengerFrom(), baseFrom: sendingAddress(), origin });
-  const growthReport = await growth.run({ messenger: messengerFrom(), baseFrom: sendingAddress(), origin, signInLink: signInLinkFor(origin) });
-  return ctx.send(200, `<pre>${JSON.stringify({ report, autoRenew: autoReport, qualifications: qualReport, newcomersForgotten: forgotten, enquiriesDeleted, growth: growthReport, terms: termsReport }, null, 1).replace(/</g, '&lt;')}</pre>`);
-});
+registerPaymentActionRoutes({ post, UUID_RE });
 
-post('/o/:slug/renewals/fees', async (ctx) => {
-  const org = await organisationFor(ctx);
-  const form = await ctx.form();
-  const input = readFee(form);
-  try {
-    await fees.save(ctx.me.accountId, org.id, input);
-    return ctx.redirect(`/o/${org.slug}/renewals?done=${encodeURIComponent('Price saved.')}`);
-  } catch (e) {
-    if (e instanceof Invalid) return renewalsScreen(ctx, org, { status: 422, error: e.message, values: input });
-    throw e;
-  }
-});
-
-post('/o/:slug/renewals/fees/:feeId/remove', async (ctx) => {
-  const org = await organisationFor(ctx);
-  await ctx.form();
-  if (!UUID_RE.test(ctx.params.feeId)) throw new NotFound('Price');
-  await fees.remove(ctx.me.accountId, org.id, ctx.params.feeId);
-  return ctx.redirect(`/o/${org.slug}/renewals?done=${encodeURIComponent('Price removed.')}`);
-});
-
-post('/o/:slug/renewals/:affiliationId/exempt', async (ctx) => {
-  const org = await organisationFor(ctx);
-  const form = await ctx.form();
-  if (!UUID_RE.test(ctx.params.affiliationId)) throw new NotFound('Member');
-  try {
-    await renewals.setExemption(ctx.me.accountId, org.id, ctx.params.affiliationId, readExemption(form));
-    return ctx.redirect(`/o/${org.slug}/renewals?done=${encodeURIComponent('Saved.')}`);
-  } catch (e) {
-    if (e instanceof Invalid) return renewalsScreen(ctx, org, { status: 422, error: e.message });
-    throw e;
-  }
-});
-
-post('/o/:slug/renewals/:affiliationId/carry-on', async (ctx) => {
-  const org = await organisationFor(ctx);
-  await ctx.form();
-  if (!UUID_RE.test(ctx.params.affiliationId)) throw new NotFound('Member');
-  try {
-    const until = await renewals.carryOn(ctx.me.accountId, org.id, ctx.params.affiliationId);
-    return ctx.redirect(`/o/${org.slug}/renewals?done=${encodeURIComponent(`Carried on to ${until}.`)}`);
-  } catch (e) {
-    if (e instanceof Invalid) return renewalsScreen(ctx, org, { status: 422, error: e.message });
-    throw e;
-  }
-});
-
-post('/o/:slug/payments/:paymentId/cancel', async (ctx) => {
-  const org = await organisationFor(ctx);
-  await ctx.form();
-  if (!UUID_RE.test(ctx.params.paymentId)) throw new NotFound('Payment');
-  await payments.cancel(ctx.me.accountId, org.id, ctx.params.paymentId);
-  return ctx.redirect(`/o/${org.slug}/payments?done=${encodeURIComponent('Cancelled.')}`);
-});
 
 registerNewClubRoutes({ get, post, organisationFor });
 
-// ---- appearance ------------------------------------------------------------
-//
-// The federation's look: a built-in theme, an imported one, or the default.
-// A club has no look of its own, so these are federation screens only.
-
-const builtInList = () => Object.entries(BUILT_IN)
-  .map(([key, t]) => ({ key, ...t }));
-
-async function appearanceScreen(ctx, org, extra = {}) {
-  const stored = await appearance.current(ctx.me.accountId, org.id);
-  const q = ctx.url.searchParams;
-  return ctx.send(extra.status ?? 200, V.appearanceEditor({
-    me: ctx.me, org, csrf: ctx.csrf, builtIn: builtInList(),
-    home: await appearance.home(ctx.me.accountId, org.id),
-    current: stored ? (readTheme(stored).theme ?? null) : null,
-    done: q.get('done'), error: q.get('error'), rebuild: q.get('rebuild'),
-    ...extra,
-  }));
-}
-
 registerSettingsRoutes({ get, post, organisationFor, mayPublishAt, requestRebuild });
 
-get('/o/:slug/appearance', async (ctx) => {
-  const org = await organisationFor(ctx, { toWrite: true });
-  if (org.type === 'club') return ctx.redirect(`/o/${org.slug}/club-page`);
-  return appearanceScreen(ctx, org);
-});
-
-post('/o/:slug/appearance', async (ctx) => {
-  const org = await organisationFor(ctx, { toWrite: true });
-  if (org.type === 'club') throw new Forbidden('A club uses its federation\'s look.');
-  const form = await ctx.form();
-  const pasted = String(form.theme_json ?? '');
-  const doc = form.builtin ? BUILT_IN[form.builtin] : pasted;
-  if (!doc) return appearanceScreen(ctx, org, { status: 422, pasted,
-    error: 'Choose a theme or paste a theme file.' });
-  const read = readTheme(doc);
-  if (!read.ok) return appearanceScreen(ctx, org, { status: 422, pasted,
-    problems: read.problems });
-  try {
-    await appearance.apply(ctx.me.accountId, org.id, read.theme);
-  } catch (e) {
-    if (e instanceof Invalid)
-      return appearanceScreen(ctx, org, { status: 422, pasted, error: e.message });
-    throw e;
-  }
-  const rebuild = await requestRebuild({ reason: `appearance ${org.slug}` });
-  return ctx.redirect(`/o/${org.slug}/appearance?done=${
-    encodeURIComponent(`Now using "${read.theme.name}".`)}`
-    + '&rebuild=' + encodeURIComponent(rebuild.detail));
-});
-
-/**
- * The crest. One picture, set by the federation, used in the site header and on every
- * event banner. It comes from the federation's own image library, or is added here.
- */
-post('/o/:slug/appearance/logo', async (ctx) => {
-  const org = await organisationFor(ctx, { toWrite: true });
-  if (org.type === 'club') throw new Forbidden('A club uses its federation\'s crest.');
-  const { fields, files } = await ctx.upload({ maxBytes: MAX_BYTES + 256 * 1024 });
-  const back = `/o/${org.slug}/appearance`;
-  try {
-    if (!await mayManageAt(ctx, org.id)) throw new Forbidden('Only an owner or administrator can set the crest.');
-    let assetId = UUID_RE.test(fields.assetId ?? '') ? fields.assetId : null;
-    const file = files.find((f) => f.field === 'logoFile' && f.bytes.length);
-    if (file) {
-      const created = await assets.create(ctx.me.accountId, org.id, {
-        bytes: file.bytes, identified: identify(file.bytes, { filename: file.filename }),
-        filename: file.filename, altText: `${org.name} crest` });
-      assetId = created.id;
-    }
-    if (fields.remove) assetId = null;
-    else if (!assetId) return ctx.redirect(`${back}?error=${encodeURIComponent('Choose a picture or add one.')}`);
-    await appearance.setLogo(ctx.me.accountId, org.id, assetId);
-    const rebuild = await requestRebuild({ reason: `crest ${org.slug}` });
-    return ctx.redirect(`${back}?done=${encodeURIComponent(assetId ? 'Crest set.' : 'Crest removed.')}&rebuild=${encodeURIComponent(rebuild.detail)}`);
-  } catch (e) {
-    if (e instanceof NotAnImage || e instanceof BadUpload || e instanceof Invalid)
-      return ctx.redirect(`${back}?error=${encodeURIComponent(e.message)}`);
-    throw e;
-  }
-});
-
-/**
- * The top of the home page: the big picture, the three lines of words, and the picture that
- * shows when the site is shared. Federation screens only; a club uses its federation's.
- * The permission check comes before the upload is read.
- */
-post('/o/:slug/appearance/home', async (ctx) => {
-  const org = await organisationFor(ctx, { toWrite: true });
-  if (org.type === 'club') throw new Forbidden('A club uses its federation\'s home page.');
-  if (!await mayManageAt(ctx, org.id)) throw new Forbidden('Only an owner or administrator can change the home page.');
-  const { fields, files } = await ctx.upload({ maxBytes: MAX_BYTES + 256 * 1024 });
-  const back = `/o/${org.slug}/appearance`;
-  try {
-    const change = {
-      heroHeading: fields.heroHeading ?? '', heroText: fields.heroText ?? '', heroButton: fields.heroButton ?? '',
-    };
-    const add = async (field, alt) => {
-      const file = files.find((f) => f.field === field && f.bytes.length);
-      if (!file) return undefined;
-      const identified = identify(file.bytes, { filename: file.filename });
-      const created = await assets.create(ctx.me.accountId, org.id, {
-        bytes: file.bytes, identified, filename: file.filename, altText: alt });
-      return { id: created.id, identified };
-    };
-    const warnings = [];
-    const hero = await add('heroFile', `${org.name} home page`);
-    if (hero) { change.heroAssetId = hero.id; warnings.push(...fitFor('hero', hero.identified)); }
-    else if (fields.removeHero) change.heroAssetId = null;
-    const share = await add('shareFile', `${org.name} link preview`);
-    if (share) { change.shareAssetId = share.id; warnings.push(...fitFor('share', share.identified)); }
-    else if (fields.removeShare) change.shareAssetId = null;
-    await appearance.setHome(ctx.me.accountId, org.id, change);
-    const rebuild = await requestRebuild({ reason: `home page ${org.slug}` });
-    return ctx.redirect(`${back}?done=${encodeURIComponent(['Home page saved.', ...warnings].join(' '))}&rebuild=${encodeURIComponent(rebuild.detail)}`);
-  } catch (e) {
-    if (e instanceof NotAnImage || e instanceof BadUpload || e instanceof Invalid)
-      return ctx.redirect(`${back}?error=${encodeURIComponent(e.message)}`);
-    throw e;
-  }
-});
-
-post('/o/:slug/appearance/reset', async (ctx) => {
-  const org = await organisationFor(ctx, { toWrite: true });
-  if (org.type === 'club') throw new Forbidden('A club uses its federation\'s look.');
-  await ctx.form();
-  await appearance.reset(ctx.me.accountId, org.id);
-  const rebuild = await requestRebuild({ reason: `appearance reset ${org.slug}` });
-  return ctx.redirect(`/o/${org.slug}/appearance?done=${
-    encodeURIComponent('Back to the default look.')}`
-    + '&rebuild=' + encodeURIComponent(rebuild.detail));
-});
-
-get('/o/:slug/appearance/export', async (ctx) => {
-  const org = await organisationFor(ctx, { toWrite: true });
-  if (org.type === 'club') return ctx.redirect(`/o/${org.slug}/club-page`);
-  const stored = await appearance.current(ctx.me.accountId, org.id);
-  const read = stored ? readTheme(stored) : null;
-  if (!read?.ok) return ctx.redirect(`/o/${org.slug}/appearance?error=${
-    encodeURIComponent('There is no theme chosen here to download yet.')}`);
-  return ctx.download(`${org.slug}-theme.json`, 'application/json', serialise(read.theme));
-});
+registerAppearanceRoutes({ get, post, UUID_RE });
 
 registerClubPageRoutes({ get, post, mayPublishAt, organisationFor });
 
@@ -1988,261 +1343,9 @@ registerNewsRoutes({ get, post, mayPublishAt, slugify, organisationFor });
 
 registerMediaRoutes({ SECURITY_HEADERS, get, post, UUID_RE, organisationFor });
 
-// ---- competition ----------------------------------------------------------
+registerCompetitionRoutes({ get, post });
 
-/** The event named in the path, on an organisation the actor may be at. */
-async function eventFor(ctx, { toSchedule = false } = {}) {
-  const org = await organisationFor(ctx, { toSchedule });
-  const { repo } = await calendar();
-  const event = await repo.bySlug(org.id, ctx.params.eventSlug);
-  if (!event) throw new NotFound('Event');
-  return { org, event };
-}
-
-/** The day the event runs, as a calendar day in the organisation's zone. */
-const dayOf = (event, zone) => toLocalInput(event.startsAt, zone).slice(0, 10);
-
-/** The organiser's configuration, turned into what the engine takes. */
-async function engineSetupFor(eventId) {
-  const setup = await competition.setupFor(eventId);
-  const byDiscipline = {};
-  for (const [id, rows] of Object.entries(setup.byDiscipline)) {
-    byDiscipline[id] = rows.map((d) => new Division({
-      id: d.id, disciplineId: d.discipline_id, label: d.label, summary: d.summary,
-      minRankOrder: d.min_rank_order, maxRankOrder: d.max_rank_order,
-      minAge: d.min_age, maxAge: d.max_age,
-      minWeightKg: d.min_weight_kg, maxWeightKg: d.max_weight_kg,
-      gender: d.gender,
-      minYearsTraining: d.min_years_training, maxYearsTraining: d.max_years_training,
-      minPriorEvents: d.min_prior_events, maxPriorEvents: d.max_prior_events,
-      options: d.options, sortOrder: d.sort_order, capacity: d.capacity,
-    }));
-  }
-  const prices = setup.prices.map((p) => ({ forCount: p.for_count,
-    amountCents: p.amount_cents, membersOnly: p.members_only,
-    currency: p.currency }));
-  return { ...setup, engineDivisions: byDiscipline, enginePrices: prices };
-}
-
-get('/o/:slug/events/:eventSlug/setup', async (ctx) => {
-  const { org, event } = await eventFor(ctx, { toSchedule: true });
-  const setup = await competition.setupFor(event.id);
-  return ctx.send(200, V.eventSetup({
-    me: ctx.me, org, event, csrf: ctx.csrf,
-    disciplines: setup.disciplines, byDiscipline: setup.byDiscipline,
-    prices: setup.prices, grades: await gradesFor(org),
-    done: ctx.url.searchParams.get('done'),
-    error: ctx.url.searchParams.get('error'),
-  }));
-});
-
-post('/o/:slug/events/:eventSlug/setup/discipline', async (ctx) => {
-  const { org, event } = await eventFor(ctx, { toSchedule: true });
-  const form = await ctx.form();
-  const back = `/o/${org.slug}/events/${event.slug}/setup`;
-  try {
-    const d = await competition.addDiscipline(ctx.me.accountId, event.id, {
-      name: form.name, summary: form.summary?.trim() || null,
-      sortOrder: +(form.sortOrder ?? 0) || 0 });
-    return ctx.redirect(`${back}?done=${encodeURIComponent(`${d.name} added.`)}`);
-  } catch (e) {
-    return ctx.redirect(`${back}?error=${encodeURIComponent(e.message)}`);
-  }
-});
-
-post('/o/:slug/events/:eventSlug/setup/division', async (ctx) => {
-  const { org, event } = await eventFor(ctx, { toSchedule: true });
-  const form = await ctx.form();
-  const back = `/o/${org.slug}/events/${event.slug}/setup`;
-  try {
-    const d = await competition.addDivision(ctx.me.accountId, form.disciplineId, {
-      label: form.label, summary: form.summary?.trim() || null,
-      minRankOrder: form.minRankOrder, maxRankOrder: form.maxRankOrder,
-      minAge: form.minAge, maxAge: form.maxAge,
-      minWeightKg: form.minWeightKg, maxWeightKg: form.maxWeightKg,
-      gender: form.gender?.trim() || null,
-      sortOrder: +(form.sortOrder ?? 0) || 0 });
-    return ctx.redirect(`${back}?done=${encodeURIComponent(`${d.label} added.`)}`);
-  } catch (e) {
-    return ctx.redirect(`${back}?error=${encodeURIComponent(e.message)}`);
-  }
-});
-
-post('/o/:slug/events/:eventSlug/setup/price', async (ctx) => {
-  const { org, event } = await eventFor(ctx, { toSchedule: true });
-  const form = await ctx.form();
-  const back = `/o/${org.slug}/events/${event.slug}/setup`;
-  try {
-    // Typed in dollars because that is what the form says; stored in cents
-    // because money in a float is how a total comes out a penny wrong.
-    const amountCents = Math.round(Number(form.amount) * 100);
-    if (!Number.isFinite(amountCents) || amountCents < 0)
-      throw new Invalid('That is not a price');
-    await competition.setPrice(ctx.me.accountId, event.id, {
-      forCount: +form.forCount, amountCents, membersOnly: !!form.membersOnly });
-    return ctx.redirect(`${back}?done=${encodeURIComponent('Price set.')}`);
-  } catch (e) {
-    return ctx.redirect(`${back}?error=${encodeURIComponent(e.message)}`);
-  }
-});
-
-// ---- entering a club's own competitors -------------------------------------
-
-/**
- * The event may belong to somebody else.
- *
- * A club enters its people in the federation's tournament, and it has no role
- * at the federation. So the organisation in the path is the CLUB doing the
- * entering — checked for the registrar role there — and the event is found by
- * looking up the tree from it. Requiring a grant at the host would mean only
- * the federation could ever enter anybody.
- */
-async function entryContextFor(ctx) {
-  const org = await organisationFor(ctx, { toRegister: true });
-  const host = await lookups.eventHost(org.id, ctx.params.eventSlug);
-  if (!host) throw new NotFound('Event');
-
-  const { repo } = await calendar();
-  const event = await repo.bySlug(host.id, ctx.params.eventSlug);
-  if (!event) throw new NotFound('Event');
-  return { org, host, event };
-}
-
-
-get('/o/:slug/events/:eventSlug/enter', async (ctx) => {
-  const { org, host, event } = await entryContextFor(ctx);
-  const setup = await competition.setupFor(event.id);
-  const eventDate = dayOf(event, host.timezone);
-
-  const roster = (await people.roster(ctx.me.accountId, org.id, {
-    subtree: org.type !== 'club' }))
-    .filter((p) => p.status === 'active')
-    .map((p) => ({ ...p, ageOnDay: ageOn(p.date_of_birth, eventDate) }));
-
-  return ctx.send(200, V.enterCompetitors({
-    me: ctx.me, org, host, event, csrf: ctx.csrf,
-    disciplines: setup.disciplines, roster, eventDate,
-    consent: { version: event.consentVersion ?? null,
-               text: event.consentText ?? null,
-               guardianUnder: event.guardianUnder ?? null },
-  }));
-});
-
-post('/o/:slug/events/:eventSlug/enter', async (ctx) => {
-  const { org, host, event } = await entryContextFor(ctx);
-  const form = await ctx.form();
-  const setup = await engineSetupFor(event.id);
-  const eventDate = dayOf(event, host.timezone);
-
-  const roster = await people.roster(ctx.me.accountId, org.id, {
-    subtree: org.type !== 'club' });
-  const byId = new Map(roster.map((p) => [p.id, p]));
-
-  // Which boxes were ticked, per person. A person with none ticked is simply
-  // not competing, which is the normal case for most of a roll.
-  const wanted = new Map();
-  for (const key of Object.keys(form)) {
-    const m = key.match(/^enter_([0-9a-f-]{36})_([0-9a-f-]{36})$/);
-    if (m && byId.has(m[1])) {
-      if (!wanted.has(m[1])) wanted.set(m[1], []);
-      wanted.get(m[1]).push(m[2]);
-    }
-  }
-
-  const backToForm = (error) => ctx.send(422, V.enterCompetitors({
-    me: ctx.me, org, host, event, csrf: ctx.csrf,
-    disciplines: setup.disciplines, eventDate, error, values: form,
-    roster: roster.map((p) => ({ ...p, ageOnDay: ageOn(p.date_of_birth, eventDate) })),
-    consent: { version: event.consentVersion ?? null,
-               text: event.consentText ?? null,
-               guardianUnder: event.guardianUnder ?? null },
-  }));
-
-  if (!wanted.size) return backToForm('Nobody has been ticked to enter.');
-
-  const consentProblems = event.consentVersion
-    ? problemsWithConsent({ accepted: !!form.accepted,
-        acceptedName: form.acceptedName, version: event.consentVersion }, {})
-    : [];
-  if (consentProblems.length) return backToForm(consentProblems.join('; '));
-
-  // Worked out, not written. Nothing is saved until somebody has read it.
-  const rows = [];
-  for (const [personId, disciplineIds] of wanted) {
-    const p = byId.get(personId);
-    const weightKg = form[`weight_${personId}`]?.trim() || null;
-    const heightCm = form[`height_${personId}`]?.trim() || null;
-
-    const competitor = new Competitor({
-      personId, name: `${p.first_name} ${p.last_name}`,
-      dateOfBirth: p.date_of_birth, gender: p.gender ?? p.person_gender,
-      rankOrder: p.rank_order, weightKg, heightCm, clubName: org.name,
-      isMember: true,
-    });
-
-    const placed = placeEntry({ disciplines: setup.disciplines,
-      divisionsByDiscipline: setup.engineDivisions }, competitor,
-      { eventDate, wanted: disciplineIds });
-
-    const price = priceFor(disciplineIds.length, setup.enginePrices,
-      { isMember: true });
-
-    rows.push({ personId, name: competitor.name, weightKg, heightCm,
-      ready: placed.ready, placements: placed.placements,
-      amountCents: price.amountCents,
-      needsGuardian: consentNeeded(competitor,
-        { eventDate, guardianUnder: event.guardianUnder ?? null }).guardian });
-  }
-
-  const ready = rows.filter((r) => r.ready);
-  const total = ready.reduce((n, r) => n + (r.amountCents ?? 0), 0);
-
-  if (form.confirm !== 'yes') {
-    // Everything needed to repeat this decision, so the confirm step is the
-    // same calculation rather than a stored one.
-    const text = Object.fromEntries(Object.entries(form)
-      .filter(([k]) => k !== '_csrf' && k !== 'confirm'));
-    return ctx.send(200, V.entryPreview({
-      me: ctx.me, org, event, csrf: ctx.csrf, rows, text, total,
-      currency: setup.prices[0]?.currency ?? region().currency }));
-  }
-
-  if (!ready.length) return backToForm('Nobody is ready to enter yet.');
-
-  let entered = 0;
-  const failures = [];
-  for (const r of ready) {
-    try {
-      await competition.enterCompetitor(ctx.me.accountId, event.id, {
-        personId: r.personId, enteredForOrg: org.id,
-        weightKg: r.weightKg, heightCm: r.heightCm, clubName: org.name,
-        amountCents: r.amountCents,
-        currency: setup.prices[0]?.currency ?? region().currency,
-        placements: r.placements.map((p) => ({
-          disciplineId: p.discipline.id, divisionId: p.division?.id ?? null,
-          placedBy: 'calculated',
-          options: p.division?.options ?? {} })),
-        consent: event.consentVersion ? {
-          version: event.consentVersion, acceptedName: form.acceptedName,
-          ip: ctx.ip,
-          guardian: r.needsGuardian
-            ? { name: form.acceptedName, relationship: 'entered by club',
-                contact: ctx.me.email }
-            : null,
-        } : null,
-      });
-      entered += 1;
-    } catch (e) {
-      // One competitor already entered must not lose the other nineteen.
-      failures.push(`${r.name}: ${e.message}`);
-    }
-  }
-
-  const done = `${entered} entered`
-    + (failures.length ? `. Not entered — ${failures.join('; ')}` : '.');
-  return ctx.redirect(`/o/${org.slug}/events/${event.slug}/entries?`
-    + (failures.length ? 'error=' : 'done=') + encodeURIComponent(done));
-});
+registerCompetitorRoutes({ get, post });
 
 registerEntryListRoutes({ get, post, eventFor, entryContextFor });
 
