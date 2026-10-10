@@ -21,10 +21,20 @@ import { problemsWithGuardianLink, problemsWithSelfEdit } from '../../core/domai
 import { clearance } from '../../core/domain/qualification.mjs';
 import { stateOf as declarationState, problemsWithSigning, problemsWithPublishing as problemsWithDeclarationText, needsGuardian } from '../../core/domain/declarations.mjs';
 import { MANAGE, REGISTER, TEACH } from '../../core/domain/access.mjs';
+import { EnrolPerson } from '../../core/application/enrol-person.mjs';
+import { Refused, NotPermitted } from '../../core/application/ports.mjs';
+import { PostgresPersonRegister } from '../../infrastructure/postgres/person-register.mjs';
+import { PostgresAuthorisation } from '../../infrastructure/postgres/repositories.mjs';
 import { fees } from './billing.mjs';
 import { webhooks } from './messaging.mjs';
 import { orgs } from './organisations.mjs';
 import { AWARD_SELECT, CATALOGUE_FROM, Forbidden, Invalid, NotFound, PERSON_COLUMNS, assertRole, describeAwards, homesOf, insertAsset, localNow, one, q, qualToday } from './shared.mjs';
+
+const enrolPerson = new EnrolPerson({
+  register: new PostgresPersonRegister(pool),
+  auth: new PostgresAuthorisation(pool),
+  announcer: { announce: (orgId, event, data) => webhooks.emitNow(orgId, event, data) },
+});
 
 export const people = {
   /** Roster for one organisation. Private detail only for registrars and above. */
@@ -150,88 +160,15 @@ export const people = {
    * whoever happened to be filling in the form is how two people end up with
    * the same one.
    */
-  async enrol(actor, { organisationId, firstName, lastName, preferredName = null,
-                       dateOfBirth = null, gender = null, email = null,
-                       phone = null, role = 'member', starts = null,
-                       paidUntil = null, emergencyName = null,
-                       emergencyPhone = null }) {
-    await assertRole(actor, organisationId, REGISTER);
-
-    // The same rules the import applies, so a row typed into the form and a
-    // row read out of a spreadsheet are judged identically.
-    const problems = [
-      ...problemsWithPerson({ firstName, lastName, dateOfBirth, email, gender }),
-      ...problemsWithMembership({ role, starts, paidUntil }),
-    ];
-    problems.push(...problemsWithRoleAndGrade({ role, hasGrade: false }));
-    if (problems.length) throw new Invalid(problems.join('; '));
-
-    const client = await pool.connect();
+  async enrol(actor, fields) {
     try {
-      await client.query('begin');
-
-      // One enrolment at a time, so a form submitted twice (a double tap, a slow connection) is judged the second
-      // time against the first, instead of both passing the check together.
-      await client.query(`select pg_advisory_xact_lock(hashtext('enrol-person'))`);
-
-      // The same name with the same date of birth or the same email is the same person (a parent's email shared with a child is fine). Adding them twice is how a second,
-      // empty record ends up being the one somebody opens, so refuse it and say where the first one is.
-      const { rows: sameName } = await client.query(`select display_number, first_name, last_name, date_of_birth::text as date_of_birth, email
-        from person where lower(first_name) = lower($1) and lower(last_name) = lower($2) order by id`, [firstName.trim(), lastName.trim()]);
-      const twin = findTwin(sameName, { dateOfBirth, email });
-      if (twin) throw new Invalid(twinMessage(twin));
-
-      // The federation's prefix, and the next number in its sequence. Inside
-      // the transaction so two registrars saving at once cannot collide.
-      const { rows: [fed] } = await client.query(`
-        select coalesce(f.short_name, f.slug) as prefix, f.id
-        from organisation target
-        join organisation f on target.path <@ f.path and f.parent_id is null
-        where target.id = $1`, [organisationId]);
-
-      const prefix = (fed?.prefix ?? 'M').toUpperCase().replace(/[^A-Z]/g, '').slice(0, 5)
-        || 'M';
-      const { rows: [seq] } = await client.query(`
-        select coalesce(max(substring(display_number from '[0-9]+$')::int), 0) + 1 as next
-        from person where display_number like $1`, [`${prefix}-%`]);
-      const number = `${prefix}-${String(seq.next).padStart(4, '0')}`;
-
-      const { rows: [person] } = await client.query(`
-        insert into person (display_number, first_name, last_name, preferred_name,
-                            date_of_birth, gender, email, phone)
-        values ($1,$2,$3,$4,$5,$6,$7,$8) returning *`,
-        [number, firstName.trim(), lastName.trim(), preferredName || null,
-         dateOfBirth || null, normaliseGender(gender) ?? null, email || null, phone || null]);
-
-      if (emergencyName || emergencyPhone) {
-        await client.query(`
-          insert into person_private (person_id, emergency_name, emergency_phone)
-          values ($1,$2,$3)
-          on conflict (person_id) do update
-            set emergency_name = excluded.emergency_name,
-                emergency_phone = excluded.emergency_phone`,
-          [person.id, seal(emergencyName || null), seal(emergencyPhone || null)]);
-      }
-
-      await client.query(`
-        insert into affiliation (person_id, organisation_id, role, starts,
-                                 status, paid_until)
-        values ($1,$2,$3,coalesce($4::date, current_date),'active',$5)`,
-        [person.id, organisationId, role, starts || null, paidUntil || null]);
-
-      await client.query(`
-        insert into audit_log (account_id, organisation_id, action, entity,
-                               entity_id, after)
-        values ($1,$2,'enrol','person',$3,$4::jsonb)`,
-        [actor, organisationId, person.id,
-         JSON.stringify({ role, number })]);
-
-      await client.query('commit');
-      await webhooks.emitNow(organisationId, 'member.created', { id: person.id, number, first_name: person.first_name, last_name: person.last_name, role });
-      return person;
+      return await enrolPerson.execute({ actorId: actor, ...fields });
     } catch (e) {
-      await client.query('rollback'); throw e;
-    } finally { client.release(); }
+      // The use case speaks in its own words; callers of this layer expect Forbidden and Invalid.
+      if (e instanceof NotPermitted) throw new Forbidden();
+      if (e instanceof Refused) throw new Invalid(e.message);
+      throw e;
+    }
   },
 
   /**

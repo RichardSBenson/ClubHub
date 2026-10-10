@@ -224,3 +224,27 @@ export class Refused extends Error {
     this.reasons = Array.isArray(reasons) ? reasons : [reasons];
   }
 }
+
+/**
+ * The register of people, as the enrolment use case needs it. `inTransaction` runs `work(tx)` as one unit: if it
+ * throws, nothing is kept. `tx` offers:
+ *   lockEnrolment()                         — one enrolment at a time
+ *   peopleNamed(first, last)                — [{ display_number, first_name, last_name, date_of_birth, email }]
+ *   federationShortNameFor(organisationId)  — string | null
+ *   lastNumberIn(prefix)                    — highest sequence used under the prefix, 0 if none
+ *   addPerson(fields)                       — the new person row
+ *   addEmergencyContact(personId, name, phone)
+ *   addAffiliation({ personId, organisationId, role, starts, paidUntil })
+ *   audit({ actorId, organisationId, action, entity, entityId, after })
+ */
+export const PERSON_REGISTER = {
+  name: 'PersonRegister',
+  methods: ['inTransaction'],
+};
+
+/** Tells the outside world something happened (webhooks, say). Never throws into the caller. */
+export const ANNOUNCER = {
+  name: 'Announcer',
+  /** (organisationId, eventName, data) → void */
+  methods: ['announce'],
+};

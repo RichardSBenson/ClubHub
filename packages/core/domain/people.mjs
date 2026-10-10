@@ -169,3 +169,16 @@ export function findTwin(candidates, { dateOfBirth = null, email = null } = {}) 
 /** What to tell somebody who is about to add a person twice. */
 export const twinMessage = (twin) =>
   `${twin.first_name} ${twin.last_name} is already on the register as ${twin.display_number}. Open that record instead of adding them again.`;
+
+/**
+ * The letters a federation's member numbers start with: its short name (or slug), capitals only, at most five.
+ * A federation with nothing usable gets "M".
+ */
+export function memberNumberPrefix(shortNameOrSlug) {
+  return (shortNameOrSlug ?? 'M').toUpperCase().replace(/[^A-Z]/g, '').slice(0, 5) || 'M';
+}
+
+/** MOK-0042: the prefix, a dash, and the sequence number padded to four digits. */
+export function formatMemberNumber(prefix, sequence) {
+  return `${prefix}-${String(sequence).padStart(4, '0')}`;
+}
