@@ -312,3 +312,26 @@ export const DECLARATION_STORE = {
   name: 'DeclarationStore',
   methods: ['ownerOf', 'currentOf', 'firstHomeOf', 'signingOf', 'ageOf', 'addSigning', 'publish', 'signedAmong', 'signedCount'],
 };
+
+/**
+ * Documents members send to their club (certificates, first aid, safeguarding). `atomically(work)` runs `work(store)`
+ * as one unit. The store seals and opens the file bytes; the core never sees how they are kept.
+ *   homeOf(personId)                        — their club (member roll first) or null
+ *   homesOf(personId)                       — every club they are currently on
+ *   todayAt(organisationId)                 — 'YYYY-MM-DD' in that organisation's own timezone
+ *   qualificationChoices(organisationId)    — [{ id, label }] the club (and those above it) ask for
+ *   qualificationAt(organisationId, id)     — { id, label } | null
+ *   documentsOf(personId)                   — newest first, without the file
+ *   addDocument({ ... })                    — { id }
+ *   documentFile(personId, docId)           — { mime, bytes, filename, title } | null (bytes opened)
+ *   documentToReview(personId, docId)       — the document row | null
+ *   addAward({ personId, qualificationId, awardedOn, expiresOn, reference, recordedBy }) — { id }
+ *   markReviewed({ docId, accepted, reviewedBy, note, awardId })
+ *   waitingUnder(organisationId)            — pending documents for the organisation and everything beneath it
+ *   audit({ actorId, organisationId, action, entityId, after })
+ */
+export const MEMBER_DOCUMENT_STORE = {
+  name: 'MemberDocumentStore',
+  methods: ['atomically', 'homeOf', 'homesOf', 'todayAt', 'qualificationChoices', 'qualificationAt', 'documentsOf', 'addDocument',
+            'documentFile', 'documentToReview', 'addAward', 'markReviewed', 'waitingUnder', 'audit'],
+};

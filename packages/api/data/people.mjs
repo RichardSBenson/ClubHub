@@ -24,6 +24,8 @@ import { MANAGE, REGISTER, TEACH } from '../../core/domain/access.mjs';
 import { EnrolPerson } from '../../core/application/enrol-person.mjs';
 import { LinkGuardian, SetGuardianContact, UnlinkGuardian, ListGuardians } from '../../core/application/guardians.mjs';
 import { PostgresGuardianRegister } from '../../infrastructure/postgres/guardian-register.mjs';
+import { DocumentChoices, ListDocuments, SendDocument, OpenDocument, ReviewDocument, WaitingDocuments } from '../../core/application/member-documents.mjs';
+import { PostgresMemberDocumentStore } from '../../infrastructure/postgres/member-document-store.mjs';
 import { DeclarationStanding, PublishDeclaration, SignDeclaration } from '../../core/application/declarations.mjs';
 import { PostgresDeclarationStore } from '../../infrastructure/postgres/declaration-store.mjs';
 import { GrantAccess } from '../../core/application/grant-access.mjs';
@@ -719,95 +721,27 @@ export const declarations = {
   },
 };
 
-export const memberDocuments = {
-  async _homeOf(personId) {
-    return (await one(`select organisation_id from affiliation where person_id = $1 and ends is null
-      order by (role = 'member') desc limit 1`, [personId]))?.organisation_id ?? null;
-  },
-  async _isOfficial(actor, personId) {
-    for (const h of await homesOf(personId))
-      if ((await one('select has_role_at($1,$2,$3) as ok', [actor, h, REGISTER]))?.ok) return h;
-    return null;
-  },
+const documentStore = new PostgresMemberDocumentStore(pool);
+const documentDeps = { store: documentStore, auth, howMayActFor: (accountId, personId) => selfService.mayActFor(accountId, personId) };
+const documentChoices = new DocumentChoices(documentDeps);
+const listDocuments = new ListDocuments(documentDeps);
+const sendDocument = new SendDocument(documentDeps);
+const openDocument = new OpenDocument(documentDeps);
+const reviewDocument = new ReviewDocument(documentDeps);
+const waitingDocuments = new WaitingDocuments(documentDeps);
 
+export const memberDocuments = {
   /** Qualifications the person's club asks for, for the "what is it?" list. */
-  async choices(personId) {
-    const home = await this._homeOf(personId);
-    return home ? q(`select q.id, q.label ${CATALOGUE_FROM} order by q.label`, [home]) : [];
-  },
+  choices: (personId) => documentChoices.execute({ personId }),
 
   /** The person, a parent or guardian, or an official of their club: never the file itself. */
-  async list(actor, personId) {
-    const official = await this._isOfficial(actor, personId);
-    if (!official && !(await family.mayActFor(actor, personId))) throw new Forbidden();
-    const rows = await q(`select d.id, d.title, d.awarded_on::text as awarded_on, d.expires_on::text as expires_on, d.note, d.filename,
-        d.mime, d.size_bytes, d.status, d.created_at, d.review_note, qq.label as qualification
-      from member_document d left join qualification qq on qq.id = d.qualification_id
-      where d.person_id = $1 order by d.created_at desc`, [personId]);
-    return { rows, official: !!official };
-  },
-
-  async add(actor, personId, { file, qualificationId = null, title = '', awardedOn = null, expiresOn = null, note = '' }) {
-    if (!(await family.mayActFor(actor, personId)) && !(await this._isOfficial(actor, personId))) throw new Forbidden();
-    const home = await this._homeOf(personId);
-    if (!home) throw new Invalid('This person is not on a club\'s roll yet, so there is nobody to send it to.');
-    const qual = qualificationId
-      ? await one(`select q.id, q.label ${CATALOGUE_FROM} and q.id = $2`, [home, qualificationId]) : null;
-    if (qualificationId && !qual) throw new Invalid('That is not something this club asks for.');
-    const today = await qualToday(home);
-    const problems = problemsWithDocument({ title, awardedOn: awardedOn || '', expiresOn: expiresOn || '', hasQualification: !!qual },
-      { size: file?.bytes?.length ?? 0 }, { today });
-    if (problems.length) throw new Invalid(problems.join(' '));
-    const row = await one(`insert into member_document (person_id, organisation_id, qualification_id, title, awarded_on, expires_on, note,
-        filename, mime, bytes, size_bytes, uploaded_by)
-      values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) returning id`,
-      [personId, home, qual?.id ?? null, (qual?.label ?? String(title).trim()).slice(0, 120), awardedOn || null, expiresOn || null,
-       String(note ?? '').trim().slice(0, 300) || null, file.filename ?? null, file.mime, sealBytes(file.bytes), file.bytes.length, actor]);
-    await pool.query(`insert into audit_log (account_id, organisation_id, action, entity, entity_id, after)
-      values ($1,$2,'document_sent','person',$3,$4)`, [actor, home, personId, JSON.stringify({ documentId: row.id, title: qual?.label ?? title })]);
-    return row;
-  },
-
-  async file(actor, personId, docId) {
-    const official = await this._isOfficial(actor, personId);
-    const own = await family.mayActFor(actor, personId);
-    if (!official && !own) throw new Forbidden();
-    const d = await one('select mime, bytes, filename, title from member_document where id = $1 and person_id = $2', [docId, personId]);
-    if (!d) throw new NotFound('Document');
-    // Somebody opening another person's document is the thing worth being able to answer for later.
-    if (official && !own)
-      await pool.query(`insert into audit_log (account_id, organisation_id, action, entity, entity_id, after)
-        values ($1,$2,'document_opened','person',$3,$4)`, [actor, official, personId, JSON.stringify({ documentId: docId, title: d.title })]);
-    return { ...d, bytes: openBytes(d.bytes) };
-  },
+  list: (actor, personId) => speakingForThisLayer(() => listDocuments.execute({ actorId: actor, personId })),
+  add: (actor, personId, fields) => speakingForThisLayer(() => sendDocument.execute({ actorId: actor, personId, ...fields })),
+  file: (actor, personId, docId) => speakingForThisLayer(() => openDocument.execute({ actorId: actor, personId, docId })),
 
   /** A registrar accepts or declines. Accepting a qualification records it, with this file as the proof. */
-  async review(actor, personId, docId, { accept, note = '', awardedOn = null, expiresOn = null }) {
-    const home = await this._isOfficial(actor, personId);
-    if (!home) throw new Forbidden();
-    const d = await one('select id, status, title, qualification_id, awarded_on::text as awarded_on, expires_on::text as expires_on from member_document where id = $1 and person_id = $2', [docId, personId]);
-    if (!d) throw new NotFound('Document');
-    if (d.status !== 'pending') throw new Invalid('That one has already been dealt with.');
-    let awardId = null;
-    if (accept && d.qualification_id) {
-      const on = awardedOn || d.awarded_on;
-      if (!on) throw new Invalid('There is no issue date on this one. Add the date it was issued before accepting.');
-      const a = await one(`insert into qualification_award (person_id, qualification_id, awarded_on, expires_on, reference, recorded_by)
-        values ($1,$2,$3,$4,$5,$6) returning id`, [personId, d.qualification_id, on, expiresOn || d.expires_on || null, 'Sent in by the member', actor]);
-      awardId = a.id;
-    }
-    await pool.query(`update member_document set status = $2, reviewed_by = $3, reviewed_at = now(), review_note = $4, award_id = $5 where id = $1`,
-      [docId, accept ? 'accepted' : 'declined', actor, String(note ?? '').trim().slice(0, 300) || null, awardId]);
-    await pool.query(`insert into audit_log (account_id, organisation_id, action, entity, entity_id, after)
-      values ($1,$2,$3,'person',$4,$5)`, [actor, home, accept ? 'document_accepted' : 'document_declined', personId, JSON.stringify({ documentId: docId, title: d.title })]);
-  },
-
-  async waiting(actor, orgId) {
-    await assertRole(actor, orgId, REGISTER);
-    return q(`select d.id, d.title, d.person_id, p.first_name, p.last_name, d.created_at from member_document d join person p on p.id = d.person_id
-      join organisation o on o.id = d.organisation_id
-      where d.status = 'pending' and o.path <@ (select path from organisation where id = $1) order by d.created_at`, [orgId]);
-  },
+  review: (actor, personId, docId, fields) => speakingForThisLayer(() => reviewDocument.execute({ actorId: actor, personId, docId, ...fields })),
+  waiting: (actor, orgId) => speakingForThisLayer(() => waitingDocuments.execute({ actorId: actor, organisationId: orgId })),
 };
 
 // ---------------------------------------------------------------------------
