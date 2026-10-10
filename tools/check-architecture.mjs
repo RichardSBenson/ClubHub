@@ -120,7 +120,7 @@ for (const f of files.filter((x) => x.includes('core/domain/') && !is(x, 'defaul
 }
 
 // 7: size caps. Lower these as the big files are split; never raise them.
-const CAPS = { 'packages/api/data/people.mjs': 1500, 'packages/api/server.mjs': 1600, 'packages/api/views.mjs': 5170 };
+const CAPS = { 'packages/api/data/people.mjs': 1500, 'packages/api/server.mjs': 1600, 'packages/api/views.mjs': 1300 };
 const DEFAULT_CAP = 1500;
 for (const f of files) {
   const rel = path.relative(ROOT, f), n = fs.readFileSync(f, 'utf8').split('\n').length - 1, cap = CAPS[rel] ?? DEFAULT_CAP;

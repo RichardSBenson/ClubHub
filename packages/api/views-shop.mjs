@@ -2,18 +2,17 @@
  * Screens: the shop. What a member sees of their own club's range, the public page, and the club's (or the
  * federation's) admin. Re-exported by views.mjs, so callers still say V.shopScreen and so on.
  */
-import { page, when } from './views.mjs';
+import { page } from './views.mjs';
 import { esc } from '../core/domain/html.mjs';
 import { money as cents } from '../core/domain/money.mjs';
-import { words } from '../infrastructure/region-context.mjs';
 
-const clubWord = () => words().club.toLowerCase();
 
 // ---------------------------------------------------------------------------
 // the shop
 // ---------------------------------------------------------------------------
 
 import { CATEGORIES as SHOP_CATEGORIES, ORDER_STATUSES as SHOP_STATUSES, mayMoveOrder as shopMayMove } from '../core/domain/shop.mjs';
+import { clubWord, when } from './views-shared.mjs';
 
 const plainAmount = (c) => c == null ? '' : (c / 100).toFixed(2).replace(/\.00$/, '');
 const shopLines = (o) => (o.lines ?? []).map((l) => `${esc(l.name)}${l.size ? ` (${esc(l.size)})` : ''} × ${esc(l.quantity)}`).join(', ');
