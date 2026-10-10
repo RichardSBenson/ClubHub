@@ -45,17 +45,7 @@ import { PostgresAuthorisation } from '../../infrastructure/postgres/repositorie
 import { fees } from './billing.mjs';
 import { webhooks } from './messaging.mjs';
 import { orgs } from './organisations.mjs';
-import { AWARD_SELECT, CATALOGUE_FROM, Forbidden, Invalid, NotFound, PERSON_COLUMNS, assertRole, describeAwards, homesOf, insertAsset, localNow, one, q, qualToday } from './shared.mjs';
-
-/** The use cases speak in their own words; callers of this layer expect Forbidden, Invalid and NotFound. */
-async function speakingForThisLayer(run) {
-  try { return await run(); } catch (e) {
-    if (e instanceof NotPermitted) throw new Forbidden();
-    if (e instanceof Refused) throw new Invalid(e.message);
-    if (e instanceof Missing) throw new NotFound(e.message);
-    throw e;
-  }
-}
+import { AWARD_SELECT, CATALOGUE_FROM, speakingForThisLayer, Forbidden, Invalid, NotFound, PERSON_COLUMNS, assertRole, describeAwards, homesOf, insertAsset, localNow, one, q, qualToday } from './shared.mjs';
 
 const register = new PostgresPersonRegister(pool);
 const auth = new PostgresAuthorisation(pool);

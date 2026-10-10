@@ -19,12 +19,13 @@ import { builtInFor, builtInYears, yearToOffer, termState, mayEnrol, holidays as
 import { MANAGE, REGISTER } from '../../core/domain/access.mjs';
 import { resolveRegion, problemsWithRegion } from '../../core/domain/region.mjs';
 import { resolveEventTypes, problemsWithEventTypes } from '../../core/domain/event-types.mjs';
+import { ViewClubPage, SaveClubPage, RequestClubPage, TakeDownClubPage, DecideClubPage, ClubPagesBeneath } from '../../core/application/club-pages.mjs';
+import { PostgresClubPageStore } from '../../infrastructure/postgres/club-page-store.mjs';
 import { AddClub } from '../../core/application/add-club.mjs';
-import { Refused, NotPermitted, Missing } from '../../core/application/ports.mjs';
 import { PostgresOrganisationRegister } from '../../infrastructure/postgres/organisation-register.mjs';
 import { PostgresAuthorisation } from '../../infrastructure/postgres/repositories.mjs';
 import { family, people } from './people.mjs';
-import { Forbidden, Invalid, NotFound, PERSON_COLUMNS, WRITE_PAGES, ageOnDate, assertRole, clubMail, clubOnly, feeRows, one, q, todayAt } from './shared.mjs';
+import { speakingForThisLayer, Invalid, NotFound, PERSON_COLUMNS, WRITE_PAGES, ageOnDate, assertRole, clubMail, clubOnly, feeRows, one, q, todayAt } from './shared.mjs';
 
 // ---------------------------------------------------------------------------
 // organisations
@@ -285,12 +286,7 @@ export const clubs = {
    * club with no way in is the failure this exists to prevent.
    */
   async create(actor, parentId, input) {
-    try { return await addClub.execute({ actorId: actor, parentId, input }); } catch (e) {
-      if (e instanceof NotPermitted) throw new Forbidden();
-      if (e instanceof Refused) throw new Invalid(e.message);
-      if (e instanceof Missing) throw new NotFound(e.message);
-      throw e;
-    }
+    return speakingForThisLayer(() => addClub.execute({ actorId: actor, parentId, input }));
   },
 };
 
@@ -469,249 +465,39 @@ export const appearance = {
   },
 };
 
+const clubPageStore = new PostgresClubPageStore(pool);
+const clubPageDeps = { store: clubPageStore, auth: new PostgresAuthorisation(pool) };
+const viewClubPage = new ViewClubPage(clubPageDeps);
+const saveClubPage = new SaveClubPage(clubPageDeps);
+const requestClubPage = new RequestClubPage(clubPageDeps);
+const takeDownClubPage = new TakeDownClubPage(clubPageDeps);
+const decideClubPage = new DecideClubPage(clubPageDeps);
+const clubPagesBeneath = new ClubPagesBeneath(clubPageDeps);
+
 export const clubPages = {
-  async _club(clubId) {
-    const club = await one(
-      `select id, name, slug, type, parent_id from organisation where id = $1`,
-      [clubId]);
-    if (!club) throw new NotFound('Club');
-    if (club.type !== 'club')
-      throw new Invalid('Only a club has a page of its own.');
-    return club;
-  },
-
-  async _sessionsOf(clubId) {
-    return q(`
-      select id, label, weekday, to_char(starts, 'HH24:MI') as starts,
-             to_char(ends, 'HH24:MI') as ends, min_age, max_age
-      from training_session where organisation_id = $1
-      order by sort_order, weekday, starts`, [clubId]);
-  },
-
-  /**
-   * `at` is whose history it appears in. A club's own edits are the club's;
-   * the federation's answer is the federation's — and since history reads
-   * downward, it shows at the club as well.
-   */
-  async _audit(actor, at, clubId, action, before, after) {
-    const club = await one(`select name from organisation where id = $1`, [clubId]);
-    await pool.query(`
-      insert into audit_log (account_id, organisation_id, action, entity,
-                             entity_id, before, after)
-      values ($1,$2,$3,'club_page',$4,$5,$6)`,
-      [actor, at, action, clubId, JSON.stringify(before ?? {}),
-       JSON.stringify({ ...(after ?? {}), club: club?.name ?? null })]);
-  },
-
   /** The club's profile and times, for its own screen. */
-  async forClub(actor, clubId) {
-    await assertRole(actor, clubId, WRITE_PAGES);
-    const club = await this._club(clubId);
-    const profile = await one(
-      `select * from club_profile where organisation_id = $1`, [clubId]) ?? {};
-    const sessions = await this._sessionsOf(clubId);
-    return { club, profile, sessions, state: stateOf(profile),
-             problems: readinessProblems(profile, sessions) };
-  },
-
-  /**
-   * Save what the club has said about itself.
-   *
-   * Does not touch whether the page is live. It does refuse an edit that
-   * would leave a live page half empty: the checks on the way in only mean
-   * something if they also hold on the way through.
-   */
+  forClub: (actor, clubId) => speakingForThisLayer(() => viewClubPage.execute({ actorId: actor, clubId })),
   async save(actor, clubId, { profile, sessions, removed = [] }) {
-    await assertRole(actor, clubId, WRITE_PAGES);
-    await this._club(clubId);
-
-    if (profile.hero_asset_id) {
-      const own = await one(
-        `select 1 from asset where id = $1 and organisation_id = $2`,
-        [profile.hero_asset_id, clubId]);
-      if (!own) throw new Invalid(
-        'That picture is not in this club\'s library. Upload it here first.');
-    }
-
-    const was = await one(
-      `select * from club_profile where organisation_id = $1`, [clubId]);
-    if (was?.published) {
-      const problems = readinessProblems(profile, sessions);
-      if (problems.length) throw new ClubPageNotReady(
-        ['Your page is live, so this would leave it unfinished.', ...problems]);
-    }
-
-    const client = await pool.connect();
-    try {
-      await client.query('begin');
-      await client.query(`
-        insert into club_profile (organisation_id, venue_name, address_line,
-          suburb, city, postcode, directions, phone, email, blurb, who_trains,
-          first_class_free, accepts_beginners, hero_asset_id, updated_at)
-        values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14, now())
-        on conflict (organisation_id) do update set
-          venue_name = excluded.venue_name, address_line = excluded.address_line,
-          suburb = excluded.suburb, city = excluded.city,
-          postcode = excluded.postcode, directions = excluded.directions,
-          phone = excluded.phone, email = excluded.email, blurb = excluded.blurb,
-          who_trains = excluded.who_trains,
-          first_class_free = excluded.first_class_free,
-          accepts_beginners = excluded.accepts_beginners,
-          hero_asset_id = excluded.hero_asset_id, updated_at = now()`,
-        [clubId, profile.venue_name, profile.address_line, profile.suburb,
-         profile.city, profile.postcode, profile.directions, profile.phone,
-         profile.email, profile.blurb, profile.who_trains,
-         profile.first_class_free, profile.accepts_beginners,
-         profile.hero_asset_id]);
-
-      // Times are edited in place, never deleted and recreated, because
-      // attendance points at them. An emptied row is a time the club has
-      // stopped running; only that one goes.
-      const mine = (await client.query(
-        `select id::text from training_session where organisation_id = $1`,
-        [clubId])).rows.map((r) => r.id);
-      for (const id of removed.filter((r) => mine.includes(r)))
-        await client.query(
-          `delete from training_session where id = $1 and organisation_id = $2`,
-          [id, clubId]);
-
-      let order = 0;
-      for (const s of sessions) {
-        order += 1;
-        if (s.id && mine.includes(s.id)) {
-          await client.query(`
-            update training_session set label=$3, weekday=$4, starts=$5,
-              ends=$6, min_age=$7, max_age=$8, sort_order=$9
-            where id = $1 and organisation_id = $2`,
-            [s.id, clubId, s.label, s.weekday, s.starts, s.ends,
-             s.minAge, s.maxAge, order]);
-        } else {
-          await client.query(`
-            insert into training_session (organisation_id, label, weekday,
-              starts, ends, min_age, max_age, sort_order)
-            values ($1,$2,$3,$4,$5,$6,$7,$8)`,
-            [clubId, s.label, s.weekday, s.starts, s.ends,
-             s.minAge, s.maxAge, order]);
-        }
-      }
-      await client.query('commit');
-    } catch (e) {
-      await client.query('rollback');
-      throw e;
-    } finally {
-      client.release();
-    }
-
-    await this._audit(actor, clubId, clubId, 'club_page_saved',
-      { venue: was?.venue_name ?? null }, { venue: profile.venue_name });
+    await speakingForThisLayer(() => saveClubPage.execute({ actorId: actor, clubId, profile, sessions, removed }));
     return this.forClub(actor, clubId);
   },
-
   /** The club asks to be on the federation's website. */
   async request(actor, clubId) {
-    await assertRole(actor, clubId, MANAGE);
-    const club = await this._club(clubId);
-    if (!club.parent_id) throw new Invalid('This club has no federation to ask.');
-
-    const profile = await one(
-      `select * from club_profile where organisation_id = $1`, [clubId]) ?? {};
-    const problems = readinessProblems(profile, await this._sessionsOf(clubId));
-    if (problems.length) throw new ClubPageNotReady(problems);
-    if (profile.published) throw new Invalid('Your page is already live.');
-
-    await pool.query(`
-      update club_profile set page_requested_at = now(), page_note = null
-      where organisation_id = $1`, [clubId]);
-    await this._audit(actor, clubId, clubId, 'club_page_requested', {}, { state: 'requested' });
+    await speakingForThisLayer(() => requestClubPage.execute({ actorId: actor, clubId }));
     return this.forClub(actor, clubId);
   },
-
-  /**
-   * The club takes its own page down, or withdraws a request, whenever it
-   * likes. Putting a page up needs a second party; taking it down does not.
-   */
+  /** The club takes its own page down, or withdraws a request, whenever it likes. */
   async takeDown(actor, clubId) {
-    await assertRole(actor, clubId, MANAGE);
-    await this._club(clubId);
-    const was = await one(
-      `select published, page_requested_at from club_profile
-       where organisation_id = $1`, [clubId]);
-    await pool.query(`
-      update club_profile set published = false, page_requested_at = null
-      where organisation_id = $1`, [clubId]);
-    await this._audit(actor, clubId, clubId, 'club_page_taken_down',
-      { state: stateOf(was) }, { state: 'off' });
+    await speakingForThisLayer(() => takeDownClubPage.execute({ actorId: actor, clubId }));
     return this.forClub(actor, clubId);
   },
-
-  /**
-   * The federation answers — or switches a club on without being asked,
-   * which is the other way in and equally legitimate: a federation that has
-   * filled in a club's details itself does not need the club to request.
-   *
-   * The decision belongs to somebody STRICTLY above the club. Without that a
-   * club's own administrator would be able to approve its own request.
-   */
+  /** The federation answers, or switches a club on without being asked. */
   async decide(actor, clubId, approve, { decidedBy, note = null }) {
-    await assertRole(actor, decidedBy, MANAGE);
-    await this._club(clubId);
-
-    const above = await one(`
-      select 1 from organisation mine, organisation theirs
-      where mine.id = $1 and theirs.id = $2
-        and theirs.path <@ mine.path and theirs.id <> mine.id`,
-      [decidedBy, clubId]);
-    if (!above) throw new Invalid('That club does not sit beneath this organisation.');
-
-    const profile = await one(
-      `select * from club_profile where organisation_id = $1`, [clubId]) ?? {};
-
-    if (approve) {
-      const problems = readinessProblems(profile, await this._sessionsOf(clubId));
-      if (problems.length) throw new ClubPageNotReady(problems);
-      await pool.query(`
-        update club_profile set published = true, page_requested_at = null,
-          page_note = null, published_by = $2, published_at = now()
-        where organisation_id = $1`, [clubId, actor]);
-    } else {
-      await pool.query(`
-        update club_profile set published = false, page_requested_at = null,
-          page_note = $2
-        where organisation_id = $1`, [clubId, (note ?? '').trim().slice(0, 400) || null]);
-    }
-    await this._audit(actor, decidedBy, clubId,
-      approve ? 'club_page_approved' : 'club_page_declined',
-      { state: stateOf(profile) }, { state: approve ? 'live' : 'off' });
+    await speakingForThisLayer(() => decideClubPage.execute({ actorId: actor, clubId, approve, decidedBy, note }));
     return this.forClub(actor, clubId);
   },
-
-  /**
-   * Every club beneath this organisation and where its page stands.
-   * Only for somebody who can decide, and only what sits beneath them.
-   */
-  async beneath(actor, orgId) {
-    await assertRole(actor, orgId, MANAGE);
-    const { rows } = await pool.query(`
-      select o.id, o.name, o.slug,
-             d.venue_name, d.city, d.phone, d.email, d.blurb, d.who_trains,
-             coalesce(d.published, false) as published,
-             d.page_requested_at, d.page_note, d.published_at,
-             (select count(*) from training_session t
-               where t.organisation_id = o.id)::int as sessions
-      from organisation root
-      join organisation o on o.path <@ root.path and o.id <> root.id
-                          and o.type = 'club' and o.status = 'active'
-      left join club_profile d on d.organisation_id = o.id
-      where root.id = $1
-      order by (d.page_requested_at is not null and not coalesce(d.published, false)) desc,
-               o.name`, [orgId]);
-    return rows.map((r) => ({
-      ...r,
-      state: stateOf(r),
-      gaps: readinessGaps(r, Array.from({ length: r.sessions }, () => ({})))
-        .map((g) => g.short),
-    }));
-  },
+  /** Every club beneath this organisation and where its page stands. */
+  beneath: (actor, orgId) => speakingForThisLayer(() => clubPagesBeneath.execute({ actorId: actor, organisationId: orgId })),
 };
 
 const termRow = `st.id, st.organisation_id, st.year, st.number, st.name, to_char(st.starts,'YYYY-MM-DD') as starts,

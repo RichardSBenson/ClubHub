@@ -401,3 +401,22 @@ export const ORGANISATION_REGISTER = {
   name: 'OrganisationRegister',
   methods: ['organisationById', 'slugTaken', 'emailHasAccount', 'addClub'],
 };
+
+/**
+ * A club's own public page and the times it trains. `atomically(work)` runs `work(store)` as one unit.
+ *   clubOf(id)                              — { id, name, slug, type, parent_id } | null
+ *   sessionsOf(clubId)                      — training times, in order
+ *   profileOf(clubId)                       — the club_profile row | null
+ *   ownsAsset(assetId, clubId)
+ *   saveProfile(clubId, profile)
+ *   sessionIdsOf(clubId) / removeSession(clubId, id) / updateSession(clubId, session, order) / addSession(clubId, session, order)
+ *   requestPage(clubId) / takeDown(clubId) / publish(clubId, publishedBy) / decline(clubId, note)
+ *   sitsBeneath(deciderId, clubId)          — is the club strictly beneath that organisation
+ *   pagesBeneath(organisationId)            — every club beneath it and where its page stands
+ *   audit({ actorId, organisationId, action, clubId, before, after })
+ */
+export const CLUB_PAGE_STORE = {
+  name: 'ClubPageStore',
+  methods: ['atomically', 'clubOf', 'sessionsOf', 'profileOf', 'ownsAsset', 'saveProfile', 'sessionIdsOf', 'removeSession',
+            'updateSession', 'addSession', 'requestPage', 'takeDown', 'publish', 'decline', 'sitsBeneath', 'pagesBeneath', 'audit'],
+};

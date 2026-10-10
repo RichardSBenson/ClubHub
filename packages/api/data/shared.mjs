@@ -5,6 +5,7 @@
  * checks permission in SQL, not in the caller.
  */
 
+import { Refused, NotPermitted, Missing } from '../../core/application/ports.mjs';
 import { pool } from '../../infrastructure/postgres/pool.mjs';
 import { DEFAULT_TIMEZONE } from '../../core/domain/defaults.mjs';
 import { senderFor } from '../../core/domain/messaging.mjs';
@@ -22,6 +23,16 @@ export class Forbidden extends Error {
 
 export class NotFound extends Error {
   constructor(msg = 'Not found') { super(msg); this.status = 404; }
+}
+
+/** The use cases speak in their own words; callers of the data layer expect Forbidden, Invalid and NotFound. */
+export async function speakingForThisLayer(run) {
+  try { return await run(); } catch (e) {
+    if (e instanceof NotPermitted) throw new Forbidden();
+    if (e instanceof Refused) throw new Invalid(e.message);
+    if (e instanceof Missing) throw new NotFound(e.message);
+    throw e;
+  }
 }
 
 export class Invalid extends Error {
