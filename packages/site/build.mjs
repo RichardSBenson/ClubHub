@@ -451,6 +451,8 @@ for (const target of SITES) {
     written.push('vendor/lightbox.js');
     await fs.copyFile(new URL('../../vendor/honbu/select-all.js', import.meta.url).pathname, path.join(OUT, 'vendor', 'select-all.js'));
     written.push('vendor/select-all.js');
+    await fs.copyFile(new URL('../../vendor/honbu/message-form.js', import.meta.url).pathname, path.join(OUT, 'vendor', 'message-form.js'));
+    written.push('vendor/message-form.js');
     await fs.copyFile(new URL('../../vendor/honbu/photo-pick.js', import.meta.url).pathname, path.join(OUT, 'vendor', 'photo-pick.js'));
     written.push('vendor/photo-pick.js');
     await fs.copyFile(new URL('../../vendor/honbu/finder.js', import.meta.url).pathname, path.join(OUT, 'vendor', 'finder.js'));

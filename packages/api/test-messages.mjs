@@ -237,7 +237,7 @@ console.log('\nTHE SCREENS');
 {
   await signIn('doug@example.nz');
   const s = await req('/o/whanganui/messages');
-  ok('opens', s.status === 200 && /Goes out as/.test(s.html), String(s.status));
+  ok('opens', s.status === 200 && /From <strong>Whanganui/.test(s.html), String(s.status));
   ok('says who it is sent as', /Whanganui/.test(s.html) && /whanganui@/.test(s.html));
   const sent = await req('/o/whanganui/messages', { method: 'POST',
     form: { audience: 'members', kind: 'announcement', subject: 'From the screen', body: 'Hello' } });
