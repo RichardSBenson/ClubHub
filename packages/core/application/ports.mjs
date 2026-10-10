@@ -450,3 +450,20 @@ export const TERM_STORE = {
             'enrolledCount', 'removeTerm', 'setMidTermRule', 'effectiveTerms', 'memberClubOf', 'personById', 'trainingWeekdays', 'feeSchedule',
             'enrolmentOf', 'enrol', 'requestPayment', 'enrolmentToWithdraw', 'voidUnpaidFor', 'markWithdrawn', 'audit'],
 };
+
+/**
+ * An organisation's own settings and what is stored on it: site menu, look, crest, home page, club profile.
+ * `atomically(work)` runs `work(store)` as one unit.
+ *   settingsOf(organisationId)              — the settings object
+ *   putSetting(organisationId, key, value) / removeSetting(organisationId, key)
+ *   assetOwner(assetId)                     — the organisation that owns the picture, or null
+ *   authoredPages(organisationId)           — [{ slug, title }] published pages
+ *   clubRow(organisationId)                 — the club row with founded_iso, or null
+ *   updateClub(organisationId, { name, shortName, founded, timezone, status }) — the row
+ *   clubOverview(organisationId, parentId)  — { administrators, counts, page, parent }
+ *   audit({ actorId, organisationId, action, before, after })
+ */
+export const SETTINGS_STORE = {
+  name: 'SettingsStore',
+  methods: ['atomically', 'settingsOf', 'putSetting', 'removeSetting', 'assetOwner', 'authoredPages', 'clubRow', 'updateClub', 'clubOverview', 'audit'],
+};

@@ -9,7 +9,6 @@ import { pool } from '../../infrastructure/postgres/pool.mjs';
 import { DEFAULT_TIMEZONE } from '../../core/domain/defaults.mjs';
 import { region, setRegion, setEventTypes, setWords } from '../../infrastructure/region-context.mjs';
 import { readTheme } from '../../site/theme.mjs';
-import { problemsWithClubProfile, changesTheSite } from '../../core/domain/club-profile.mjs';
 import { destinations, problemsWithNavigation } from '../../content/navigation.mjs';
 import { midTermOf, builtInFor, builtInYears, yearToOffer, termState, holidays as termHolidays, inHoliday, offersDue, CALENDARS } from '../../core/domain/terms.mjs';
 import { MANAGE, REGISTER } from '../../core/domain/access.mjs';
@@ -19,11 +18,13 @@ import { LoadBuiltInTerms, SaveTerm, RemoveTerm, SetMidTermRule, OfferedTerms, E
 import { PostgresTermStore } from '../../infrastructure/postgres/term-store.mjs';
 import { ViewClubPage, SaveClubPage, RequestClubPage, TakeDownClubPage, DecideClubPage, ClubPagesBeneath } from '../../core/application/club-pages.mjs';
 import { PostgresClubPageStore } from '../../infrastructure/postgres/club-page-store.mjs';
+import { ReadSiteSettings, SaveNavigation, ApplyTheme, ResetTheme, SetCrest, SetHomePage, ViewClubProfile, SaveClubProfile } from '../../core/application/site-settings.mjs';
+import { PostgresSettingsStore } from '../../infrastructure/postgres/settings-store.mjs';
 import { AddClub } from '../../core/application/add-club.mjs';
 import { PostgresOrganisationRegister } from '../../infrastructure/postgres/organisation-register.mjs';
 import { PostgresAuthorisation } from '../../infrastructure/postgres/repositories.mjs';
 import { family, people } from './people.mjs';
-import { speakingForThisLayer, Invalid, NotFound, WRITE_PAGES, assertRole, clubMail, feeRows, one, q, todayAt } from './shared.mjs';
+import { speakingForThisLayer, Invalid, NotFound, assertRole, clubMail, feeRows, one, q, todayAt } from './shared.mjs';
 
 // ---------------------------------------------------------------------------
 // organisations
@@ -200,47 +201,21 @@ export const orgs = {
 // has never opened the editor — see packages/content/navigation.mjs.
 // ---------------------------------------------------------------------------
 
+const settingsDeps = { store: new PostgresSettingsStore(pool), auth: new PostgresAuthorisation(pool), destinations, problemsWithNavigation, readTheme };
+const readSiteSettings = new ReadSiteSettings(settingsDeps);
+const saveNavigation = new SaveNavigation(settingsDeps);
+const applyTheme = new ApplyTheme(settingsDeps);
+const resetTheme = new ResetTheme(settingsDeps);
+const setCrest = new SetCrest(settingsDeps);
+const setHomePage = new SetHomePage(settingsDeps);
+const viewClubProfile = new ViewClubProfile(settingsDeps);
+const saveClubProfile = new SaveClubProfile(settingsDeps);
+
 export const navigation = {
   /** What this federation has stored, and everywhere its site has a page. */
-  async forEditing(actor, orgId) {
-    await assertRole(actor, orgId, WRITE_PAGES);
-    const org = await one('select settings from organisation where id=$1', [orgId]);
-    const { rows: authored } = await pool.query(`
-      select slug, title from page
-      where organisation_id=$1 and status='published' order by title`, [orgId]);
-    return { stored: org?.settings?.navigation ?? null, authored };
-  },
-
-  /**
-   * Replace the menu.
-   *
-   * Validated against what the site will actually have a page for, so an item
-   * pointing nowhere is refused here rather than disappearing during a build.
-   */
-  async save(actor, orgId, items, { vocabulary = {} } = {}) {
-    await assertRole(actor, orgId, MANAGE);
-    const { authored } = await this.forEditing(actor, orgId);
-    const existing = destinations({ authored, vocabulary });
-
-    const problems = problemsWithNavigation(items, existing);
-    if (problems.length) throw new Invalid(problems.join(' '));
-
-    const clean = items.map((i) => ({ href: i.href.trim(), label: i.label.trim() }));
-    const row = await one(`
-      update organisation
-         set settings = jsonb_set(settings, '{navigation}', $2::jsonb, true),
-             updated_at = now()
-       where id = $1 returning settings`,
-      [orgId, JSON.stringify({ items: clean })]);
-
-    await pool.query(`
-      insert into audit_log (account_id, organisation_id, action, entity,
-                             entity_id, after)
-      values ($1,$2,'navigation_save','organisation',$2,$3)`,
-      [actor, orgId, JSON.stringify({ items: clean })]);
-
-    return row?.settings?.navigation?.items ?? clean;
-  },
+  forEditing: (actor, orgId) => speakingForThisLayer(() => readSiteSettings.navigation({ actorId: actor, organisationId: orgId })),
+  save: (actor, orgId, items, { vocabulary = {} } = {}) =>
+    speakingForThisLayer(() => saveNavigation.execute({ actorId: actor, organisationId: orgId, items, vocabulary })),
 };
 
 // ---------------------------------------------------------------------------
@@ -293,68 +268,11 @@ export const clubs = {
 // ---------------------------------------------------------------------------
 
 export const clubProfile = {
-  /** The club, and who runs it, who trains in it, and what is coming up. */
-  async get(actor, orgId) {
-    await assertRole(actor, orgId, MANAGE);
-    // The date as text: pg hands a DATE back as a JS Date at local midnight,
-    // and turning that into a string shifts it a day on a server east of UTC.
-    const club = await one(`select *, to_char(founded,'YYYY-MM-DD') as founded_iso
-      from organisation where id=$1 and type='club'`, [orgId]);
-    if (!club) throw new NotFound('Club');
-
-    const { rows: administrators } = await pool.query(`
-      select a.email, p.first_name, p.last_name, g.role
-      from grant_role g
-      join account a on a.id = g.account_id
-      left join person p on p.id = a.person_id
-      where g.organisation_id = $1 and g.role in ('owner','administrator')
-      order by g.granted_at`, [orgId]);
-
-    const counts = await one(`
-      select
-        (select count(*)::int from affiliation
-          where organisation_id=$1 and ends is null and status='active') as members,
-        (select count(*)::int from affiliation
-          where organisation_id=$1 and ends is null and status='active'
-            and role in ('instructor','coach')) as instructors,
-        (select count(*)::int from event
-          where organisation_id=$1 and status='published'
-            and starts_at > now()) as upcoming`, [orgId]);
-
-    const page = await one(`select published, page_requested_at from club_profile
-      where organisation_id=$1`, [orgId]);
-    const parent = await one('select name, slug from organisation where id=$1', [club.parent_id]);
-    return { club, parent, administrators, counts, page };
-  },
-
-  async save(actor, orgId, input) {
-    await assertRole(actor, orgId, MANAGE);
-    const before = await one(`select *, to_char(founded,'YYYY-MM-DD') as founded_iso
-      from organisation where id=$1 and type='club'`, [orgId]);
-    if (!before) throw new NotFound('Club');
-
-    const problems = problemsWithClubProfile(input);
-    if (problems.length) throw new Invalid(problems.join(' '));
-
-    const row = await one(`
-      update organisation
-         set name=$2, short_name=$3, founded=$4::date, timezone=$5, status=$6,
-             updated_at=now()
-       where id=$1 returning *, to_char(founded,'YYYY-MM-DD') as founded_iso`,
-      [orgId, input.name, input.shortName, input.founded, input.timezone, input.status]);
-
-    const was = { name: before.name, status: before.status, timezone: before.timezone,
-                  short_name: before.short_name, founded: before.founded_iso };
-    const now = { name: row.name, status: row.status, timezone: row.timezone,
-                  short_name: row.short_name, founded: row.founded_iso };
-    await pool.query(`
-      insert into audit_log (account_id, organisation_id, action, entity,
-                             entity_id, before, after)
-      values ($1,$2,'club_profile_saved','organisation',$2,$3,$4)`,
-      [actor, orgId, JSON.stringify(was), JSON.stringify(now)]);
-
-    return { club: row, siteChanged: changesTheSite(before, row) };
-  },
+  get: (actor, orgId) => speakingForThisLayer(async () => {
+    const r = await viewClubProfile.execute({ actorId: actor, organisationId: orgId });
+    return { club: r.club, parent: r.parent, administrators: r.administrators, counts: r.counts, page: r.page };
+  }),
+  save: (actor, orgId, input) => speakingForThisLayer(() => saveClubProfile.execute({ actorId: actor, organisationId: orgId, input })),
 };
 
 // ---------------------------------------------------------------------------
@@ -367,100 +285,13 @@ export const clubProfile = {
 // ---------------------------------------------------------------------------
 
 export const appearance = {
-  async current(actor, orgId) {
-    await assertRole(actor, orgId, WRITE_PAGES);
-    const org = await one('select settings from organisation where id=$1', [orgId]);
-    return org?.settings?.theme ?? null;
-  },
-
-  async apply(actor, orgId, doc) {
-    await assertRole(actor, orgId, MANAGE);
-    const read = readTheme(doc);
-    if (!read.ok) throw new Invalid(read.problems.join(' '));
-    const before = (await one('select settings from organisation where id=$1', [orgId]))
-      ?.settings?.theme ?? null;
-    await one(`
-      update organisation
-         set settings = jsonb_set(settings, '{theme}', $2::jsonb, true),
-             updated_at = now()
-       where id = $1 returning id`, [orgId, JSON.stringify(read.theme)]);
-    await pool.query(`
-      insert into audit_log (account_id, organisation_id, action, entity,
-                             entity_id, before, after)
-      values ($1,$2,'theme_apply','organisation',$2,$3,$4)`,
-      [actor, orgId, before ? JSON.stringify({ name: before.name }) : null,
-       JSON.stringify({ name: read.theme.name })]);
-    return read;
-  },
-
-  /** The crest: the picture used in the site header and on every event banner. null removes it. */
-  async setLogo(actor, orgId, assetId) {
-    await assertRole(actor, orgId, MANAGE);
-    if (assetId) {
-      const a = await one('select organisation_id from asset where id = $1', [assetId]);
-      if (!a || a.organisation_id !== orgId) throw new Invalid('Choose one of this organisation\'s own pictures.');
-    }
-    await one(`update organisation set settings = case when $2::text is null then settings - 'logoAssetId'
-        else jsonb_set(settings, '{logoAssetId}', to_jsonb($2::text), true) end, updated_at = now()
-      where id = $1 returning id`, [orgId, assetId]);
-    await pool.query(`insert into audit_log (account_id, organisation_id, action, entity, entity_id, after)
-      values ($1,$2,'crest_set','organisation',$2,$3)`, [actor, orgId, JSON.stringify({ assetId })]);
-  },
-
-  async logo(actor, orgId) {
-    await assertRole(actor, orgId, WRITE_PAGES);
-    return (await one('select settings from organisation where id=$1', [orgId]))?.settings?.logoAssetId ?? null;
-  },
-
-  /** What the home page says and shows at the top. Blank words fall back to the defaults. */
-  async home(actor, orgId) {
-    await assertRole(actor, orgId, WRITE_PAGES);
-    const h = (await one('select settings from organisation where id=$1', [orgId]))?.settings?.homePage ?? {};
-    return { heroAssetId: h.heroAssetId ?? null, heroHeading: h.heroHeading ?? '',
-             heroText: h.heroText ?? '', heroButton: h.heroButton ?? '',
-             shareAssetId: h.shareAssetId ?? null };
-  },
-
-  /**
-   * Set the home-page top picture, wording and link-preview picture. `undefined` leaves a
-   * field alone; null or '' clears it. Pictures must be this organisation's own.
-   */
-  async setHome(actor, orgId, { heroAssetId, shareAssetId, heroHeading, heroText, heroButton }) {
-    await assertRole(actor, orgId, MANAGE);
-    for (const [label, v] of [['heading', heroHeading], ['button', heroButton]])
-      if (v != null && String(v).length > 80) throw new Invalid(`The ${label} is too long (80 characters at most).`);
-    if (heroText != null && String(heroText).length > 300) throw new Invalid('The text under the heading is too long (300 characters at most).');
-    for (const id of [heroAssetId, shareAssetId].filter(Boolean)) {
-      const a = await one('select organisation_id from asset where id = $1', [id]);
-      if (!a || a.organisation_id !== orgId) throw new Invalid('Choose one of this organisation\'s own pictures.');
-    }
-    const before = (await one('select settings from organisation where id=$1', [orgId]))?.settings?.homePage ?? {};
-    const next = { ...before };
-    const put = (k, v) => {
-      if (v === undefined) return;
-      const s = typeof v === 'string' ? v.trim() : v;
-      if (s === null || s === '') delete next[k]; else next[k] = s;
-    };
-    put('heroAssetId', heroAssetId); put('shareAssetId', shareAssetId);
-    put('heroHeading', heroHeading); put('heroText', heroText); put('heroButton', heroButton);
-    await one(`update organisation set settings = jsonb_set(settings, '{homePage}', $2::jsonb, true),
-        updated_at = now() where id = $1 returning id`, [orgId, JSON.stringify(next)]);
-    await pool.query(`insert into audit_log (account_id, organisation_id, action, entity, entity_id, before, after)
-      values ($1,$2,'home_page_set','organisation',$2,$3,$4)`,
-      [actor, orgId, JSON.stringify(before), JSON.stringify(next)]);
-  },
-
-  /** Back to the deployment's own look (settings file, then defaults). */
-  async reset(actor, orgId) {
-    await assertRole(actor, orgId, MANAGE);
-    await one(`
-      update organisation set settings = settings - 'theme', updated_at = now()
-       where id = $1 returning id`, [orgId]);
-    await pool.query(`
-      insert into audit_log (account_id, organisation_id, action, entity,
-                             entity_id, after)
-      values ($1,$2,'theme_reset','organisation',$2,'{}')`, [actor, orgId]);
-  },
+  current: (actor, orgId) => speakingForThisLayer(() => readSiteSettings.theme({ actorId: actor, organisationId: orgId })),
+  apply: (actor, orgId, doc) => speakingForThisLayer(() => applyTheme.execute({ actorId: actor, organisationId: orgId, doc })),
+  setLogo: (actor, orgId, assetId) => speakingForThisLayer(() => setCrest.execute({ actorId: actor, organisationId: orgId, assetId })),
+  logo: (actor, orgId) => speakingForThisLayer(() => readSiteSettings.crest({ actorId: actor, organisationId: orgId })),
+  home: (actor, orgId) => speakingForThisLayer(() => readSiteSettings.home({ actorId: actor, organisationId: orgId })),
+  setHome: (actor, orgId, fields) => speakingForThisLayer(() => setHomePage.execute({ actorId: actor, organisationId: orgId, ...fields })),
+  reset: (actor, orgId) => speakingForThisLayer(() => resetTheme.execute({ actorId: actor, organisationId: orgId })),
 };
 
 const clubPageStore = new PostgresClubPageStore(pool);
