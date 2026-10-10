@@ -2303,3 +2303,9 @@ drop view if exists dojo_profile;
 alter table payment_line drop constraint if exists payment_line_kind_check;
 alter table payment_line add constraint payment_line_kind_check check (kind in ('club_fee','tournament_entry','kyu_grading',
   'dan_grading','uniform','equipment'));
+-- A message can go by email and app notification together (the default) or by app notification alone, so a club can
+-- reach a member who has the app but no email address. A person with no app installed is recorded as 'no_app'.
+alter table message add column if not exists channel text not null default 'both' check (channel in ('both','app'));
+alter table message_recipient drop constraint if exists message_recipient_status_check;
+alter table message_recipient add constraint message_recipient_status_check
+  check (status in ('queued','sending','sent','failed','opted_out','no_email','no_app'));

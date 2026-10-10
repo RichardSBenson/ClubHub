@@ -82,11 +82,20 @@ export const messages = {
       where o.path <@ $1::ltree and e.status = 'published'
         and e.starts_at > now() - interval '60 days'
       order by e.starts_at desc limit 40`, [org.path]);
+    const people = await q(`
+      select p.id, trim(concat_ws(' ', p.first_name, p.last_name)) as name, cg.label as grade,
+             (select o2.name from affiliation a2 join organisation o2 on o2.id = a2.organisation_id
+               where a2.person_id = p.id and a2.ends is null and o2.path <@ $1::ltree limit 1) as club
+      from person p
+      left join person_current_grade cg on cg.person_id = p.id
+      where exists (select 1 from affiliation a join organisation o on o.id = a.organisation_id
+                    where a.person_id = p.id and a.ends is null and a.status = 'active' and o.path <@ $1::ltree)
+      order by p.last_name, p.first_name limit 1000`, [org.path]);
     const contact = org.type === 'club'
       ? (await one('select email from club_profile where organisation_id=$1', [orgId]))?.email : null;
     const me = actor ? await one('select email from account where id=$1', [actor]) : null;
     const sender = senderFor({ club: org, baseFrom, contactEmail: contact, actorEmail: me?.email });
-    return { org, events, sender, contactEmail: contact };
+    return { org, events, people, sender, contactEmail: contact };
   },
 
   async history(actor, orgId, { limit = 50 } = {}) {
@@ -132,9 +141,10 @@ export const messages = {
     if (problems.length) throw new Invalid(problems.join(' '));
 
     const { org, sender } = await messages.options(actor, orgId, { baseFrom, trusted });
-    if (!sender)
+    const appOnly = input.channel === 'app';
+    if (!appOnly && !sender)
       throw new Invalid('Email is not set up to send from this system yet — ask whoever installed it to add a sending address.');
-    if (!sender.replyTo)
+    if (!appOnly && !sender.replyTo)
       throw new Invalid('Add a contact email on the club\'s page first, so replies have somewhere to go.');
     if (input.audience === 'selected' && !input.personIds?.length)
       throw new Invalid('Choose who this is for.');
@@ -162,19 +172,21 @@ export const messages = {
       where p.id = any($1::uuid[])`, [ids, region().adultAge])) : [];
 
     const { recipients, skipped } = chooseRecipients(candidates,
-      { honourOptOut: input.kind === 'announcement', preferFees: input.kind === 'renewal' });
+      { honourOptOut: input.kind === 'announcement', preferFees: input.kind === 'renewal', appOnly });
     if (!recipients.length)
       throw new Invalid(ids.length
-        ? 'Nobody here can be emailed — they have no address on file, or have opted out.'
+        ? (appOnly ? 'Everyone here has opted out of announcements.'
+                   : 'Nobody here can be emailed — they have no address on file, or have opted out.')
         : 'That group has nobody in it.');
 
     const message = await one(`
       insert into message (organisation_id, sent_by, kind, audience, event_id, subject, body,
-                           sender_name, sender_address, reply_to)
-      values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) returning *`,
+                           sender_name, sender_address, reply_to, channel)
+      values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) returning *`,
       [orgId, actor, input.kind, input.audience,
        input.audience === 'event' ? input.eventId : null,
-       input.subject, input.body, sender.name, sender.address, sender.replyTo]);
+       input.subject, input.body, sender?.name ?? org.name, sender?.address ?? '', sender?.replyTo ?? null,
+       appOnly ? 'app' : 'both']);
 
     const rows = [
       ...recipients.map((r) => ({ ...r, status: 'queued' })),
@@ -238,6 +250,15 @@ export const messages = {
         'select person_id, token from email_preference where person_id = any($1::uuid[])',
         [batch.map((b) => b.person_id)])).map((t) => [t.person_id, t.token]));
       await Promise.all(batch.map(async (r) => {
+        if (message.channel === 'app') {
+          // No email at all: the notification is the message, and the inbox in the app keeps it.
+          const reached = await push.toPerson(r.person_id,
+            { title: org.name, body: message.subject, url: '/me/messages' }).catch(() => 0);
+          await pool.query(`update message_recipient set status=$2, sent_at=now(), error=null where id=$1`,
+            [r.id, reached ? 'sent' : 'no_app']);
+          if (reached) sent++;
+          return;
+        }
         const token = tokens.get(r.person_id);
         const url = token && origin ? `${origin}/unsubscribe/${token}` : null;
         try {

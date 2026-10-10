@@ -1898,7 +1898,7 @@ async function messagesScreen(ctx, org, extra = {}) {
   const baseFrom = sendingAddress();
   const options = await messages.options(ctx.me.accountId, org.id, { baseFrom });
   return ctx.send(extra.status ?? 200, V.messagesScreen({
-    me: ctx.me, org, csrf: ctx.csrf, events: options.events, sender: options.sender,
+    me: ctx.me, org, csrf: ctx.csrf, events: options.events, people: options.people, sender: options.sender,
     history: await messages.history(ctx.me.accountId, org.id),
     done: ctx.url.searchParams.get('done'), ...extra,
   }));

@@ -15,7 +15,7 @@
 import './reset.mjs';
 import http from 'node:http';
 import handler from './server.mjs';
-import { pool, messages, emailPreferences, Forbidden, Invalid } from './data.mjs';
+import { pool, messages, emailPreferences, push, Forbidden, Invalid } from './data.mjs';
 import * as auth from './auth.mjs';
 import { MemoryMessenger } from '../infrastructure/messaging/messengers.mjs';
 
@@ -284,6 +284,49 @@ console.log('\nWHAT IS NOT THEIRS');
     const viaOwn = await req(`/o/wellington/messages/${theirs.id}`);
     ok('nor by asking through their own club', viaOwn.status === 404, String(viaOwn.status));
   }
+}
+
+console.log('\nPEOPLE I TICK, AND BY PHONE ALONE');
+{
+  const adminAcc = await one(`select id, email from account where email='doug@example.nz'`);
+  const opts = await messages.options(adminAcc.id, whanganui.id, { baseFrom: BASE });
+  ok('the compose screen lists the roll to tick from', opts.people.some((x) => x.id === adult.id) && !opts.people.some((x) => x.id === stranger.id));
+
+  await signIn(adminAcc.email);
+  const screen = await req('/o/whanganui/messages');
+  ok('and offers it, with the phone-only choice', /name="pick_/.test(screen.html) && /value="selected"/.test(screen.html) && /value="app"/.test(screen.html));
+  const roll = await req('/o/whanganui/roster');
+  ok('the roll links to Messages', /href="\/o\/whanganui\/messages"/.test(roll.html));
+
+  let err;
+  try { await messages.prepare(adminAcc.id, whanganui.id, input({ audience: 'selected', personIds: [] }), { baseFrom: BASE }); } catch (e) { err = e; }
+  ok('ticking nobody is refused', err instanceof Invalid);
+
+  const made = await messages.prepare(adminAcc.id, whanganui.id,
+    input({ audience: 'selected', personIds: [noEmail.id, adult.id, stranger.id], channel: 'app', subject: 'Phone only' }), { baseFrom: BASE });
+  ok('somebody with no email is still a recipient by phone', made.recipients === 2, String(made.recipients));
+  ok('a person from another club is dropped, not trusted', !(await one('select 1 x from message_recipient where message_id=$1 and person_id=$2', [made.message.id, stranger.id])));
+  ok('the message is recorded as phone only', made.message.channel === 'app');
+
+  const acct = await one(`insert into account (email, person_id) values ('nomail-acc@msg.test',$1) returning id`, [noEmail.id]);
+  await pool.query(`insert into push_subscription (account_id, endpoint, p256dh, auth) values ($1,'https://push.example.net/nomail','p','a')`, [acct.id]);
+  const sent = [];
+  const realProvider = push.provider;
+  push.provider = () => ({ send: async (sub, m) => { sent.push({ endpoint: sub.endpoint, m }); return 'sent'; } });
+  const mail = new MemoryMessenger();
+  await messages.sendBatch(adminAcc.id, whanganui.id, made.message.id, { messenger: mail, origin: 'http://x.test' });
+  push.provider = realProvider;
+  ok('no email was sent', mail.sent.length === 0);
+  ok('the phone got the subject', sent.length === 1 && sent[0].endpoint.endsWith('/nomail') && sent[0].m.body === 'Phone only');
+  const rows = await q('select person_id, status from message_recipient where message_id=$1', [made.message.id]);
+  ok('the one with the app is sent', rows.find((r) => r.person_id === noEmail.id)?.status === 'sent');
+  ok('the one without is told as having no app', rows.find((r) => r.person_id === adult.id)?.status === 'no_app');
+
+  const viaForm = await req('/o/whanganui/messages', { method: 'POST', form: {
+    audience: 'selected', kind: 'announcement', channel: 'both', subject: 'Ticked', body: 'Hello you two',
+    [`pick_${adult.id}`]: '1', [`pick_${sensei.id}`]: '1' } });
+  ok('ticking people on the screen sends to just them', viaForm.status === 302 &&
+    (await one(`select count(*)::int n from message_recipient r join message m on m.id=r.message_id where m.subject='Ticked'`)).n === 2);
 }
 
 server.close();

@@ -17,7 +17,7 @@ export const AUDIENCES = Object.freeze([
   ['udansha',     'Black belts only (udansha)'],
   ['event',       'People entered in an event'],
   ['person',      'One person'],
-  ['selected',    'People picked from a list'],   // not offered on the compose screen
+  ['selected',    'People I tick from the list'],
 ]);
 
 /** Which affiliation roles an audience means, for the audiences that are decided by role. Everyone is the default. */
@@ -61,13 +61,25 @@ export function senderFor({ club, baseFrom, contactEmail = null, actorEmail = nu
   };
 }
 
+export const CHANNELS = Object.freeze([
+  ['both', 'Email and a notification on their phone'],
+  ['app',  'A notification on their phone only (no email)'],
+]);
+
+const ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 export function readMessage(form = {}) {
+  // People ticked on the compose screen arrive as pick_<id>=1.
+  const personIds = Object.keys(form).filter((k) => k.startsWith('pick_') && form[k] === '1')
+    .map((k) => k.slice(5)).filter((id) => ID.test(id));
   const t = (k, n) => String(form[k] ?? '').replace(/\r\n/g, '\n').trim().slice(0, n);
   return {
     audience: t('audience', 20),
     eventId: t('eventId', 40) || null,
     personNumber: t('personNumber', 30) || null,
     kind: t('kind', 20) || 'announcement',
+    channel: t('channel', 10) || 'both',
+    personIds,
     subject: String(form.subject ?? '').replace(/\s+/g, ' ').trim().slice(0, 150),
     body: t('body', 10_000),
   };
@@ -77,6 +89,8 @@ export function problemsWithMessage(m) {
   const out = [];
   if (!AUDIENCES.some(([k]) => k === m.audience)) out.push('Choose who this is for.');
   if (!KINDS.some(([k]) => k === m.kind)) out.push('Choose what kind of message this is.');
+  if (!CHANNELS.some(([k]) => k === (m.channel ?? 'both'))) out.push('Choose how it is sent.');
+  if (m.audience === 'selected' && !m.personIds?.length) out.push('Tick at least one person.');
   if (m.audience === 'event' && !m.eventId) out.push('Choose the event.');
   if (m.audience === 'person' && !m.personNumber) out.push('Enter the member number of the person.');
   if (m.kind === 'renewal' && m.audience !== 'selected')
@@ -106,12 +120,13 @@ export function renderBody({ text, club, unsubscribeUrl = null, optOutHonoured =
  * eight-year-old — and a child with nobody linked is written to directly. One
  * address gets one copy however many children it covers.
  */
-export function chooseRecipients(candidates, { honourOptOut = true, preferFees = false } = {}) {
+export function chooseRecipients(candidates, { honourOptOut = true, preferFees = false, appOnly = false } = {}) {
   const sendTo = new Map();
   const skipped = [];
   for (const c of candidates) {
     const minor = c.isMinor === true;
-    let guardians = (c.guardians ?? []).filter((g) => isEmail(g.email));
+    // By app alone nobody needs an address: a child's notice goes to the parents' phones, anybody else's to their own.
+    let guardians = (c.guardians ?? []).filter((g) => appOnly || isEmail(g.email));
     // A child's main contact gets the mail; other parents only if marked "also copy".
     // With no main contact set, every linked parent is written to, as always.
     if (guardians.some((g) => g.main)) guardians = guardians.filter((g) => g.main || g.alsoCopy);
@@ -120,11 +135,12 @@ export function chooseRecipients(candidates, { honourOptOut = true, preferFees =
     const targets = minor && guardians.length
       ? guardians.map((g) => ({ personId: g.personId, email: g.email,
                                 optedOut: g.optedOut, via: c.personId }))
+      : appOnly ? [{ personId: c.personId, email: null, optedOut: c.optedOut, via: null }]
       : isEmail(c.email) ? [{ personId: c.personId, email: c.email,
                                optedOut: c.optedOut, via: null }] : [];
     if (!targets.length) { skipped.push({ personId: c.personId, reason: 'no_email' }); continue; }
     for (const t of targets) {
-      const key = t.email.toLowerCase();
+      const key = t.email ? t.email.toLowerCase() : `person:${t.personId}`;
       if (honourOptOut && t.optedOut) {
         skipped.push({ personId: t.personId, email: t.email, reason: 'opted_out' }); continue;
       }
