@@ -404,7 +404,7 @@ export const dashboard = ({ me, csrf, orgs, parents = [], groups = [], platformO
   ${parents.map((o) => `<div class="card">
     <h3>${esc(o.name)}</h3>
     ${o.canMessage ? `<p><a class="btn" href="/o/${esc(o.slug)}/messages">Send a message</a></p>` : ''}
-    <p>${esc(o.type)} · <a href="/o/${esc(o.slug)}/roster">Members</a>
+    <p>${esc(o.type)} · <a href="/o/${esc(o.slug)}/roster">Roll</a>
        · <a href="/o/${esc(o.slug)}/events">Events</a>
        · <a href="/o/${esc(o.slug)}/grading">Grading</a>
        · <a href="/o/${esc(o.slug)}/pages">Website</a>${platformOwner && !String(o.path).includes('.') ? ` · <a href="/platform">Platform</a>` : ''}</p>
@@ -438,7 +438,7 @@ export const roster = ({ me, csrf, org, roster, total = null, canRegister = fals
     return `<span class="tag wait">Instructor · not shown</span> <span class="muted">${esc(why)}</span>`;
   };
   return page({
-  title: `${org.name} roster`, me, csrf, body: `
+  title: `${org.name} roll`, me, csrf, body: `
   <h1>${esc(org.name)} roll</h1>
   <p class="sub">${total ?? roster.length} on the roll ·
     <a href="/o/${esc(org.slug)}/grading">Run a grading</a> ·
