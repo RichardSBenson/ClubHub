@@ -366,9 +366,7 @@ post('/o/:slug/declaration', async (ctx) => {
   }
 });
 
-// ---- roster ---------------------------------------------------------------
-// The roll used to live at /roster; old bookmarks and links still land on it.
-get('/o/:slug/roster', async (ctx) => ctx.redirect(`/o/${ctx.params.slug}/roll${ctx.url.search}`));
+// ---- the roll ---------------------------------------------------------------
 
 get('/o/:slug/roll', async (ctx) => {
   // organisationFor also builds the side menu — without it the roll was the one page with no menu at all.

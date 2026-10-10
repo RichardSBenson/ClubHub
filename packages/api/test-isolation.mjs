@@ -102,7 +102,6 @@ const PUBLIC = new Map([
   ['GET /api/v1/events', 'the same'],
   ['POST /signout', 'leaving must always work'],
   ['GET /dashboard', 'shows only what the signer-in may see'],
-  ['GET /o/:slug/roster', 'nobody: it only redirects to /o/:slug/roll, which does its own check'],
   ['GET /o/:slug/bookings', 'a teacher or official of that club; booking.forClub asserts the role'],
   ['POST /o/:slug/bookings/:sessionId/places', 'an official of that club; the class must belong to it'],
   ['GET /o/:slug/shop', 'an official of that club (or of the federation, for the national range); shop.forOrg asserts the role'],
