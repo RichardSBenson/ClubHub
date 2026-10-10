@@ -1,22 +1,14 @@
 /** INFRASTRUCTURE — the GuardianRegister port on Postgres. Storage only: SQL and the transaction. */
 
+import { inTransaction } from './transaction.mjs';
+
 const PERSON = `p.id, p.display_number, p.first_name, p.last_name, p.preferred_name,
   p.date_of_birth::text as date_of_birth, p.gender, p.email, p.phone`;
 
 export class PostgresGuardianRegister {
   constructor(pool) { this.pool = pool; }
 
-  async inTransaction(work) {
-    const client = await this.pool.connect();
-    try {
-      await client.query('begin');
-      const result = await work(transactionOn(client));
-      await client.query('commit');
-      return result;
-    } catch (e) {
-      await client.query('rollback'); throw e;
-    } finally { client.release(); }
-  }
+  inTransaction(work) { return inTransaction(this.pool, (client) => work(transactionOn(client))); }
 }
 
 function transactionOn(client) {

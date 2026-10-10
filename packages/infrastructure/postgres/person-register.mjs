@@ -4,21 +4,13 @@
  */
 
 import { seal } from '../crypto/vault.mjs';
+import { inTransaction } from './transaction.mjs';
 
 export class PostgresPersonRegister {
   constructor(pool) { this.pool = pool; }
 
-  async inTransaction(work) {
-    const client = await this.pool.connect();
-    try {
-      await client.query('begin');
-      const result = await work(transactionOn(client));
-      await client.query('commit');
-      return result;
-    } catch (e) {
-      await client.query('rollback'); throw e;
-    } finally { client.release(); }
-  }
+  inTransaction(work) { return inTransaction(this.pool, (client) => work(transactionOn(client))); }
+
 }
 
 function transactionOn(client) {
