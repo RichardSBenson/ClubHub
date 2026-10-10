@@ -22,6 +22,8 @@ import { clearance } from '../../core/domain/qualification.mjs';
 import { stateOf as declarationState, problemsWithSigning, problemsWithPublishing as problemsWithDeclarationText, needsGuardian } from '../../core/domain/declarations.mjs';
 import { MANAGE, REGISTER, TEACH } from '../../core/domain/access.mjs';
 import { EnrolPerson } from '../../core/application/enrol-person.mjs';
+import { LinkGuardian, SetGuardianContact, UnlinkGuardian, ListGuardians } from '../../core/application/guardians.mjs';
+import { PostgresGuardianRegister } from '../../infrastructure/postgres/guardian-register.mjs';
 import { UpdatePerson, TransferMember } from '../../core/application/change-person.mjs';
 import { Refused, NotPermitted, Missing } from '../../core/application/ports.mjs';
 import { PostgresPersonRegister } from '../../infrastructure/postgres/person-register.mjs';
@@ -45,6 +47,11 @@ const register = new PostgresPersonRegister(pool);
 const auth = new PostgresAuthorisation(pool);
 const updatePerson = new UpdatePerson({ register, auth });
 const transferMember = new TransferMember({ register, auth });
+const guardians = new PostgresGuardianRegister(pool);
+const linkGuardian = new LinkGuardian({ register: guardians, auth, adultAge: () => region().adultAge });
+const setGuardianContact = new SetGuardianContact({ register: guardians, auth });
+const unlinkGuardian = new UnlinkGuardian({ register: guardians, auth });
+const listGuardians = new ListGuardians({ register: guardians, auth });
 const enrolPerson = new EnrolPerson({
   register, auth,
   announcer: { announce: (orgId, event, data) => webhooks.emitNow(orgId, event, data) },
@@ -759,99 +766,21 @@ export const family = {
 
   /** A registrar links a parent or guardian to a child at the child's club. */
   async link(actor, { guardianId, childId, relationship = 'parent' }) {
-    const guardian = await one(`select ${PERSON_COLUMNS} from person p where p.id=$1`, [guardianId]);
-    const child = await one(`select ${PERSON_COLUMNS} from person p where p.id=$1`, [childId]);
-    if (!guardian || !child) throw new NotFound('Person');
-
-    const homes = await homesOf(childId);
-    let home = null;
-    for (const h of homes) {
-      const ok = await one('select has_role_at($1,$2,$3) as ok', [actor, h, REGISTER]);
-      if (ok?.ok) { home = h; break; }
-    }
-    if (!home) throw new Forbidden();
-
-    const problems = problemsWithGuardianLink({ guardian, child, relationship }, { adultAge: region().adultAge });
-    if (problems.length) throw new Invalid(problems.join(' '));
-
-    const row = await one(`
-      insert into guardian_link (guardian_id, child_id, relationship, created_by)
-      values ($1,$2,$3,$4)
-      on conflict (guardian_id, child_id) where ended_on is null do nothing
-      returning *`, [guardianId, childId, relationship, actor]);
-    if (!row) throw new Invalid(`${guardian.first_name} is already linked to ${child.first_name}.`);
-
-    await pool.query(`
-      insert into audit_log (account_id, organisation_id, action, entity, entity_id, after)
-      values ($1,$2,'guardian_link','person',$3,$4)`,
-      [actor, home, childId, JSON.stringify({
-        guardian: `${guardian.first_name} ${guardian.last_name}`,
-        child: `${child.first_name} ${child.last_name}`, relationship })]);
-    return row;
+    return speakingForThisLayer(() => linkGuardian.execute({ actorId: actor, guardianId, childId, relationship }));
   },
 
-  /**
-   * Choose who a child's club mail goes to. `main` makes this parent the main contact (and removes the
-   * mark from the child's other links); `copy` marks a non-main parent as also copied in. Unticking main
-   * returns the child to "every parent".
-   */
+  /** Choose who a child's club mail goes to (see SetGuardianContact). */
   async setContact(actor, linkId, { main = false, copy = false, fees = false }) {
-    const link = await one('select * from guardian_link where id=$1 and ended_on is null', [linkId]);
-    if (!link) throw new NotFound('Link');
-    let home = null;
-    for (const h of await homesOf(link.child_id)) {
-      const ok = await one('select has_role_at($1,$2,$3) as ok', [actor, h, REGISTER]);
-      if (ok?.ok) { home = h; break; }
-    }
-    if (!home) throw new Forbidden();
-    const client = await pool.connect();
-    try {
-      await client.query('begin');
-      if (main) await client.query('update guardian_link set is_main_contact=false where child_id=$1 and ended_on is null', [link.child_id]);
-      if (fees) await client.query('update guardian_link set pays_fees=false where child_id=$1 and ended_on is null', [link.child_id]);
-      await client.query('update guardian_link set is_main_contact=$2, also_copy=$3, pays_fees=$4 where id=$1', [linkId, !!main, !main && !!copy, !!fees]);
-      await client.query(`insert into audit_log (account_id, organisation_id, action, entity, entity_id, after)
-        values ($1,$2,'guardian_contact','person',$3,$4)`, [actor, home, link.child_id, JSON.stringify({ linkId, main: !!main, copy: !main && !!copy, fees: !!fees })]);
-      await client.query('commit');
-    } catch (e) { await client.query('rollback'); throw e; } finally { client.release(); }
+    return speakingForThisLayer(() => setGuardianContact.execute({ actorId: actor, linkId, main, copy, fees }));
   },
 
   async unlink(actor, linkId) {
-    const link = await one(`
-      select gl.*, g.first_name as g_first, g.last_name as g_last,
-             c.first_name as c_first, c.last_name as c_last
-      from guardian_link gl
-      join person g on g.id = gl.guardian_id join person c on c.id = gl.child_id
-      where gl.id=$1 and gl.ended_on is null`, [linkId]);
-    if (!link) throw new NotFound('Link');
-    let home = null;
-    for (const h of await homesOf(link.child_id)) {
-      const ok = await one('select has_role_at($1,$2,$3) as ok', [actor, h, REGISTER]);
-      if (ok?.ok) { home = h; break; }
-    }
-    if (!home) throw new Forbidden();
-    await pool.query('update guardian_link set ended_on = current_date where id=$1', [linkId]);
-    await pool.query(`
-      insert into audit_log (account_id, organisation_id, action, entity, entity_id, after)
-      values ($1,$2,'guardian_unlink','person',$3,$4)`,
-      [actor, home, link.child_id, JSON.stringify({
-        guardian: `${link.g_first} ${link.g_last}`, child: `${link.c_first} ${link.c_last}` })]);
+    return speakingForThisLayer(() => unlinkGuardian.execute({ actorId: actor, linkId }));
   },
 
   /** The guardians of a child, for the child's own record. */
   async guardiansOf(actor, childId) {
-    let allowed = false;
-    for (const h of await homesOf(childId)) {
-      const ok = await one('select has_role_at($1,$2,$3) as ok', [actor, h, REGISTER]);
-      if (ok?.ok) { allowed = true; break; }
-    }
-    if (!allowed) throw new Forbidden();
-    const { rows } = await pool.query(`
-      select gl.id, gl.relationship, gl.is_main_contact, gl.also_copy, gl.pays_fees, g.id as person_id, g.first_name, g.last_name,
-             g.email, exists(select 1 from account a where a.person_id = g.id) as can_sign_in
-      from guardian_link gl join person g on g.id = gl.guardian_id
-      where gl.child_id=$1 and gl.ended_on is null order by gl.created_at`, [childId]);
-    return rows;
+    return speakingForThisLayer(() => listGuardians.execute({ actorId: actor, childId }));
   },
 };
 

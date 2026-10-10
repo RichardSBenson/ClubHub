@@ -260,3 +260,19 @@ export const ANNOUNCER = {
   /** (organisationId, eventName, data) → void */
   methods: ['announce'],
 };
+
+/**
+ * The links between children and their guardians. `inTransaction(work)` as for PersonRegister; `tx` offers:
+ *   personById(id)                          — { id, first_name, last_name, date_of_birth, ... } | null
+ *   homesOf(personId)                       — organisation ids of their current affiliations
+ *   linkById(id)                            — the live link, with g_first/g_last/c_first/c_last names, or null
+ *   addLink({ guardianId, childId, relationship, createdBy })  — the new link, or null when already linked
+ *   chooseContact(link, { main, copy, fees }) — one main contact and one fee-payer per child
+ *   endLink(id)
+ *   guardiansOf(childId)                    — the live links with the guardian's details
+ *   audit({ actorId, organisationId, action, entity, entityId, after })
+ */
+export const GUARDIAN_REGISTER = {
+  name: 'GuardianRegister',
+  methods: ['inTransaction'],
+};
