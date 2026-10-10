@@ -9,18 +9,20 @@ import { pool } from '../../infrastructure/postgres/pool.mjs';
 import { region, words } from '../../infrastructure/region-context.mjs';
 const clubWord = () => words().club.toLowerCase();
 import { isTestProvider } from '../../infrastructure/payments/providers.mjs';
-import { dueForReminder, reminderText, PERIODS, feeFor } from '../../core/domain/membership.mjs';
-import { chargeDue, afterFailure, problemsWithSetup, cardLabel, METHODS as AUTO_METHODS, PERIOD_CHOICES, CHARGE_LEAD_DAYS, MAX_FAILURES } from '../../core/domain/autorenew.mjs';
+import { dueForReminder, reminderText } from '../../core/domain/membership.mjs';
+import { METHODS as AUTO_METHODS, PERIOD_CHOICES, CHARGE_LEAD_DAYS, MAX_FAILURES } from '../../core/domain/autorenew.mjs';
 import { readBasket, readNote, mayMoveOrder, ORDER_STATUSES } from '../../core/domain/shop.mjs';
 import { SettlePayment, ListPaymentsFor, ListOwed, ViewPayment, PayPayment, CompleteTestPayment, PaymentsReceived, RecordManualPayment, RequestPayment, CancelPaymentRequest, renewMembership } from '../../core/application/payments.mjs';
 import { ListFees, SaveFee, RemoveFee, RenewalRoster, RemindMembers, SetReminders, AskToRenew, SetExemption, CarryExemptMemberOn } from '../../core/application/renewals.mjs';
 import { PostgresRenewalStore } from '../../infrastructure/postgres/renewal-store.mjs';
+import { AutoRenewStanding, StartAutoRenew, CancelAutoRenew, AutoRenewForClub, RunAutoRenewals } from '../../core/application/auto-renew.mjs';
+import { PostgresAutoRenewStore } from '../../infrastructure/postgres/auto-renew-store.mjs';
 import { PostgresPaymentLedger } from '../../infrastructure/postgres/payment-ledger.mjs';
 import { PostgresAuthorisation } from '../../infrastructure/postgres/repositories.mjs';
 import { MANAGE, REGISTER } from '../../core/domain/access.mjs';
 import { messages, push, webhooks } from './messaging.mjs';
 import { family } from './people.mjs';
-import { speakingForThisLayer, Invalid, NotFound, assertRole, clubOnly, feeRows, one, q, qualToday } from './shared.mjs';
+import { speakingForThisLayer, Invalid, NotFound, assertRole, clubOnly, feeRows, one, q } from './shared.mjs';
 import { referrals } from './visitors.mjs';
 
 export const billing = {
@@ -163,151 +165,39 @@ export const renewals = {
   carryOn: (actor, orgId, affiliationId) => speakingForThisLayer(() => carryExemptMemberOn.execute({ actorId: actor, organisationId: orgId, affiliationId })),
 };
 
-const AGREEMENT_SELECT = `select g.id, g.organisation_id, g.affiliation_id, g.person_id, g.period, g.method, g.label, g.status, g.failures,
-    g.next_attempt_on::text as next_attempt_on, g.last_error, g.agreed_at, o.name as club,
-    a.paid_until::text as paid_until, a.fee_exempt,
-    nullif(trim(concat_ws(' ', p.first_name, p.last_name)), '') as person_name
-  from payment_agreement g join organisation o on o.id = g.organisation_id
-  join affiliation a on a.id = g.affiliation_id join person p on p.id = g.person_id`;
+const autoRenewDeps = {
+  store: new PostgresAutoRenewStore(pool, pool, { feeRows }), auth: new PostgresAuthorisation(pool),
+  mustActFor: (actor, personId) => family.assertMayActFor(actor, personId),
+  adultAge: () => region().adultAge, currency: () => region().currency, clubWord,
+};
+const autoRenewStanding = new AutoRenewStanding(autoRenewDeps);
+const startAutoRenew = new StartAutoRenew(autoRenewDeps);
+const cancelAutoRenew = new CancelAutoRenew(autoRenewDeps);
+const autoRenewForClub = new AutoRenewForClub(autoRenewDeps);
+const runAutoRenewals = new RunAutoRenewals({ ...autoRenewDeps, settle: (x) => settlePayment.execute(x) });
 
 export const autoRenew = {
   AUTO_METHODS, PERIOD_CHOICES, CHARGE_LEAD_DAYS, MAX_FAILURES,
 
   /** Where this person stands: each club membership, whether it renews itself, and what it would cost. */
-  async forPerson(actor, personId) {
-    await family.assertMayActFor(actor, personId);
-    const mem = await q(`select a.id as affiliation_id, a.organisation_id, o.name as club, a.paid_until::text as paid_until, a.fee_exempt
-      from affiliation a join organisation o on o.id = a.organisation_id
-      where a.person_id = $1 and a.ends is null and a.role in ('member','instructor','assistant') and o.type = 'club'
-        and a.status in ('active','lapsed') order by o.name`, [personId]);
-    const live = await q(`${AGREEMENT_SELECT} where g.person_id = $1 and g.status <> 'cancelled'`, [personId]);
-    const person = await one(`select id, first_name, last_name, date_of_birth::text as dob from person where id = $1`, [personId]);
-    const out = [];
-    for (const m of mem) {
-      const today = await qualToday(m.organisation_id);
-      const age = person.dob ? Math.floor((Date.parse(today) - Date.parse(person.dob)) / 31_557_600_000) : null;
-      const schedule = await feeRows(m.organisation_id);
-      const prices = Object.fromEntries(PERIOD_CHOICES.map((pd) => [pd, feeFor(schedule, { adultAge: region().adultAge, ageYears: age, period: pd, today })]).filter(([, f]) => f));
-      out.push({ ...m, agreement: live.find((g) => g.affiliation_id === m.affiliation_id) ?? null, prices });
-    }
-    return { person, memberships: out };
-  },
-
+  forPerson: (actor, personId) => speakingForThisLayer(() => autoRenewStanding.execute({ actorId: actor, personId })),
   /** The person (or their parent) agrees to automatic renewal and gives a method. Only a token is kept. */
-  async start(actor, personId, affiliationId, input, { provider }) {
-    await family.assertMayActFor(actor, personId);
-    const problems = problemsWithSetup({ method: input.method, period: input.period, agreed: input.agreed });
-    if (problems.length) throw new Invalid(problems.join(' '));
-    const a = await one(`select a.id, a.organisation_id, a.fee_exempt, o.type from affiliation a join organisation o on o.id = a.organisation_id
-      where a.id = $1 and a.person_id = $2 and a.ends is null and a.role in ('member','instructor','assistant')`, [affiliationId, personId]);
-    if (!a || a.type !== 'club') throw new NotFound('Membership');
-    if (a.fee_exempt) throw new Invalid('You are not charged here, so there is nothing to renew.');
-    const today = await qualToday(a.organisation_id);
-    const person = await one('select date_of_birth::text as dob from person where id=$1', [personId]);
-    const age = person.dob ? Math.floor((Date.parse(today) - Date.parse(person.dob)) / 31_557_600_000) : null;
-    if (!feeFor(await feeRows(a.organisation_id), { adultAge: region().adultAge, ageYears: age, period: input.period, today }))
-      throw new Invalid(`The ${clubWord()} has not set a price for that yet. Choose another, or ask the ${clubWord()}.`);
-    if (await one(`select 1 x from payment_agreement where affiliation_id=$1 and status <> 'cancelled'`, [affiliationId]))
-      throw new Invalid('Automatic renewal is already set up. Stop it first to change it.');
-    let saved;
-    try { saved = await provider.saveMethod({ method: input.method, card: input.card }); }
-    catch { throw new Invalid('We could not reach the payment provider. Nothing was saved — try again.'); }
-    if (saved.status !== 'saved') throw new Invalid(saved.detail || 'That payment method was not accepted.');
-    const row = await one(`insert into payment_agreement (organisation_id, affiliation_id, person_id, period, method, provider, provider_ref, label, agreed_by)
-      values ($1,$2,$3,$4,$5,$6,$7,$8,$9) returning id`,
-      [a.organisation_id, affiliationId, personId, input.period, input.method, provider.name, saved.ref,
-       input.method === 'card' ? cardLabel(input.card) : 'Bank direct debit', actor]);
-    await pool.query(`insert into audit_log (account_id, organisation_id, action, entity, entity_id, after) values ($1,$2,'auto_renew_start','person',$3,$4)`,
-      [actor, a.organisation_id, personId, JSON.stringify({ period: input.period, method: input.method })]);
-    return row.id;
-  },
-
+  start: (actor, personId, affiliationId, input, { provider }) => speakingForThisLayer(() => startAutoRenew.execute({ actorId: actor, personId, affiliationId, input, provider })),
   /** One press. After it, nothing more is charged. */
-  async cancel(actor, personId, agreementId) {
-    await family.assertMayActFor(actor, personId);
-    const g = await one(`update payment_agreement set status='cancelled', cancelled_at=now(), cancelled_by=$3, next_attempt_on=null
-      where id=$1 and person_id=$2 and status <> 'cancelled' returning organisation_id`, [agreementId, personId, actor]);
-    if (!g) throw new NotFound('Automatic renewal');
-    await pool.query(`insert into audit_log (account_id, organisation_id, action, entity, entity_id, after) values ($1,$2,'auto_renew_stop','person',$3,'{}')`,
-      [actor, g.organisation_id, personId]);
-  },
-
+  cancel: (actor, personId, agreementId) => speakingForThisLayer(() => cancelAutoRenew.execute({ actorId: actor, personId, agreementId })),
   /** A club's view: who renews themselves, who is failing. */
-  async forClub(actor, orgId) {
-    await assertRole(actor, orgId, REGISTER);
-    await clubOnly(orgId);
-    return q(`${AGREEMENT_SELECT} where g.organisation_id = $1 and g.status <> 'cancelled'
-      order by (g.status = 'paused') desc, (g.failures > 0) desc, p.last_name, p.first_name`, [orgId]);
-  },
+  forClub: (actor, orgId) => speakingForThisLayer(() => autoRenewForClub.execute({ actorId: actor, organisationId: orgId })),
 
-  /**
-   * The daily run. For each agreement whose membership is about to run out: ask for the club's price, charge the saved
-   * method, and let the ordinary payment path extend the membership. Safe to run twice: the payment is claimed before
-   * the provider is asked, and a second run finds the membership already extended or an attempt already waiting.
-   */
-  async run({ provider, messenger = null, origin = '', baseFrom = '', budgetMs = 9000 }) {
-    const started = Date.now();
-    const rows = await q(`${AGREEMENT_SELECT} where g.status = 'active' order by g.agreed_at`);
-    const report = { charged: 0, failed: 0, paused: 0, skipped: 0 };
-    for (const g of rows) {
-      if (Date.now() - started > budgetMs) break;
-      const today = await qualToday(g.organisation_id);
-      if (!chargeDue({ status: g.status, nextAttemptOn: g.next_attempt_on, paidUntil: g.paid_until, exempt: g.fee_exempt }, today)) { report.skipped++; continue; }
-      const person = await one('select date_of_birth::text as dob from person where id=$1', [g.person_id]);
-      const age = person.dob ? Math.floor((Date.parse(today) - Date.parse(person.dob)) / 31_557_600_000) : null;
-      const fee = feeFor(await feeRows(g.organisation_id), { adultAge: region().adultAge, ageYears: age, period: g.period, today });
-      if (!fee) { report.skipped++; continue; }
-      // Reuse an attempt already waiting rather than asking twice.
-      let pay = await one(`select py.id from payment py join payment_line l on l.payment_id = py.id
-        where l.renews_affiliation_id = $1 and py.status in ('pending','failed') order by py.created_at desc limit 1`, [g.affiliation_id]);
-      if (!pay) {
-        const client = await pool.connect();
-        try {
-          await client.query('begin');
-          const { rows: [p] } = await client.query(`insert into payment (organisation_id, person_id, amount_cents, currency, status)
-            values ($1,$2,$3,$4,'pending') returning id`, [g.organisation_id, g.person_id, fee.amount_cents, fee.currency ?? region().currency]);
-          await client.query(`insert into payment_line (payment_id, kind, description, amount_cents, renews_affiliation_id, renews_months)
-            values ($1,'club_fee',$2,$3,$4,$5)`, [p.id, `${fee.label} — automatic renewal ${PERIODS[g.period].label.toLowerCase()}`, fee.amount_cents, g.affiliation_id, PERIODS[g.period].months]);
-          await client.query('commit'); pay = p;
-        } catch (e) { await client.query('rollback'); throw e; } finally { client.release(); }
-      }
-      const claimed = await one(`update payment set status='awaiting', method=$2, provider=$3, updated_at=now()
-        where id=$1 and status in ('pending','failed') returning id`, [pay.id, g.method === 'card' ? 'card' : 'direct_debit', provider.name]);
-      if (!claimed) { report.skipped++; continue; }
-      let result;
-      try { result = await provider.charge({ ref: (await one('select provider_ref from payment_agreement where id=$1', [g.id])).provider_ref,
-        amountCents: fee.amount_cents, currency: fee.currency ?? region().currency, reference: pay.id }); }
-      catch (e) { result = { status: 'failed', detail: 'The payment provider could not be reached.' }; }
-      if (result.status === 'succeeded') {
-        await settle(pay.id, true, result.detail, { ref: result.ref });
-        await pool.query(`update payment_agreement set failures=0, next_attempt_on=null, last_error=null where id=$1`, [g.id]);
-        report.charged++;
-      } else if (result.status === 'awaiting') {
-        await pool.query(`update payment set provider_ref=$2, detail=$3, updated_at=now() where id=$1`, [pay.id, result.ref, result.detail]);
-        report.charged++;
-      } else {
-        await settle(pay.id, false, result.detail ?? 'Declined.', { ref: result.ref });
-        const next = afterFailure(g.failures, today);
-        await pool.query(`update payment_agreement set failures=$2, status=$3, next_attempt_on=$4, last_error=$5 where id=$1`,
-          [g.id, next.failures, next.status, next.nextAttemptOn, String(result.detail ?? 'Declined.').slice(0, 250)]);
-        report.failed++;
-        if (next.status === 'paused') report.paused++;
-        await push.toPerson(g.person_id, { title: next.status === 'paused' ? 'Automatic renewal has stopped' : 'Your membership payment did not go through',
-          body: `${g.club}: ${g.person_name}`, url: `/me/${g.person_id}/auto-renew` });
-        if (messenger) {
-          const text = next.status === 'paused'
-            ? { subject: 'Automatic renewal has stopped', body: `We could not take your membership payment for ${g.person_name} at ${g.club} after several tries, so automatic renewal is paused. Please sign in, go to My payments, and pay or set up automatic renewal again.` }
-            : { subject: 'Your membership payment did not go through', body: `We tried to renew ${g.person_name}'s membership at ${g.club} and the payment did not go through (${result.detail ?? 'declined'}). We will try again on ${next.nextAttemptOn}. You can also pay now from My payments.` };
-          try {
-            const made = await messages.prepare(null, g.organisation_id, { audience: 'selected', kind: 'renewal', personIds: [g.person_id],
-              subject: text.subject, body: text.body, eventId: null, personNumber: null }, { baseFrom, trusted: true });
-            await messages.sendBatch(null, g.organisation_id, made.message.id, { messenger, origin, trusted: true, budgetMs: 3000 });
-          } catch { /* the failure is recorded either way; a missing address must not stop the run */ }
-        }
-      }
-    }
-    return report;
-  },
+  /** The daily run (see core/application/auto-renew.mjs). */
+  run: ({ provider, messenger = null, origin = '', baseFrom = '', budgetMs = 9000 }) => runAutoRenewals.execute({ provider, budgetMs,
+    tell: async ({ personId, organisationId, push: note, email }) => {
+      await push.toPerson(personId, note);
+      if (!messenger) return;
+      try {
+        const made = await messages.prepare(null, organisationId, { audience: 'selected', kind: 'renewal', personIds: [personId], subject: email.subject, body: email.body, eventId: null, personNumber: null }, { baseFrom, trusted: true });
+        await messages.sendBatch(null, organisationId, made.message.id, { messenger, origin, trusted: true, budgetMs: 3000 });
+      } catch { /* the failure is recorded either way; a missing address must not stop the run */ }
+    } }),
 };
 
 /**

@@ -538,3 +538,32 @@ export const RENEWAL_STORE = {
   methods: ['atomically', 'clubById', 'todayAt', 'feeRows', 'endFeesBefore', 'addFee', 'removeFee', 'rosterRows', 'remindersEnabled',
     'setReminders', 'requestRenewal', 'setExemption', 'voidAskedFor', 'personName', 'affiliationOf', 'audit'],
 };
+
+/**
+ * Automatic renewal: the agreements people have made to have a saved method charged as their membership runs out.
+ * `atomically(work)` runs `work(store)` as one unit.
+ *   personById(id)                          — { id, first_name, last_name, dob } or null
+ *   todayAtClub(organisationId)             — 'YYYY-MM-DD' in that club's timezone
+ *   feeRows(organisationId)                 — the club's prices
+ *   renewableMemberships(personId)          — [{ affiliation_id, organisation_id, club, paid_until, fee_exempt }]
+ *   liveAgreementsOf(personId)              — agreements not cancelled (see agreement rows below)
+ *   membershipForSetup(affiliationId, personId) — { id, organisation_id, fee_exempt, type } or null
+ *   hasLiveAgreement(affiliationId)
+ *   addAgreement({ organisationId, affiliationId, personId, period, method, providerName, providerRef, label, actorId }) — the id
+ *   cancelAgreement({ agreementId, personId, actorId }) — the organisation id, or null if there was nothing to stop
+ *   agreementsOfClub(clubId)                — live agreements, the failing ones first
+ *   activeAgreements()                      — every agreement still charging
+ *   waitingRenewalPayment(affiliationId)    — the id of a pending or failed renewal already asked, or null
+ *   createRenewalPayment({ organisationId, personId, cents, currency, affiliationId, months, description }) — the payment id
+ *   claimAttempt({ paymentId, method, providerName }) — false if another run got there first
+ *   savedMethodOf(agreementId)              — the provider's reference for the saved method
+ *   noteProgress(paymentId, ref, detail)
+ *   chargeWorked(agreementId) / chargeFailed({ agreementId, failures, status, nextAttemptOn, error })
+ *   audit({ actorId, organisationId, action, entityId, after })
+ */
+export const AUTO_RENEW_STORE = {
+  name: 'AutoRenewStore',
+  methods: ['atomically', 'personById', 'todayAtClub', 'feeRows', 'renewableMemberships', 'liveAgreementsOf', 'membershipForSetup', 'hasLiveAgreement',
+    'addAgreement', 'cancelAgreement', 'agreementsOfClub', 'activeAgreements', 'waitingRenewalPayment', 'createRenewalPayment', 'claimAttempt',
+    'savedMethodOf', 'noteProgress', 'chargeWorked', 'chargeFailed', 'audit'],
+};
