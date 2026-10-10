@@ -24,6 +24,7 @@ import { MANAGE, REGISTER, TEACH } from '../../core/domain/access.mjs';
 import { EnrolPerson } from '../../core/application/enrol-person.mjs';
 import { LinkGuardian, SetGuardianContact, UnlinkGuardian, ListGuardians } from '../../core/application/guardians.mjs';
 import { PostgresGuardianRegister } from '../../infrastructure/postgres/guardian-register.mjs';
+import { ImportRoll, ReadRoll } from '../../core/application/import-roll.mjs';
 import { UpdatePerson, TransferMember } from '../../core/application/change-person.mjs';
 import { Refused, NotPermitted, Missing } from '../../core/application/ports.mjs';
 import { PostgresPersonRegister } from '../../infrastructure/postgres/person-register.mjs';
@@ -52,6 +53,8 @@ const linkGuardian = new LinkGuardian({ register: guardians, auth, adultAge: () 
 const setGuardianContact = new SetGuardianContact({ register: guardians, auth });
 const unlinkGuardian = new UnlinkGuardian({ register: guardians, auth });
 const listGuardians = new ListGuardians({ register: guardians, auth });
+const importRoll = new ImportRoll({ register, auth });
+const readRoll = new ReadRoll({ register, auth });
 const enrolPerson = new EnrolPerson({
   register, auth,
   announcer: { announce: (orgId, event, data) => webhooks.emitNow(orgId, event, data) },
@@ -335,104 +338,12 @@ export const people = {
    * numbers.
    */
   async importRoll(actor, organisationId, rows = []) {
-    await assertRole(actor, organisationId, REGISTER);
-    const adding = rows.filter((r) => r.action === 'add');
-    if (!adding.length) throw new Invalid('There is nothing to import');
-
-    const client = await pool.connect();
-    try {
-      await client.query('begin');
-
-      const { rows: [fed] } = await client.query(`
-        select coalesce(f.short_name, f.slug) as prefix
-        from organisation target
-        join organisation f on target.path <@ f.path and f.parent_id is null
-        where target.id = $1`, [organisationId]);
-      const prefix = (fed?.prefix ?? 'M').toUpperCase().replace(/[^A-Z]/g, '')
-        .slice(0, 5) || 'M';
-
-      const { rows: [seq] } = await client.query(`
-        select coalesce(max(substring(display_number from '[0-9]+$')::int), 0) as last
-        from person where display_number like $1`, [`${prefix}-%`]);
-      let next = seq.last;
-
-      const created = [];
-      let graded = 0;
-
-      for (const row of adding) {
-        const v = row.values;
-        next += 1;
-        const number = `${prefix}-${String(next).padStart(4, '0')}`;
-
-        const { rows: [person] } = await client.query(`
-          insert into person (display_number, first_name, last_name,
-            preferred_name, date_of_birth, gender, email, phone)
-          values ($1,$2,$3,$4,$5,$6,$7,$8) returning id, display_number`,
-          [number, v.firstName.trim(), v.lastName.trim(),
-           v.preferredName || null, v.dateOfBirth || null, normaliseGender(v.gender) ?? null,
-           v.email || null, v.phone || null]);
-
-        if (v.emergencyName || v.emergencyPhone) {
-          await client.query(`
-            insert into person_private (person_id, emergency_name, emergency_phone)
-            values ($1,$2,$3)`,
-            [person.id, seal(v.emergencyName || null), seal(v.emergencyPhone || null)]);
-        }
-
-        await client.query(`
-          insert into affiliation (person_id, organisation_id, role, starts,
-                                   status, paid_until)
-          values ($1,$2,$3,coalesce($4::date, current_date),'active',$5)`,
-          [person.id, organisationId, v.role ?? 'member',
-           v.starts || null, v.paidUntil || null]);
-
-        // A grade the club already holds is RECORDED, not awarded. It did not
-        // happen here, there was no panel, and nothing ratified it — writing
-        // it as though this system conferred it would put a fiction in the
-        // one place a federation has to be able to trust. The note says where
-        // it came from, so anybody reading the history later knows.
-        if (v.gradeId) {
-          await client.query(`
-            insert into grading_record (person_id, grade_id, awarded_on,
-              awarded_by_org, result, panel, notes)
-            values ($1,$2,coalesce($3::date, current_date),$4,'pass','[]',$5)`,
-            [person.id, v.gradeId, v.gradedOn || null, organisationId,
-             'Held on joining. Imported from the club\'s own records; not '
-             + 'graded through this system.']);
-          graded += 1;
-        }
-
-        created.push({ id: person.id, number: person.display_number,
-                       line: row.line,
-                       name: `${v.firstName} ${v.lastName}`.trim() });
-      }
-
-      await client.query(`
-        insert into audit_log (account_id, organisation_id, action, entity,
-                               entity_id, after)
-        values ($1,$2,'import','organisation',$2,$3::jsonb)`,
-        [actor, organisationId,
-         JSON.stringify({ added: created.length, graded,
-                          numbers: created.map((c) => c.number) })]);
-
-      await client.query('commit');
-      return { added: created.length, graded, created };
-    } catch (e) {
-      await client.query('rollback'); throw e;
-    } finally { client.release(); }
+    return speakingForThisLayer(() => importRoll.execute({ actorId: actor, organisationId, rows }));
   },
 
   /** Who is already on this roll, in the shape the import planner compares. */
   async rollFor(actor, organisationId) {
-    await assertRole(actor, organisationId, REGISTER);
-    const rows = await q(`
-      select p.id, p.first_name, p.last_name, p.email, p.date_of_birth
-      from affiliation a join person p on p.id = a.person_id
-      where a.organisation_id = $1 and a.ends is null`, [organisationId]);
-    return rows.map((r) => ({
-      id: r.id, firstName: r.first_name, lastName: r.last_name,
-      email: r.email, dateOfBirth: r.date_of_birth,
-    }));
+    return speakingForThisLayer(() => readRoll.execute({ actorId: actor, organisationId }));
   },
 
   /**

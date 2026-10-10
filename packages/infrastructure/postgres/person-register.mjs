@@ -110,6 +110,20 @@ function transactionOn(client) {
         where person_id = $1 and ends is null`, [personId, paidUntil || null, status || null]);
     },
 
+    async recordHeldGrade({ personId, gradeId, awardedOn, organisationId, note }) {
+      await client.query(`
+        insert into grading_record (person_id, grade_id, awarded_on, awarded_by_org, result, panel, notes)
+        values ($1,$2,coalesce($3::date, current_date),$4,'pass','[]',$5)`, [personId, gradeId, awardedOn || null, organisationId, note]);
+    },
+
+    async rollOf(organisationId) {
+      const { rows } = await client.query(`
+        select p.id, p.first_name, p.last_name, p.email, p.date_of_birth
+        from affiliation a join person p on p.id = a.person_id
+        where a.organisation_id = $1 and a.ends is null`, [organisationId]);
+      return rows.map((r) => ({ id: r.id, firstName: r.first_name, lastName: r.last_name, email: r.email, dateOfBirth: r.date_of_birth }));
+    },
+
     async endAffiliation(id, on) { await client.query('update affiliation set ends = $2 where id = $1', [id, on]); },
 
     async audit({ actorId, organisationId, action, entity, entityId, before = null, after }) {

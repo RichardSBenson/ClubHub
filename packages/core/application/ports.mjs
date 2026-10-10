@@ -248,6 +248,8 @@ export class Refused extends Error {
  *   changeEmergencyContact(personId, { name?, phone? })  — only what is given
  *   changeAffiliation(personId, { paidUntil?, status? }) — their current affiliations
  *   endAffiliation(id, on)
+ *   recordHeldGrade({ personId, gradeId, awardedOn, organisationId, note })  — a grade already held, recorded as such
+ *   rollOf(organisationId)                  — who is on the organisation's roll now, in the shape the import planner compares
  */
 export const PERSON_REGISTER = {
   name: 'PersonRegister',
