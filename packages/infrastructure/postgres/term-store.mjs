@@ -110,4 +110,30 @@ export class PostgresTermStore extends PostgresStore {
     await this.db.query(`insert into audit_log (account_id, organisation_id, action, entity, entity_id, after) values ($1,$2,$3,$4,$5,$6)`,
       [actorId, organisationId, action, entity, entityId, JSON.stringify(after)]);
   }
+
+  // --- the daily run -------------------------------------------------------
+
+  federationsForCalendars() {
+    return this.rows(`select id, name, country_code, settings, timezone from organisation where parent_id is null and status = 'active' and country_code is not null`);
+  }
+
+  async loadedYears(organisationId) { return (await this.rows('select distinct year from school_term where organisation_id = $1', [organisationId])).map((x) => x.year); }
+
+  activeClubs() { return this.rows(`select * from organisation where type = 'club' and status = 'active'`); }
+
+
+  async offerMade(termId, clubId) { return !!await this.one('select 1 as x from term_offer where term_id = $1 and organisation_id = $2', [termId, clubId]); }
+
+  async familiesToOffer({ previousTermId, nextTermId, clubId }) {
+    const kids = await this.rows(`select p.first_name, p.email::text as email,
+        coalesce((select json_agg(g.email::text) from guardian_link gl join person g on g.id = gl.guardian_id where gl.child_id = p.id and gl.ended_on is null and g.email is not null and (gl.is_main_contact or gl.also_copy or not exists (select 1 from guardian_link m where m.child_id = p.id and m.ended_on is null and m.is_main_contact))), '[]'::json) as guardians
+      from term_enrolment e join person p on p.id = e.person_id
+      where e.term_id = $1 and e.organisation_id = $2 and e.status = 'enrolled'
+        and not exists (select 1 from term_enrolment n where n.term_id = $3 and n.person_id = p.id)
+        and exists (select 1 from affiliation a where a.person_id = p.id and a.organisation_id = $2 and a.status = 'active' and a.ends is null)`,
+      [previousTermId, clubId, nextTermId]);
+    return kids.map((k) => ({ firstName: k.first_name, email: k.email, guardians: k.guardians }));
+  }
+
+  async recordOffer(termId, clubId) { await this.db.query('insert into term_offer (term_id, organisation_id) values ($1,$2) on conflict do nothing', [termId, clubId]); }
 }

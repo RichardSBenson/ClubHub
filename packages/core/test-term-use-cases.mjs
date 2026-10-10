@@ -56,5 +56,27 @@ console.log('\nWithdrawing');
 await refuses('once it has started, ask the club', () => new WithdrawFromTerm(deps(store({ today: '2026-10-12' }))).execute({ actorId: 'm', personId: 'kid', termId: 't1' }), Refused, 'has started');
 await refuses('not enrolled', () => new WithdrawFromTerm(deps(store({ toWithdraw: null }))).execute({ actorId: 'm', personId: 'kid', termId: 't1' }), Missing);
 await refuses('a stranger may not', () => new WithdrawFromTerm(deps(store(), { how: async () => null })).execute({ actorId: 'm', personId: 'kid', termId: 't1' }), NotPermitted);
+
+console.log('\nThe daily run');
+{
+  const { RunDailyTermWork } = await import('./application/terms.mjs');
+  const T1 = { id: 't1', name: 'Term 1', starts: '2026-02-02', ends: '2026-04-10' }, T2 = { id: 't2', name: 'Term 2', starts: '2026-10-20', ends: '2026-12-10' };
+  const run = async ({ offered = false, families = [{ firstName: 'Mia', email: 'mia@x.nz', guardians: ['mum@x.nz'] }, { firstName: 'Joe', email: 'joe@x.nz', guardians: ['mum@x.nz'] }, { firstName: 'Ana', email: 'ana@x.nz', guardians: [] }], auto } = {}) => {
+    const log = { recorded: [], loaded: [], mail: [] };
+    const st = { async federationsForCalendars() { return [{ id: 'f', name: 'Fed', country_code: 'ZZ', settings: auto === false ? { terms: { auto: false } } : {}, timezone: 'UTC' }]; },
+      async loadedYears() { return [2026]; }, async activeClubs() { return [{ id: 'c', name: 'Taupo', timezone: 'UTC' }]; }, async todayAt() { return '2026-10-01'; },
+      async effectiveTerms(c, y) { return { terms: y === 2026 ? [T1, T2] : [] }; }, async offerMade() { return offered; },
+      async familiesToOffer() { return families; }, async recordOffer(t, c) { log.recorded.push([t, c]); } };
+    const report = await new RunDailyTermWork({ store: st, loadBuiltIn: async (o, y) => log.loaded.push([o, y]) })
+      .execute({ origin: 'https://x', mailClub: async (club, to, subject, text) => { log.mail.push({ to, text }); return true; } });
+    return { report, log };
+  };
+  const { report, log } = await run();
+  ok('offers once, recorded', log.recorded.length === 1 && log.recorded[0][0] === 't2');
+  ok('one email per address, siblings together', report.offered === 2 && log.mail.find((m) => m.to === 'mum@x.nz').text.includes('Mia and Joe'));
+  ok('no guardian: the child themself', log.mail.some((m) => m.to === 'ana@x.nz'));
+  ok('includes the enrol link', log.mail[0].text.includes('https://x/me/terms'));
+  ok('already offered: nothing', (await run({ offered: true })).report.offered === 0);
+}
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

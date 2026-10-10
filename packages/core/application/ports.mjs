@@ -467,3 +467,19 @@ export const SETTINGS_STORE = {
   name: 'SettingsStore',
   methods: ['atomically', 'settingsOf', 'putSetting', 'removeSetting', 'assetOwner', 'authoredPages', 'clubRow', 'updateClub', 'clubOverview', 'audit'],
 };
+
+/**
+ * What the daily term run needs to read and record. (The Postgres term store satisfies this as well as TERM_STORE.)
+ *   federationsForCalendars()              — [{ id, name, country_code, settings, timezone }] active top-level organisations with a country
+ *   loadedYears(organisationId)            — the years that organisation already has terms for
+ *   activeClubs()                          — active club rows
+ *   todayAt(organisation)                  — "YYYY-MM-DD" where that organisation is now
+ *   effectiveTerms(organisationId, year)   — { terms } its own, or the nearest ancestor's
+ *   offerMade(termId, clubId)              — has this term already been offered by this club?
+ *   familiesToOffer({ previousTermId, nextTermId, clubId }) — [{ firstName, email, guardians: [email] }] children enrolled last term, still active, not yet in the next
+ *   recordOffer(termId, clubId)
+ */
+export const TERM_OFFER_STORE = {
+  name: 'TermOfferStore',
+  methods: ['federationsForCalendars', 'loadedYears', 'activeClubs', 'todayAt', 'effectiveTerms', 'offerMade', 'familiesToOffer', 'recordOffer'],
+};

@@ -10,11 +10,11 @@ import { DEFAULT_TIMEZONE } from '../../core/domain/defaults.mjs';
 import { region, setRegion, setEventTypes, setWords } from '../../infrastructure/region-context.mjs';
 import { readTheme } from '../../site/theme.mjs';
 import { destinations, problemsWithNavigation } from '../../content/navigation.mjs';
-import { midTermOf, builtInFor, builtInYears, yearToOffer, termState, holidays as termHolidays, inHoliday, offersDue, CALENDARS } from '../../core/domain/terms.mjs';
+import { midTermOf, builtInFor, termState, holidays as termHolidays, inHoliday, CALENDARS } from '../../core/domain/terms.mjs';
 import { MANAGE, REGISTER } from '../../core/domain/access.mjs';
 import { resolveRegion, problemsWithRegion } from '../../core/domain/region.mjs';
 import { resolveEventTypes, problemsWithEventTypes } from '../../core/domain/event-types.mjs';
-import { LoadBuiltInTerms, SaveTerm, RemoveTerm, SetMidTermRule, OfferedTerms, EnrolInTerm, WithdrawFromTerm } from '../../core/application/terms.mjs';
+import { LoadBuiltInTerms, SaveTerm, RemoveTerm, SetMidTermRule, OfferedTerms, RunDailyTermWork, EnrolInTerm, WithdrawFromTerm } from '../../core/application/terms.mjs';
 import { PostgresTermStore } from '../../infrastructure/postgres/term-store.mjs';
 import { ViewClubPage, SaveClubPage, RequestClubPage, TakeDownClubPage, DecideClubPage, ClubPagesBeneath } from '../../core/application/club-pages.mjs';
 import { PostgresClubPageStore } from '../../infrastructure/postgres/club-page-store.mjs';
@@ -354,6 +354,7 @@ const loadBuiltInTerms = new LoadBuiltInTerms(termDeps);
 const saveTerm = new SaveTerm(termDeps);
 const removeTerm = new RemoveTerm(termDeps);
 const setMidTermRule = new SetMidTermRule(termDeps);
+const runDailyTermWork = new RunDailyTermWork({ store: termDeps.store, loadBuiltIn: (orgId, year) => loadBuiltInTerms.execute({ actorId: null, organisationId: orgId, year, system: true }) });
 const offeredTerms = new OfferedTerms(termDeps);
 const enrolInTerm = new EnrolInTerm(termDeps);
 const withdrawFromTerm = new WithdrawFromTerm(termDeps);
@@ -406,44 +407,7 @@ export const terms = {
   withdraw: (actor, personId, termId) => speakingForThisLayer(() => withdrawFromTerm.execute({ actorId: actor, personId, termId })),
 
   /** Daily: load each country's next calendar where it is known, and offer the next term to families. */
-  async run({ messenger, baseFrom, origin }) {
-    const report = { loaded: [], offered: 0 };
-    const roots = await q(`select id, name, country_code, settings from organisation where parent_id is null and status = 'active' and country_code is not null`);
-    for (const r of roots) {
-      if (r.settings?.terms?.auto === false) continue;
-      const today = await todayAt({ timezone: (await one('select timezone from organisation where id=$1', [r.id])).timezone });
-      const loaded = (await q('select distinct year from school_term where organisation_id = $1', [r.id])).map((x) => x.year);
-      const year = yearToOffer(loaded, today);
-      if (year && builtInYears(r.country_code).includes(year)) {
-        try { await this.loadBuiltIn(null, r.id, year, { quiet: true }); report.loaded.push(`${r.name} ${year}`); } catch { /* already there */ }
-      }
-    }
-    const clubs = await q(`select * from organisation where type = 'club' and status = 'active'`);
-    for (const club of clubs) {
-      const today = await todayAt(club);
-      const y = Number(today.slice(0, 4));
-      const all = [...(await effectiveTerms(club.id, y)).terms, ...(await effectiveTerms(club.id, y + 1)).terms];
-      const due = offersDue(all, today);
-      if (!due) continue;
-      if (await one('select 1 as x from term_offer where term_id = $1 and organisation_id = $2', [due.next.id, club.id])) continue;
-      const kids = await q(`select p.id, p.first_name, p.email::text as email,
-          coalesce((select json_agg(g.email::text) from guardian_link gl join person g on g.id = gl.guardian_id where gl.child_id = p.id and gl.ended_on is null and g.email is not null and (gl.is_main_contact or gl.also_copy or not exists (select 1 from guardian_link m where m.child_id = p.id and m.ended_on is null and m.is_main_contact))), '[]'::json) as guardians
-        from term_enrolment e join person p on p.id = e.person_id
-        where e.term_id = $1 and e.organisation_id = $2 and e.status = 'enrolled'
-          and not exists (select 1 from term_enrolment n where n.term_id = $3 and n.person_id = p.id)
-          and exists (select 1 from affiliation a where a.person_id = p.id and a.organisation_id = $2 and a.status = 'active' and a.ends is null)`,
-        [due.prev.id, club.id, due.next.id]);
-      const byAddress = new Map();
-      for (const k of kids) for (const addr of (k.guardians.length ? k.guardians : [k.email]).filter(Boolean)) byAddress.set(addr, [...(byAddress.get(addr) ?? []), k.first_name]);
-      await pool.query('insert into term_offer (term_id, organisation_id) values ($1,$2) on conflict do nothing', [due.next.id, club.id]);
-      for (const [to, names] of byAddress) {
-        const sent = await clubMail(club, { messenger, baseFrom }, to, `${due.next.name} enrolment is open at ${club.name}`,
-          `Hello,\n\nEnrolment for ${due.next.name} (${due.next.starts} to ${due.next.ends}) is open for ${names.join(' and ')}.\nEnrol online: ${origin}/me/terms\n\nSee you in class.`);
-        if (sent) report.offered++;
-      }
-    }
-    return report;
-  },
+  run: ({ messenger, baseFrom, origin }) => runDailyTermWork.execute({ origin, mailClub: (club, to, subject, text) => clubMail(club, { messenger, baseFrom }, to, subject, text) }),
 };
 
 // ---------------------------------------------------------------------------

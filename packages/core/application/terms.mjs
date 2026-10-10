@@ -8,9 +8,9 @@
 
 import { feeFor } from '../domain/membership.mjs';
 import { ageOn } from '../domain/people.mjs';
-import { builtInFor, termState, mayEnrol, termPrice, readMidTerm, problemsWithMidTerm, problemsWithTerm, midTermOf } from '../domain/terms.mjs';
+import { builtInFor, builtInYears, yearToOffer, offersDue, termState, mayEnrol, termPrice, readMidTerm, problemsWithMidTerm, problemsWithTerm, midTermOf } from '../domain/terms.mjs';
 import { MANAGE } from '../domain/access.mjs';
-import { requirePort, Refused, NotPermitted, Missing, AUTHORISATION, TERM_STORE } from './ports.mjs';
+import { requirePort, Refused, NotPermitted, Missing, AUTHORISATION, TERM_STORE, TERM_OFFER_STORE } from './ports.mjs';
 
 class TermUseCase {
   /**
@@ -161,5 +161,47 @@ export class WithdrawFromTerm extends TermUseCase {
       await store.audit({ actorId, organisationId: e.organisation_id, action: 'term_withdrawn', entity: 'term_enrolment', entityId: e.id, after: { paid: e.paid } });
       return { paid: e.paid };
     });
+  }
+}
+
+/**
+ * The daily job: load each country's next calendar where it is known, and offer the next term to the families of children
+ * who were enrolled in the last one. It acts for nobody. A message that cannot be sent never undoes the offer.
+ *
+ * `loadBuiltIn(organisationId, year)` loads one calendar. Each run is handed `mailClub(club, to, subject, text)`, which returns whether it was sent.
+ */
+export class RunDailyTermWork {
+  constructor({ store, loadBuiltIn }) {
+    this.store = requirePort(store, TERM_OFFER_STORE);
+    this.loadBuiltIn = loadBuiltIn;
+  }
+
+  async execute({ origin, mailClub }) {
+    const report = { loaded: [], offered: 0 };
+    for (const r of await this.store.federationsForCalendars()) {
+      if (r.settings?.terms?.auto === false) continue;
+      const today = await this.store.todayAt(r);
+      const year = yearToOffer(await this.store.loadedYears(r.id), today);
+      if (year && builtInYears(r.country_code).includes(year)) {
+        try { await this.loadBuiltIn(r.id, year); report.loaded.push(`${r.name} ${year}`); } catch { /* already there */ }
+      }
+    }
+    for (const club of await this.store.activeClubs()) {
+      const today = await this.store.todayAt(club);
+      const y = Number(today.slice(0, 4));
+      const all = [...(await this.store.effectiveTerms(club.id, y)).terms, ...(await this.store.effectiveTerms(club.id, y + 1)).terms];
+      const due = offersDue(all, today);
+      if (!due || await this.store.offerMade(due.next.id, club.id)) continue;
+      const byAddress = new Map();
+      for (const k of await this.store.familiesToOffer({ previousTermId: due.prev.id, nextTermId: due.next.id, clubId: club.id }))
+        for (const addr of (k.guardians.length ? k.guardians : [k.email]).filter(Boolean)) byAddress.set(addr, [...(byAddress.get(addr) ?? []), k.firstName]);
+      await this.store.recordOffer(due.next.id, club.id);
+      for (const [to, names] of byAddress) {
+        const sent = await mailClub(club, to, `${due.next.name} enrolment is open at ${club.name}`,
+          `Hello,\n\nEnrolment for ${due.next.name} (${due.next.starts} to ${due.next.ends}) is open for ${names.join(' and ')}.\nEnrol online: ${origin}/me/terms\n\nSee you in class.`);
+        if (sent) report.offered++;
+      }
+    }
+    return report;
   }
 }
