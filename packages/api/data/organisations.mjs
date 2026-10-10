@@ -19,8 +19,12 @@ import { builtInFor, builtInYears, yearToOffer, termState, mayEnrol, holidays as
 import { MANAGE, REGISTER } from '../../core/domain/access.mjs';
 import { resolveRegion, problemsWithRegion } from '../../core/domain/region.mjs';
 import { resolveEventTypes, problemsWithEventTypes } from '../../core/domain/event-types.mjs';
+import { AddClub } from '../../core/application/add-club.mjs';
+import { Refused, NotPermitted, Missing } from '../../core/application/ports.mjs';
+import { PostgresOrganisationRegister } from '../../infrastructure/postgres/organisation-register.mjs';
+import { PostgresAuthorisation } from '../../infrastructure/postgres/repositories.mjs';
 import { family, people } from './people.mjs';
-import { Invalid, NotFound, PERSON_COLUMNS, WRITE_PAGES, ageOnDate, assertRole, clubMail, clubOnly, feeRows, one, q, todayAt } from './shared.mjs';
+import { Forbidden, Invalid, NotFound, PERSON_COLUMNS, WRITE_PAGES, ageOnDate, assertRole, clubMail, clubOnly, feeRows, one, q, todayAt } from './shared.mjs';
 
 // ---------------------------------------------------------------------------
 // organisations
@@ -244,6 +248,12 @@ export const navigation = {
 // adding a club
 // ---------------------------------------------------------------------------
 
+const addClub = new AddClub({
+  organisations: new PostgresOrganisationRegister(pool), auth: new PostgresAuthorisation(pool),
+  enrol: (actor, fields) => people.enrol(actor, fields),
+  grantAccess: (actor, personId, fields) => people.grantAccess(actor, personId, fields),
+});
+
 export const clubs = {
   /** Every club beneath this organisation, with what a federation wants to see. */
   async beneath(actor, orgId) {
@@ -275,75 +285,12 @@ export const clubs = {
    * club with no way in is the failure this exists to prevent.
    */
   async create(actor, parentId, input) {
-    await assertRole(actor, parentId, MANAGE);
-    const parent = await one('select * from organisation where id = $1', [parentId]);
-    if (!parent) throw new NotFound('Organisation');
-    if (parent.type === 'club') throw new Invalid('A club cannot have clubs beneath it.');
-
-    const problems = problemsWithNewClub(input);
-    if (problems.length) throw new Invalid(problems.join(' '));
-
-    const slug = input.slug ?? clubSlugFrom(input.name);
-    // Slugs are looked up on their own in /o/<slug>, so unique means unique
-    // everywhere, not just beneath this parent.
-    if (await one('select 1 from organisation where slug = $1', [slug]))
-      throw new Invalid(`There is already an organisation at "${slug}". Choose a different web address.`);
-
-    if (hasAdministrator(input)) {
-      const taken = await one('select person_id from account where email = $1',
-        [input.adminEmail]);
-      if (taken)
-        throw new Invalid(`${input.adminEmail} already has an account. Add the club first, `
-          + 'then give that person access to it from their own record.');
+    try { return await addClub.execute({ actorId: actor, parentId, input }); } catch (e) {
+      if (e instanceof NotPermitted) throw new Forbidden();
+      if (e instanceof Refused) throw new Invalid(e.message);
+      if (e instanceof Missing) throw new NotFound(e.message);
+      throw e;
     }
-
-    const client = await pool.connect();
-    let club;
-    try {
-      await client.query('begin');
-      ({ rows: [club] } = await client.query(`
-        insert into organisation (parent_id, type, name, short_name, slug, path,
-                                  country_code, timezone, status)
-        values ($1,'club',$2,null,$3,($4 || '.' || $5)::ltree,$6,$7,'active')
-        returning *`,
-        [parent.id, input.name, slug, parent.path, slug.replace(/-/g, '_'),
-         parent.country_code, parent.timezone]));
-
-      if (input.city)
-        await client.query(`
-          insert into club_profile (organisation_id, city) values ($1,$2)`,
-          [club.id, input.city]);
-
-      await client.query(`
-        insert into audit_log (account_id, organisation_id, action, entity,
-                               entity_id, after)
-        values ($1,$2,'club_added','organisation',$3,$4::jsonb)`,
-        [actor, parent.id, club.id,
-         JSON.stringify({ name: club.name, slug, parent: parent.name })]);
-      await client.query('commit');
-    } catch (e) {
-      await client.query('rollback'); throw e;
-    } finally { client.release(); }
-
-    // The administrator goes through the same two functions a registrar uses
-    // for anybody, so there is one way to enrol a person and one way to give
-    // them access, and both are already tested and audited.
-    let admin = null;
-    if (hasAdministrator(input)) {
-      try {
-        const person = await people.enrol(actor, {
-          organisationId: club.id, firstName: input.adminFirst,
-          lastName: input.adminLast, email: input.adminEmail, role: 'member' });
-        admin = await people.grantAccess(actor, person.id,
-          { role: 'administrator', email: input.adminEmail, organisationId: club.id });
-      } catch (e) {
-        // The club exists; say so, and say what did not happen, rather than
-        // leaving a half-finished club behind a generic error.
-        e.club = club;
-        throw e;
-      }
-    }
-    return { club, admin };
   },
 };
 

@@ -388,3 +388,16 @@ export const INSTRUCTOR_PROFILE_STORE = {
   methods: ['atomically', 'personForReadiness', 'settingsOf', 'todayAt', 'instructorQualifications', 'awardsOf', 'instructorRows',
             'membersWithin', 'nameOf', 'profileOf', 'personForProfile', 'saveProfile', 'removeProfile', 'siteStatus', 'profilesFor', 'audit'],
 };
+
+/**
+ * The register of organisations, as adding a club needs it:
+ *   organisationById(id)                    — the row (path, type, name, country_code, timezone) | null
+ *   slugTaken(slug)                         — slugs are looked up on their own in /o/<slug>, so unique means unique everywhere
+ *   emailHasAccount(email)
+ *   addClub({ parent, name, slug, city, addedBy }) — creates the club (active, inheriting country and timezone), its profile
+ *                                             row when a city is given, and the audit entry, all together; returns the club
+ */
+export const ORGANISATION_REGISTER = {
+  name: 'OrganisationRegister',
+  methods: ['organisationById', 'slugTaken', 'emailHasAccount', 'addClub'],
+};
