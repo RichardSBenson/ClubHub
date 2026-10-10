@@ -8,17 +8,18 @@
 import { pool } from '../../infrastructure/postgres/pool.mjs';
 import { region, words } from '../../infrastructure/region-context.mjs';
 const clubWord = () => words().club.toLowerCase();
-import { payeeFor, problemsWithPaymentRequest, problemsWithPayment, KINDS as PAY_KINDS } from '../../core/domain/payments.mjs';
 import { isTestProvider } from '../../infrastructure/payments/providers.mjs';
-import { dueForReminder, reminderText, PERIODS, extendedUntil, standing, feeFor, problemsWithFee, problemsWithExemption, MANUAL_METHODS, whyNotMethod, mayRecordByHand } from '../../core/domain/membership.mjs';
+import { dueForReminder, reminderText, PERIODS, standing, feeFor, problemsWithFee, problemsWithExemption, whyNotMethod } from '../../core/domain/membership.mjs';
 import { centsFrom } from '../../core/domain/payments.mjs';
 import { chargeDue, afterFailure, problemsWithSetup, cardLabel, METHODS as AUTO_METHODS, PERIOD_CHOICES, CHARGE_LEAD_DAYS, MAX_FAILURES } from '../../core/domain/autorenew.mjs';
 import { readBasket, readNote, mayMoveOrder, ORDER_STATUSES } from '../../core/domain/shop.mjs';
+import { SettlePayment, ListPaymentsFor, ListOwed, ViewPayment, PayPayment, CompleteTestPayment, PaymentsReceived, RecordManualPayment, RequestPayment, CancelPaymentRequest, renewMembership } from '../../core/application/payments.mjs';
+import { PostgresPaymentLedger } from '../../infrastructure/postgres/payment-ledger.mjs';
+import { PostgresAuthorisation } from '../../infrastructure/postgres/repositories.mjs';
 import { MANAGE, REGISTER } from '../../core/domain/access.mjs';
 import { messages, push, webhooks } from './messaging.mjs';
-import { clubs } from './organisations.mjs';
-import { family, people } from './people.mjs';
-import { Forbidden, Invalid, NotFound, assertRole, clubOnly, feeRows, one, q, qualToday } from './shared.mjs';
+import { family } from './people.mjs';
+import { speakingForThisLayer, Invalid, NotFound, assertRole, clubOnly, feeRows, one, q, qualToday } from './shared.mjs';
 import { referrals } from './visitors.mjs';
 
 export const billing = {
@@ -71,238 +72,50 @@ export const billing = {
 // A club sees what it has been paid; it does not see another club's.
 // ---------------------------------------------------------------------------
 
-const PAYMENT_SELECT = `
-  select py.id, py.organisation_id, py.person_id, py.amount_cents, py.currency, py.status,
-         py.method, py.detail, py.provider, py.provider_ref, py.created_at, py.settled_at, py.receipt_no,
-         po.name as payee_name,
-         nullif(trim(concat_ws(' ', p.first_name, p.last_name)), '') as person_name,
-         p.display_number,
-         (select coalesce(json_agg(json_build_object('kind', l.kind, 'description', l.description,
-                          'amount_cents', l.amount_cents) order by l.id), '[]'::json)
-            from payment_line l where l.payment_id = py.id) as lines
-  from payment py
-  join organisation po on po.id = py.organisation_id
-  left join person p on p.id = py.person_id`;
+const ledger = new PostgresPaymentLedger(pool);
+const paymentDeps = {
+  ledger, auth: new PostgresAuthorisation(pool),
+  mayPayFor: (actor, personId) => family.mayPayFor(actor, personId),
+  peopleOf: async (actor) => { const { self, dependants } = await family.mine(actor); return [self, ...dependants].filter(Boolean); },
+  announce: (orgId, event, data) => webhooks.emitNow(orgId, event, data),
+  afterMemberJoined: async (personId) => { const id = await ledger.referralAwaitingReward(personId); if (id) await referrals.qualify(id); },
+  currency: () => region().currency, clubWord, isTestProvider,
+};
+const settlePayment = new SettlePayment(paymentDeps);
+const settle = (paymentId, ok, detail, { actor = null, ref = undefined, manual = null } = {}) =>
+  settlePayment.execute({ paymentId, ok, detail, actorId: actor, ref, manual });
+const settling = { ...paymentDeps, settle: (x) => settlePayment.execute(x) };
+const recordManualPayment = new RecordManualPayment(settling);
+const viewPayment = new ViewPayment(paymentDeps);
+const listPaymentsFor = new ListPaymentsFor(paymentDeps);
+const listOwed = new ListOwed(paymentDeps);
+const payPayment = new PayPayment(settling);
+const completeTestPayment = new CompleteTestPayment(settling);
+const paymentsReceived = new PaymentsReceived(paymentDeps);
+const requestPayment = new RequestPayment({ ...paymentDeps, recordManual: (x) => recordManualPayment.execute(x) });
+const cancelPaymentRequest = new CancelPaymentRequest(paymentDeps);
 
-/** A receipt number for cash: R-2026-0007. One counter per organisation per year. */
-async function nextReceipt(orgId) {
-  const r = await one(`
-    insert into receipt_counter (organisation_id, year, last_number)
-    values ($1, extract(year from now())::int, 1)
-    on conflict (organisation_id, year) do update set last_number = receipt_counter.last_number + 1
-    returning year, last_number`, [orgId]);
-  return `R-${r.year}-${String(r.last_number).padStart(4, '0')}`;
-}
-
-/**
- * Carry a membership on. From the later of today and where it already runs to,
- * so paying early loses nothing and paying late is not backdated.
- */
-async function renewMembership(affiliationId, months) {
-  const a = await one(`select a.id, a.paid_until::text as paid_until, a.status,
-      to_char((now() at time zone o.timezone)::date, 'YYYY-MM-DD') as today
-    from affiliation a join organisation o on o.id = a.organisation_id where a.id = $1`, [affiliationId]);
-  if (!a) return null;
-  const until = extendedUntil(a.paid_until, a.today, months);
-  await pool.query(`update affiliation set paid_until = $2::date,
-      status = case when status in ('lapsed','trial') then 'active' else status end where id = $1`,
-    [affiliationId, until]);
-  // Somebody's first payment makes them a member: a number, and the trial and any referral follow.
-  if (['trial', 'lapsed'].includes(a.status)) await becameMember(affiliationId);
-  return until;
-}
-
-async function settle(paymentId, ok, detail, { actor = null, ref = undefined, manual = null } = {}) {
-  const row = await one(`
-    update payment set status = $2, detail = $3, updated_at = now(),
-           settled_at = case when $2 = 'succeeded' then now() else settled_at end,
-           provider_ref = coalesce($4, provider_ref),
-           method = coalesce($5, method), taken_by = coalesce($6, taken_by),
-           receipt_no = coalesce($7, receipt_no), provider = coalesce($8, provider)
-     where id = $1 and status in ('awaiting','pending','failed')
-     returning organisation_id, person_id, amount_cents, receipt_no`,
-    [paymentId, ok ? 'succeeded' : 'failed', detail, ref ?? null,
-     manual?.method ?? null, manual ? actor : null, manual?.receiptNo ?? null, manual ? 'manual' : null]);
-  if (!row) return false;
-  let renewed = [];
-  if (ok) {
-    await pool.query(`update event_entry set paid = true, updated_at = now()
-      where id in (select event_entry_id from payment_line where payment_id = $1)`, [paymentId]);
-    await pool.query(`update term_enrolment set paid = true
-      where id in (select term_enrolment_id from payment_line where payment_id = $1 and term_enrolment_id is not null)`, [paymentId]);
-    const lines = await q(`select renews_affiliation_id as id, renews_months as months
-      from payment_line where payment_id = $1 and renews_affiliation_id is not null`, [paymentId]);
-    for (const l of lines) renewed.push(await renewMembership(l.id, l.months));
-  }
-  await pool.query(`
-    insert into audit_log (account_id, organisation_id, action, entity, entity_id, before, after)
-    values ($1,$2,$3,'payment',$4,null,$5)`,
-    [actor, row.organisation_id,
-     manual ? 'payment_recorded' : ok ? 'payment_made' : 'payment_failed', paymentId,
-     JSON.stringify({ amountCents: row.amount_cents, personId: row.person_id,
-       ...(manual ? { method: manual.method, receipt: row.receipt_no } : {}),
-       ...(renewed.length ? { paidUntil: renewed[0] } : {}) })]);
-  if (ok) await webhooks.emitNow(row.organisation_id, 'payment.succeeded', { payment_id: paymentId, person_id: row.person_id, amount_cents: row.amount_cents });
-  return true;
-}
+/** Carry a membership on without a payment (see renewals.carryOn). */
+const renewMembershipNow = async (affiliationId, months) => {
+  const r = await ledger.atomically((tx) => renewMembership(tx, affiliationId, months));
+  if (r?.becameMember) await paymentDeps.afterMemberJoined(r.becameMember).catch(() => {});
+  return r?.until ?? null;
+};
 
 export const payments = {
   /** What one person owes and has paid. Authority is theirs or their guardian's. */
-  async forPerson(actor, personId) {
-    if (!(await family.mayPayFor(actor, personId))) throw new Forbidden();
-    return q(`${PAYMENT_SELECT} where py.person_id = $1 and py.status <> 'void'
-      order by (py.status in ('pending','failed','awaiting')) desc, py.created_at desc`, [personId]);
-  },
-
+  forPerson: (actor, personId) => speakingForThisLayer(() => listPaymentsFor.execute({ actorId: actor, personId })),
   /** Everything the signed-in person and their children owe, for the home screen. */
-  async owedBy(actor) {
-    const { self, dependants } = await family.mine(actor);
-    const ids = [];
-    for (const x of [self, ...dependants].filter(Boolean)) if (await family.mayPayFor(actor, x.id)) ids.push(x.id);
-    if (!ids.length) return [];
-    return q(`${PAYMENT_SELECT} where py.person_id = any($1::uuid[])
-      and py.status in ('pending','failed','awaiting') order by py.created_at`, [ids]);
-  },
-
-  async get(actor, paymentId) {
-    const row = await one(`${PAYMENT_SELECT} where py.id = $1`, [paymentId]);
-    if (!row || !row.person_id) throw new NotFound('Payment');
-    if (!(await family.mayPayFor(actor, row.person_id))) throw new Forbidden();
-    return row;
-  },
-
-  /**
-   * Pay. The row is claimed first (pending/failed → awaiting), so pressing the
-   * button twice reaches the provider once.
-   */
-  async pay(actor, paymentId, input, { provider }) {
-    const row = await payments.get(actor, paymentId);
-    const problems = problemsWithPayment(input);
-    if (problems.length) throw new Invalid(problems.join(' '));
-
-    const claimed = await one(`update payment set status='awaiting', method=$2, paid_by=$3,
-        provider=$4, updated_at=now()
-      where id=$1 and status in ('pending','failed') returning id`,
-      [paymentId, input.method, actor, provider.name]);
-    if (!claimed) throw new Invalid('This has already been paid, or is being paid.');
-
-    let result;
-    try {
-      result = await provider.start({ amountCents: row.amount_cents, currency: row.currency,
-        method: input.method, card: input.card, reference: paymentId });
-    } catch (e) {
-      await settle(paymentId, false, `The payment provider could not be reached: ${e.message}`.slice(0, 250), { actor });
-      throw new Invalid('The payment could not be started. Nothing was charged — try again.');
-    }
-    if (result.status === 'succeeded') await settle(paymentId, true, result.detail, { actor, ref: result.ref });
-    else if (result.status === 'failed') await settle(paymentId, false, result.detail, { actor, ref: result.ref });
-    else await pool.query(`update payment set provider_ref=$2, detail=$3, updated_at=now() where id=$1`,
-      [paymentId, result.ref, result.detail]);
-    return payments.get(actor, paymentId);
-  },
-
+  owedBy: (actor) => speakingForThisLayer(() => listOwed.execute({ actorId: actor })),
+  get: (actor, paymentId) => speakingForThisLayer(() => viewPayment.execute({ actorId: actor, paymentId })),
+  pay: (actor, paymentId, input, { provider }) => speakingForThisLayer(() => payPayment.execute({ actorId: actor, paymentId, input, provider })),
   /** Test provider only: stands in for the bank telling us the money arrived. */
-  async completeTest(actor, paymentId, ok, { provider }) {
-    if (!isTestProvider(provider)) throw new Forbidden('This is only available with test payments.');
-    const row = await payments.get(actor, paymentId);
-    if (row.status !== 'awaiting') throw new Invalid('Nothing is waiting on this payment.');
-    await settle(paymentId, ok, ok ? 'Confirmed by the test bank.' : 'Refused by the test bank.', { actor });
-    return payments.get(actor, paymentId);
-  },
-
+  completeTest: (actor, paymentId, ok, { provider }) => speakingForThisLayer(() => completeTestPayment.execute({ actorId: actor, paymentId, ok, provider })),
   /** What this organisation has been paid, and what is owed to it. */
-  async receivedBy(actor, orgId, { limit = 100 } = {}) {
-    await assertRole(actor, orgId, MANAGE);
-    const rows = await q(`${PAYMENT_SELECT} where py.organisation_id = $1 and py.status <> 'void'
-      order by py.created_at desc limit $2`, [orgId, limit]);
-    const totals = await q(`
-      select l.kind, py.status, count(*)::int as n, sum(l.amount_cents)::int as cents
-      from payment py join payment_line l on l.payment_id = py.id
-      where py.organisation_id = $1 and py.status in ('succeeded','pending','awaiting')
-      group by l.kind, py.status`, [orgId]);
-    const methods = await q(`select py.method, sum(py.amount_cents)::int as cents
-      from payment py where py.organisation_id = $1 and py.status = 'succeeded' and py.method is not null
-      group by py.method order by cents desc`, [orgId]);
-    return { rows, totals, methods };
-  },
-
-  /**
-   * A club asks one of its members for money. The payee is worked out from
-   * what it is for: a kyu grading or a uniform is the club's, a black belt
-   * grading is the federation's.
-   */
-  async request(actor, orgId, input) {
-    await assertRole(actor, orgId, REGISTER);
-    const problems = problemsWithPaymentRequest(input);
-    if (problems.length) throw new Invalid(problems.join(' '));
-
-    const org = await one('select * from organisation where id=$1', [orgId]);
-    const person = await one(`select id, first_name, last_name from person
-      where upper(display_number) = upper($1)`, [input.personNumber]);
-    const home = person && await one(`
-      select o.id from affiliation a join organisation o on o.id = a.organisation_id
-      where a.person_id = $1 and a.ends is null and a.status = 'active' and o.type = 'club'
-        and o.path <@ $2::ltree order by a.starts limit 1`, [person.id, org.path]);
-    if (!person || !home) throw new Invalid(`There is no member numbered ${input.personNumber} here.`);
-
-    const root = await one(`select id from organisation where parent_id is null and $1::ltree <@ path`, [org.path]);
-    let payeeId;
-    try { payeeId = payeeFor(input.kind, { clubId: home.id, federationId: root?.id }); }
-    catch (e) { throw new Invalid(e.message); }
-
-    if (input.received) {
-      if (whyNotMethod(input.received)) throw new Invalid(whyNotMethod(input.received));
-      const may = await one('select has_role_at($1,$2,$3) as ok', [actor, payeeId, REGISTER]);
-      if (!may?.ok) throw new Invalid(`This money belongs to the federation, so a ${clubWord()} cannot record it as received. Ask for it instead.`);
-    }
-    const description = input.description || PAY_KINDS[input.kind].label;
-    const client = await pool.connect();
-    try {
-      await client.query('begin');
-      const { rows: [pay] } = await client.query(`
-        insert into payment (organisation_id, person_id, amount_cents, currency, status, requested_by)
-        values ($1,$2,$3,$5,'pending',$4) returning *`,
-        [payeeId, person.id, input.amountCents, actor, region().currency]);
-      await client.query(`insert into payment_line (payment_id, kind, description, amount_cents)
-        values ($1,$2,$3,$4)`, [pay.id, input.kind, description, input.amountCents]);
-      await client.query(`
-        insert into audit_log (account_id, organisation_id, action, entity, entity_id, after)
-        values ($1,$2,'payment_requested','payment',$3,$4)`,
-        [actor, payeeId, pay.id, JSON.stringify({ kind: input.kind, amountCents: input.amountCents,
-          person: `${person.first_name} ${person.last_name}`, description })]);
-      await client.query('commit');
-      if (input.received) await payments.recordManual(actor, pay.id, input.received);
-      return pay;
-    } catch (e) { await client.query('rollback'); throw e; } finally { client.release(); }
-  },
-
-  /**
-   * The club has been handed the money — cash, or a transfer into its account.
-   * Only somebody who looks after the organisation being paid can say so, and
-   * it is numbered, attributed and in the history: a cash tin with no record is
-   * the thing treasurers lose sleep over.
-   */
-  async recordManual(actor, paymentId, method) {
-    if (whyNotMethod(method)) throw new Invalid(whyNotMethod(method));
-    const pay = await one('select organisation_id, status from payment where id=$1', [paymentId]);
-    if (!pay) throw new NotFound('Payment');
-    await assertRole(actor, pay.organisation_id, REGISTER);
-    if (!mayRecordByHand(pay.status)) throw new Invalid('This has already been dealt with.');
-    const receiptNo = await nextReceipt(pay.organisation_id);
-    const done = await settle(paymentId, true, `${MANUAL_METHODS[method]} received.`,
-      { actor, manual: { method, receiptNo } });
-    if (!done) throw new Invalid('This has already been dealt with.');
-    return one('select * from payment where id=$1', [paymentId]);
-  },
-
-  /** Take back a request nobody has paid. */
-  async cancel(actor, orgId, paymentId) {
-    await assertRole(actor, orgId, REGISTER);
-    const row = await one(`update payment set status='void', updated_at=now()
-      where id=$1 and organisation_id=$2 and status in ('pending','failed') returning id`,
-      [paymentId, orgId]);
-    if (!row) throw new NotFound('Payment');
-  },
+  receivedBy: (actor, orgId, { limit = 100 } = {}) => speakingForThisLayer(() => paymentsReceived.execute({ actorId: actor, organisationId: orgId, limit })),
+  request: (actor, orgId, input) => speakingForThisLayer(() => requestPayment.execute({ actorId: actor, organisationId: orgId, input })),
+  recordManual: (actor, paymentId, method) => speakingForThisLayer(() => recordManualPayment.execute({ actorId: actor, paymentId, method })),
+  cancel: (actor, orgId, paymentId) => speakingForThisLayer(() => cancelPaymentRequest.execute({ actorId: actor, organisationId: orgId, paymentId })),
 };
 
 export const fees = {
@@ -474,7 +287,7 @@ export const renewals = {
       where a.id=$1 and a.organisation_id=$2 and a.ends is null`, [affiliationId, orgId]);
     if (!a) throw new NotFound('Member');
     if (!a.fee_exempt) throw new Invalid('Only somebody who is not charged can be renewed without paying.');
-    const until = await renewMembership(affiliationId, 12);
+    const until = await renewMembershipNow(affiliationId, 12);
     await pool.query(`insert into audit_log (account_id, organisation_id, action, entity, entity_id, after)
       values ($1,$2,'membership_carried_on','person',$3,$4)`, [actor, orgId, a.person_id,
       JSON.stringify({ paidUntil: until })]);
@@ -682,34 +495,6 @@ export const reminders = {
 };
 
 /** The next number in the federation's own sequence. Inside the caller's transaction. */
-async function allocateNumber(client, orgId) {
-  const { rows: [fed] } = await client.query(`
-    select coalesce(f.short_name, f.slug) as prefix from organisation target
-    join organisation f on target.path <@ f.path and f.parent_id is null where target.id = $1`, [orgId]);
-  const prefix = (fed?.prefix ?? 'M').toUpperCase().replace(/[^A-Z]/g, '').slice(0, 5) || 'M';
-  const { rows: [seq] } = await client.query(`select coalesce(max(substring(display_number from '[0-9]+$')::int), 0) + 1 as next
-    from person where display_number like $1`, [`${prefix}-%`]);
-  return `${prefix}-${String(seq.next).padStart(4, '0')}`;
-}
-
-async function becameMember(affiliationId) {
-  const a = await one('select person_id, organisation_id from affiliation where id = $1', [affiliationId]);
-  if (!a) return;
-  const client = await pool.connect();
-  try {
-    await client.query('begin');
-    const { rows: [p] } = await client.query('select display_number from person where id = $1 for update', [a.person_id]);
-    if (p && !p.display_number)
-      await client.query('update person set display_number = $2 where id = $1', [a.person_id, await allocateNumber(client, a.organisation_id)]);
-    await client.query(`update member_trial set status = 'converted', converted_at = now()
-      where person_id = $1 and organisation_id = $2 and status <> 'converted'`, [a.person_id, a.organisation_id]);
-    await client.query(`update referral set status = 'member', converted_at = now() where referred_id = $1 and status = 'trial'`, [a.person_id]);
-    await client.query('commit');
-  } catch (e) { await client.query('rollback'); throw e; } finally { client.release(); }
-  const r = await one(`select id from referral where referred_id = $1 and status = 'member'`, [a.person_id]);
-  if (r) await referrals.qualify(r.id);
-}
-
 /**
  * The range a club offers: its own products, plus those of every organisation above it (the national range),
  * less what the club has hidden, at the club's own price where it set one. This is the ONLY query that decides what

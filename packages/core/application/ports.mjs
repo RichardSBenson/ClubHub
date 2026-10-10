@@ -483,3 +483,34 @@ export const TERM_OFFER_STORE = {
   name: 'TermOfferStore',
   methods: ['federationsForCalendars', 'loadedYears', 'activeClubs', 'todayAt', 'effectiveTerms', 'offerMade', 'familiesToOffer', 'recordOffer'],
 };
+
+/**
+ * Money owed and paid: payments, their lines, and what paying them sets in motion (an entry paid, a term place paid, a
+ * membership carried on, a first payment making someone a member). `atomically(work)` runs `work(store)` as one unit.
+ *   paymentsFor(personId) / owedFor(personIds) / paymentById(id) — payment rows with payee, person and lines
+ *   receivedBy(organisationId, limit)        — { rows, totals, methods }
+ *   claim({ paymentId, method, actorId, providerName }) — pending/failed → awaiting; false if somebody got there first
+ *   noteProgress(paymentId, ref, detail)
+ *   settle({ paymentId, ok, detail, ref, manual })      — the settled row { organisation_id, person_id, amount_cents, receipt_no } or null
+ *                                                         (manual: { method, receiptNo, actorId })
+ *   markFulfilled(paymentId)                 — entries and term places paid; returns [{ id, months }] memberships to carry on
+ *   affiliationForRenewal(id)                — { paid_until, status, today } or null
+ *   extendMembership(id, until)              — and a lapsed or trial member becomes active
+ *   personAndClubOf(affiliationId)           — { person_id, organisation_id } or null
+ *   numberOf(personId)                       — the member number (locks the person) / setNumber(personId, number)
+ *   federationShortNameFor(organisationId) / lastNumberIn(prefix)
+ *   convertTrial(personId, organisationId) / promoteReferral(personId)
+ *   referralAwaitingReward(personId)         — the referral id or null
+ *   nextReceipt(organisationId)              — { year, number }
+ *   voidUnpaid(organisationId, paymentId)    — true if a pending or failed request was taken back
+ *   organisationById(id) / personByNumber(number) / clubHomeOf(personId, path) / federationAbove(path)
+ *   createRequest({ payeeId, personId, amountCents, currency, actorId, kind, description }) — the payment row
+ *   audit({ actorId, organisationId, action, entityId, after })
+ */
+export const PAYMENT_LEDGER = {
+  name: 'PaymentLedger',
+  methods: ['atomically', 'paymentsFor', 'owedFor', 'paymentById', 'receivedBy', 'claim', 'noteProgress', 'settle', 'markFulfilled',
+    'affiliationForRenewal', 'extendMembership', 'personAndClubOf', 'numberOf', 'setNumber', 'federationShortNameFor', 'lastNumberIn',
+    'convertTrial', 'promoteReferral', 'referralAwaitingReward', 'nextReceipt', 'voidUnpaid', 'organisationById', 'personByNumber',
+    'clubHomeOf', 'federationAbove', 'createRequest', 'audit'],
+};
