@@ -295,3 +295,20 @@ export const SELF_SERVICE_READS = {
   name: 'SelfServiceReads',
   methods: ['selfOf', 'dependantsOf', 'feePayersOf', 'personIdOf'],
 };
+
+/**
+ * The federation's declaration and who has signed it:
+ *   ownerOf(organisationId)                 — the organisation that owns the declaration for this one, or null
+ *   currentOf(ownerId)                      — { id, version, body, published_on } | null
+ *   firstHomeOf(personId)                   — organisation id | null
+ *   signingOf(personId, declarationId)      — { signed_name, guardian, signed_on } | null
+ *   ageOf(personId)                         — whole years, or null without a date of birth
+ *   addSigning({ personId, declarationId, name, signedBy, guardian, ip })
+ *   publish({ ownerId, version, body, publishedBy }) — { id, version }, or null when the version is already used
+ *   signedAmong(declarationId, personIds)   — Set of those who have signed
+ *   signedCount(declarationId)
+ */
+export const DECLARATION_STORE = {
+  name: 'DeclarationStore',
+  methods: ['ownerOf', 'currentOf', 'firstHomeOf', 'signingOf', 'ageOf', 'addSigning', 'publish', 'signedAmong', 'signedCount'],
+};
