@@ -116,3 +116,9 @@ export function offersDue(terms, today) {
   const prev = next && [...s].reverse().find((t) => t.ends < next.starts);
   return next && prev ? { next, prev } : null;
 }
+
+/** A club's rule for joining part-way through a term; by default, pro rata by the weeks that remain. */
+export const midTermOf = (org) => {
+  const r = org?.settings?.terms?.midTerm;
+  return r?.mode ? { mode: r.mode, fixedCents: r.fixedCents ?? 0 } : { mode: 'weeks', fixedCents: 0 };
+};

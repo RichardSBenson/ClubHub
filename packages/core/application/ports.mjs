@@ -420,3 +420,33 @@ export const CLUB_PAGE_STORE = {
   methods: ['atomically', 'clubOf', 'sessionsOf', 'profileOf', 'ownsAsset', 'saveProfile', 'sessionIdsOf', 'removeSession',
             'updateSession', 'addSession', 'requestPage', 'takeDown', 'publish', 'decline', 'sitsBeneath', 'pagesBeneath', 'audit'],
 };
+
+/**
+ * School terms and children's enrolment in them. `atomically(work)` runs `work(store)` as one unit.
+ *   organisationById(id)                    — the full row (type, timezone, settings...) | null
+ *   countryOf(organisationId)               — its own country, or the nearest ancestor's
+ *   todayAt(organisation)                   — 'YYYY-MM-DD' in that organisation's timezone
+ *   termsOf(organisationId)                 — [{ id, starts, ends }] this organisation's own terms
+ *   hasTermsIn(organisationId, year)
+ *   addTerm({ organisationId, year, number, name, starts, ends, source }) / nextTermNumber(organisationId, year)
+ *   updateTerm({ id, organisationId, name, starts, ends, year }) — the row or null
+ *   enrolledCount(termId) / removeTerm(organisationId, termId) — the row or null
+ *   setMidTermRule(organisationId, rule)
+ *   effectiveTerms(organisationId, year)    — { terms, owner, inherited } its own, or the nearest ancestor's
+ *   memberClubOf(personId)                  — the club organisation row they are an active member of, or null
+ *   personById(id)                          — { id, first_name, date_of_birth, ... }
+ *   trainingWeekdays(clubId, ageYears)      — weekdays on which a child of that age has a class
+ *   feeSchedule(clubId)                     — fee rows
+ *   enrolmentOf(termId, personId)           — { id, status, paid, fee_cents, price_note } | null
+ *   enrol({ termId, personId, clubId, cents, note, today, by }) — the enrolment (revives a withdrawn one)
+ *   requestPayment({ clubId, personId, cents, currency, by, description, enrolmentId }) — payment id
+ *   enrolmentToWithdraw(termId, personId)   — { id, paid, organisation_id, starts, timezone } | null
+ *   voidUnpaidFor(enrolmentId) / markWithdrawn(enrolmentId)
+ *   audit({ actorId, organisationId, action, entity, entityId, after })
+ */
+export const TERM_STORE = {
+  name: 'TermStore',
+  methods: ['atomically', 'organisationById', 'countryOf', 'todayAt', 'termsOf', 'hasTermsIn', 'addTerm', 'nextTermNumber', 'updateTerm',
+            'enrolledCount', 'removeTerm', 'setMidTermRule', 'effectiveTerms', 'memberClubOf', 'personById', 'trainingWeekdays', 'feeSchedule',
+            'enrolmentOf', 'enrol', 'requestPayment', 'enrolmentToWithdraw', 'voidUnpaidFor', 'markWithdrawn', 'audit'],
+};

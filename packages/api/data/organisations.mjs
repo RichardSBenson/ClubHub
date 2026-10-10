@@ -8,24 +8,22 @@
 import { pool } from '../../infrastructure/postgres/pool.mjs';
 import { DEFAULT_TIMEZONE } from '../../core/domain/defaults.mjs';
 import { region, setRegion, setEventTypes, setWords } from '../../infrastructure/region-context.mjs';
-import { feeFor } from '../../core/domain/membership.mjs';
 import { readTheme } from '../../site/theme.mjs';
 import { problemsWithClubProfile, changesTheSite } from '../../core/domain/club-profile.mjs';
-import { problemsWithNewClub, clubSlugFrom, hasAdministrator } from '../../core/domain/new-club.mjs';
 import { destinations, problemsWithNavigation } from '../../content/navigation.mjs';
-import { readinessProblems, readinessGaps, ClubPageNotReady, stateOf } from '../../core/domain/club-page.mjs';
-import { cents } from '../../core/domain/csv.mjs';
-import { builtInFor, builtInYears, yearToOffer, termState, mayEnrol, holidays as termHolidays, inHoliday, termPrice, readMidTerm, problemsWithMidTerm, problemsWithTerm, offersDue, CALENDARS } from '../../core/domain/terms.mjs';
+import { midTermOf, builtInFor, builtInYears, yearToOffer, termState, holidays as termHolidays, inHoliday, offersDue, CALENDARS } from '../../core/domain/terms.mjs';
 import { MANAGE, REGISTER } from '../../core/domain/access.mjs';
 import { resolveRegion, problemsWithRegion } from '../../core/domain/region.mjs';
 import { resolveEventTypes, problemsWithEventTypes } from '../../core/domain/event-types.mjs';
+import { LoadBuiltInTerms, SaveTerm, RemoveTerm, SetMidTermRule, OfferedTerms, EnrolInTerm, WithdrawFromTerm } from '../../core/application/terms.mjs';
+import { PostgresTermStore } from '../../infrastructure/postgres/term-store.mjs';
 import { ViewClubPage, SaveClubPage, RequestClubPage, TakeDownClubPage, DecideClubPage, ClubPagesBeneath } from '../../core/application/club-pages.mjs';
 import { PostgresClubPageStore } from '../../infrastructure/postgres/club-page-store.mjs';
 import { AddClub } from '../../core/application/add-club.mjs';
 import { PostgresOrganisationRegister } from '../../infrastructure/postgres/organisation-register.mjs';
 import { PostgresAuthorisation } from '../../infrastructure/postgres/repositories.mjs';
 import { family, people } from './people.mjs';
-import { speakingForThisLayer, Invalid, NotFound, PERSON_COLUMNS, WRITE_PAGES, ageOnDate, assertRole, clubMail, clubOnly, feeRows, one, q, todayAt } from './shared.mjs';
+import { speakingForThisLayer, Invalid, NotFound, WRITE_PAGES, assertRole, clubMail, feeRows, one, q, todayAt } from './shared.mjs';
 
 // ---------------------------------------------------------------------------
 // organisations
@@ -519,7 +517,15 @@ async function effectiveTerms(orgId, year) {
 const countryOf = async (orgId) => (await one(`select o.country_code from organisation me join organisation o on me.path <@ o.path
   where me.id = $1 and o.country_code is not null order by nlevel(o.path) desc limit 1`, [orgId]))?.country_code ?? null;
 
-const midTermOf = (org) => { const r = org.settings?.terms?.midTerm; return r?.mode ? { mode: r.mode, fixedCents: r.fixedCents ?? 0 } : { mode: 'weeks', fixedCents: 0 }; };
+const termDeps = { store: new PostgresTermStore(pool, pool, { feeScheduleFor: (clubId) => feeRows(clubId) }), auth: new PostgresAuthorisation(pool),
+  howMayActFor: (accountId, personId) => family.mayActFor(accountId, personId), adultAge: () => region().adultAge, currency: () => region().currency };
+const loadBuiltInTerms = new LoadBuiltInTerms(termDeps);
+const saveTerm = new SaveTerm(termDeps);
+const removeTerm = new RemoveTerm(termDeps);
+const setMidTermRule = new SetMidTermRule(termDeps);
+const offeredTerms = new OfferedTerms(termDeps);
+const enrolInTerm = new EnrolInTerm(termDeps);
+const withdrawFromTerm = new WithdrawFromTerm(termDeps);
 
 export const terms = {
   /** The calendar as this organisation sees it, this year and next. */
@@ -544,56 +550,12 @@ export const terms = {
       holiday: inHoliday(here, today), calendar: CALENDARS[String(country ?? '').toUpperCase()] ?? null };
   },
 
-  /** Load the country's own calendar for a year. */
-  async loadBuiltIn(actor, orgId, year, { quiet = false } = {}) {
-    if (!quiet) await assertRole(actor, orgId, MANAGE);
-    const country = await countryOf(orgId);
-    const cal = builtInFor(country, year);
-    if (!cal) throw new Invalid(`There is no built-in calendar for ${country ?? 'this country'} in ${year}. Add the terms yourself.`);
-    if ((await one('select 1 as x from school_term where organisation_id = $1 and year = $2', [orgId, year])))
-      throw new Invalid(`${year} already has terms here.`);
-    for (const t of cal.terms)
-      await pool.query(`insert into school_term (organisation_id, year, number, name, starts, ends, source) values ($1,$2,$3,$4,$5,$6,'built-in')`,
-        [orgId, year, t.number, t.name, t.starts, t.ends]);
-    await pool.query(`insert into audit_log (account_id, organisation_id, action, entity, entity_id, after)
-      values ($1,$2,'terms_loaded','organisation',$2,$3)`, [quiet ? null : actor, orgId, JSON.stringify({ year, country, source: cal.source })]);
-    return cal.terms.length;
-  },
-
-  async save(actor, orgId, input) {
-    await assertRole(actor, orgId, MANAGE);
-    const t = { id: input.id || null, name: String(input.name ?? '').trim().slice(0, 40), starts: String(input.starts ?? '').trim(), ends: String(input.ends ?? '').trim() };
-    const year = Number(t.starts.slice(0, 4));
-    const others = await q(`select id, to_char(starts,'YYYY-MM-DD') as starts, to_char(ends,'YYYY-MM-DD') as ends from school_term where organisation_id = $1`, [orgId]);
-    const problems = problemsWithTerm(t, others);
-    if (problems.length) throw new Invalid(problems.join(' '));
-    if (t.id) {
-      const row = await one(`update school_term set name=$3, starts=$4, ends=$5, year=$6, source='manual' where id=$1 and organisation_id=$2 returning id`, [t.id, orgId, t.name, t.starts, t.ends, year]);
-      if (!row) throw new NotFound('Term');
-    } else {
-      const n = (await one('select coalesce(max(number),0)+1 as n from school_term where organisation_id=$1 and year=$2', [orgId, year])).n;
-      await pool.query(`insert into school_term (organisation_id, year, number, name, starts, ends) values ($1,$2,$3,$4,$5,$6)`, [orgId, year, n, t.name, t.starts, t.ends]);
-    }
-    await pool.query(`insert into audit_log (account_id, organisation_id, action, entity, entity_id, after) values ($1,$2,'term_saved','organisation',$2,$3)`, [actor, orgId, JSON.stringify(t)]);
-  },
-
-  async remove(actor, orgId, termId) {
-    await assertRole(actor, orgId, MANAGE);
-    if ((await one(`select 1 as x from term_enrolment where term_id = $1 and status = 'enrolled'`, [termId])))
-      throw new Invalid('Children are enrolled in that term. Withdraw them first.');
-    const row = await one('delete from school_term where id = $1 and organisation_id = $2 returning id', [termId, orgId]);
-    if (!row) throw new NotFound('Term');
-  },
-
-  async setRule(actor, orgId, form) {
-    await assertRole(actor, orgId, MANAGE);
-    const org = await clubOnly(orgId);
-    const rule = readMidTerm(form);
-    const problems = problemsWithMidTerm(rule);
-    if (problems.length) throw new Invalid(problems.join(' '));
-    await pool.query(`update organisation set settings = coalesce(settings,'{}'::jsonb) || jsonb_build_object('terms',
-      coalesce(settings->'terms','{}'::jsonb) || jsonb_build_object('midTerm', $2::jsonb)), updated_at = now() where id = $1`, [org.id, JSON.stringify(rule)]);
-  },
+  /** Load the country's own calendar for a year. `quiet` is the daily run, acting for nobody. */
+  loadBuiltIn: (actor, orgId, year, { quiet = false } = {}) =>
+    speakingForThisLayer(() => loadBuiltInTerms.execute({ actorId: actor, organisationId: orgId, year, system: quiet })),
+  save: (actor, orgId, input) => speakingForThisLayer(() => saveTerm.execute({ actorId: actor, organisationId: orgId, input })),
+  remove: (actor, orgId, termId) => speakingForThisLayer(() => removeTerm.execute({ actorId: actor, organisationId: orgId, termId })),
+  setRule: (actor, orgId, form) => speakingForThisLayer(() => setMidTermRule.execute({ actorId: actor, organisationId: orgId, form })),
 
   /** Who is enrolled in one term at one club. */
   async roster(actor, orgId, termId) {
@@ -607,79 +569,10 @@ export const terms = {
   },
 
   /** The terms a child could be enrolled in now, and what each costs them. */
-  async forPerson(actor, personId) {
-    const how = await family.assertMayActFor(actor, personId);
-    const person = await one(`select ${PERSON_COLUMNS} from person p where p.id = $1`, [personId]);
-    const home = await one(`select o.* from affiliation a join organisation o on o.id = a.organisation_id
-      where a.person_id = $1 and a.role = 'member' and a.status in ('active') and a.ends is null limit 1`, [personId]);
-    if (!home) return { how, person, club: null, items: [] };
-    const today = await todayAt(home);
-    const age = ageOnDate(person.date_of_birth, today);
-    if (age == null || age >= region().adultAge) return { how, person, club: null, items: [] };
-    const y = Number(today.slice(0, 4));
-    const grade = await one('select rank_order from person_current_grade where person_id = $1', [personId]);
-    const sessions = await q('select weekday, min_age, max_age, min_grade_id from training_session where organisation_id = $1', [home.id]);
-    const weekdays = [...new Set(sessions.filter((s) => (s.min_age == null || age >= s.min_age) && (s.max_age == null || age <= s.max_age)).map((s) => s.weekday))];
-    const schedule = await feeRows(home.id);
-    const fee = feeFor(schedule, { adultAge: region().adultAge, ageYears: age, period: 'term', today });
-    const rule = midTermOf(home);
-    const items = [];
-    for (const year of [y, y + 1]) {
-      for (const t of (await effectiveTerms(home.id, year)).terms) {
-        if (t.ends < today) continue;
-        const enrolment = await one(`select id, status, paid, fee_cents, price_note from term_enrolment where term_id = $1 and person_id = $2`, [t.id, personId]);
-        const state = termState(t, today);
-        const price = fee ? termPrice({ fullCents: fee.amount_cents, term: t, today, rule, weekdays }) : { cents: 0, kind: 'free', note: 'No term fee set' };
-        items.push({ term: t, state, enrolment, price, mayEnrol: mayEnrol(t, today) && !!price && (!enrolment || enrolment.status === 'withdrawn') });
-      }
-    }
-    return { how, person, club: home.name, items, fee, rule };
-  },
-
-  async enrol(actor, personId, termId) {
-    const info = await this.forPerson(actor, personId);
-    const item = info.items.find((i) => i.term.id === termId);
-    if (!item) throw new NotFound('Term');
-    if (!item.mayEnrol) throw new Invalid(item.enrolment?.status === 'enrolled' ? 'Already enrolled.' : item.price ? 'Enrolment is not open for that term yet.' : 'The club does not take enrolments part-way through this term.');
-    const home = await one(`select o.id, o.timezone from affiliation a join organisation o on o.id = a.organisation_id where a.person_id=$1 and a.role='member' and a.status='active' and a.ends is null`, [personId]);
-    const today = await todayAt(home);
-    const cents = item.price.cents;
-    const client = await pool.connect();
-    try {
-      await client.query('begin');
-      const { rows: [e] } = await client.query(`insert into term_enrolment (term_id, person_id, organisation_id, status, fee_cents, price_note, paid, enrolled_on, enrolled_by)
-        values ($1,$2,$3,'enrolled',$4,$5,$6,$7::date,$8)
-        on conflict (term_id, person_id) do update set status='enrolled', fee_cents=$4, price_note=$5, paid=$6, enrolled_on=$7::date, enrolled_by=$8 returning id`,
-        [termId, personId, home.id, cents, item.price.note, cents === 0, today, actor]);
-      let paymentId = null;
-      if (cents > 0) {
-        const { rows: [pay] } = await client.query(`insert into payment (organisation_id, person_id, amount_cents, currency, status, requested_by)
-          values ($1,$2,$3,$4,'pending',$5) returning id`, [home.id, personId, cents, info.fee?.currency ?? region().currency, actor]);
-        await client.query(`insert into payment_line (payment_id, kind, description, amount_cents, term_enrolment_id) values ($1,'club_fee',$2,$3,$4)`,
-          [pay.id, `${item.term.name} ${item.term.year} classes — ${info.person.first_name}${item.price.kind === 'full' ? '' : ` (${item.price.note})`}`, cents, e.id]);
-        paymentId = pay.id;
-      }
-      await client.query(`insert into audit_log (account_id, organisation_id, action, entity, entity_id, after) values ($1,$2,'term_enrolled','term_enrolment',$3,$4)`,
-        [actor, home.id, e.id, JSON.stringify({ term: item.term.name, year: item.term.year, cents })]);
-      await client.query('commit');
-      return { paymentId };
-    } catch (e) { await client.query('rollback'); throw e; } finally { client.release(); }
-  },
-
+  forPerson: (actor, personId) => speakingForThisLayer(() => offeredTerms.execute({ actorId: actor, personId })),
+  enrol: (actor, personId, termId) => speakingForThisLayer(() => enrolInTerm.execute({ actorId: actor, personId, termId })),
   /** Withdraw before the term starts. An unpaid bill is cancelled; a paid one is left for the club to refund. */
-  async withdraw(actor, personId, termId) {
-    await family.assertMayActFor(actor, personId);
-    const e = await one(`select e.id, e.paid, e.organisation_id, to_char(st.starts,'YYYY-MM-DD') as starts, o.timezone from term_enrolment e
-      join school_term st on st.id = e.term_id join organisation o on o.id = e.organisation_id
-      where e.term_id = $1 and e.person_id = $2 and e.status = 'enrolled'`, [termId, personId]);
-    if (!e) throw new NotFound('Enrolment');
-    if ((await todayAt(e)) >= e.starts) throw new Invalid('The term has started. Please ask the club.');
-    await pool.query(`update payment set status='void', updated_at=now() where status in ('pending','failed') and id in (select payment_id from payment_line where term_enrolment_id = $1)`, [e.id]);
-    await pool.query(`update term_enrolment set status='withdrawn' where id=$1`, [e.id]);
-    await pool.query(`insert into audit_log (account_id, organisation_id, action, entity, entity_id, after) values ($1,$2,'term_withdrawn','term_enrolment',$3,$4)`,
-      [actor, e.organisation_id, e.id, JSON.stringify({ paid: e.paid })]);
-    return { paid: e.paid };
-  },
+  withdraw: (actor, personId, termId) => speakingForThisLayer(() => withdrawFromTerm.execute({ actorId: actor, personId, termId })),
 
   /** Daily: load each country's next calendar where it is known, and offer the next term to families. */
   async run({ messenger, baseFrom, origin }) {
