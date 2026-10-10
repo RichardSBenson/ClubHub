@@ -2,6 +2,7 @@
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "buildCommand": "node tools/check-dependencies.mjs && node tools/check-wiring.mjs && node tools/migrate.mjs && node tools/seal-existing.mjs && node packages/site/build.mjs",
   "outputDirectory": "dist",
+  "regions": ["syd1"],
   "functions": {
     "api/index.js": {
       "maxDuration": 30,
