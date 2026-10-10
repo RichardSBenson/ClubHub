@@ -24,6 +24,10 @@ import { MANAGE, REGISTER, TEACH } from '../../core/domain/access.mjs';
 import { EnrolPerson } from '../../core/application/enrol-person.mjs';
 import { LinkGuardian, SetGuardianContact, UnlinkGuardian, ListGuardians } from '../../core/application/guardians.mjs';
 import { PostgresGuardianRegister } from '../../infrastructure/postgres/guardian-register.mjs';
+import { CheckMayChangePhoto, SetPhoto, ClearPhoto, SetAbout, OpenPhoto } from '../../core/application/photos.mjs';
+import { SetInstructor } from '../../core/application/instructor-role.mjs';
+import { PostgresPhotoStore } from '../../infrastructure/postgres/photo-store.mjs';
+import { PostgresInstructorStore } from '../../infrastructure/postgres/instructor-store.mjs';
 import { DocumentChoices, ListDocuments, SendDocument, OpenDocument, ReviewDocument, WaitingDocuments } from '../../core/application/member-documents.mjs';
 import { PostgresMemberDocumentStore } from '../../infrastructure/postgres/member-document-store.mjs';
 import { DeclarationStanding, PublishDeclaration, SignDeclaration } from '../../core/application/declarations.mjs';
@@ -748,113 +752,42 @@ export const memberDocuments = {
 // A person's photograph: one picture on their record, used wherever they appear
 // ---------------------------------------------------------------------------
 
+const photoDeps = { store: new PostgresPhotoStore(pool), auth, adultAge: () => region().adultAge,
+  howMayActFor: (accountId, personId) => selfService.mayActFor(accountId, personId), today: () => new Date().toISOString().slice(0, 10) };
+const checkMayChangePhoto = new CheckMayChangePhoto(photoDeps);
+const setPhoto = new SetPhoto(photoDeps);
+const clearPhoto = new ClearPhoto(photoDeps);
+const setAbout = new SetAbout(photoDeps);
+const openPhoto = new OpenPhoto(photoDeps);
+
 export const photos = {
   /** Who may change a photograph: the person, a guardian, or an official of their club who keeps the register. */
-  async assertMay(actor, personId) {
-    if (await family.mayActFor(actor, personId)) return;
-    const homes = await q('select organisation_id from affiliation where person_id = $1 and ends is null', [personId]);
-    for (const h of homes)
-      if ((await one('select has_role_at($1,$2,$3) as ok', [actor, h.organisation_id, REGISTER]))?.ok) return;
-    throw new Forbidden();
-  },
+  assertMay: (actor, personId) => speakingForThisLayer(() => checkMayChangePhoto.execute({ actorId: actor, personId })),
 
   /**
-   * Set or replace somebody's photograph. The person, a guardian, or an official of their club may do it
-   * (the same people who may edit the record), and somebody has to say the photograph may be kept: for a
-   * child that is a parent's yes, so it is asked every time rather than assumed.
+   * Set or replace somebody's photograph. Somebody has to say it may be kept: for a child that is a parent's yes,
+   * so it is asked every time rather than assumed.
    */
-  async set(actor, personId, { bytes, identified, filename }, { consent } = {}) {
-    await this.assertMay(actor, personId);
-    const kid = await one('select date_of_birth::text as dob from person where id = $1', [personId]);
-    if (photoNeedsConsent(ageOn(kid?.dob, null), region().adultAge) && !consent)
-      throw new Invalid('Please confirm that their parent or guardian agrees to this photograph being kept.');
-    const home = await one(`select organisation_id from affiliation where person_id = $1 and ends is null
-      order by (role = 'member') desc limit 1`, [personId]);
-    if (!home) throw new NotFound('Person has no current affiliation');
-    const who = await one(`select first_name || ' ' || last_name as name from person where id = $1`, [personId]);
-    const asset = await insertAsset(actor, home.organisation_id, { bytes, identified, filename,
-      altText: `Photograph of ${who.name}`, consentRef: `Kept with the agreement of the person or their guardian, recorded ${new Date().toISOString().slice(0, 10)}` });
-    await pool.query('update person set photo_asset_id = $2, updated_at = now() where id = $1', [personId, asset.id]);
-    await pool.query(`insert into audit_log (account_id, organisation_id, action, entity, entity_id, after)
-      values ($1,$2,'person_photo_set','person',$3,$4)`, [actor, home.organisation_id, personId, JSON.stringify({ assetId: asset.id })]);
-    return asset;
-  },
+  set: (actor, personId, { bytes, identified, filename }, { consent } = {}) =>
+    speakingForThisLayer(() => setPhoto.execute({ actorId: actor, personId, bytes, identified, filename, consent })),
+  clear: (actor, personId) => speakingForThisLayer(() => clearPhoto.execute({ actorId: actor, personId })),
 
-  async clear(actor, personId) {
-    await this.assertMay(actor, personId);
-    await pool.query('update person set photo_asset_id = null, updated_at = now() where id = $1', [personId]);
-    await pool.query(`insert into audit_log (account_id, action, entity, entity_id) values ($1,'person_photo_cleared','person',$2)`, [actor, personId]);
-  },
-
-  /** The few words about themselves that go beside the photograph. Same people may write it as may change the photograph. */
-  async setAbout(actor, personId, text) {
-    await this.assertMay(actor, personId);
-    const about = String(text ?? '').replace(/\r\n/g, '\n').trim();
-    if (about.length > 280) throw new Invalid('Keep it to 280 characters.');
-    await pool.query('update person set about = $2, updated_at = now() where id = $1', [personId, about || null]);
-    await pool.query(`insert into audit_log (account_id, action, entity, entity_id) values ($1,'person_about_changed','person',$2)`, [actor, personId]);
-  },
-
-  async forPerson(personId) {
-    return (await one('select photo_asset_id from person where id = $1', [personId]))?.photo_asset_id ?? null;
-  },
+  /** The few words about themselves that go beside the photograph. */
+  setAbout: (actor, personId, text) => speakingForThisLayer(() => setAbout.execute({ actorId: actor, personId, text })),
+  forPerson: (personId) => photoDeps.store.photoAssetIdOf(personId),
+  bytes: (actor, personId) => speakingForThisLayer(() => openPhoto.execute({ actorId: actor, personId })),
 };
 
 // ---------------------------------------------------------------------------
 // The instructor switch
 // ---------------------------------------------------------------------------
 
+const instructorStore = new PostgresInstructorStore(pool);
+const setInstructor = new SetInstructor({ store: instructorStore, auth });
+
 export const instructorRole = {
   /** Is this person recorded as an instructor right now? */
-  async is(personId) {
-    return !!(await one(`select 1 as x from affiliation where person_id = $1 and ends is null
-      and role = 'instructor' and status = 'active'`, [personId]));
-  },
-
-  /**
-   * Tick or untick "is an instructor" for somebody. Done at their own club by an owner or administrator
-   * there, or by one above (a region or the federation): has_role_at reaches down the tree.
-   * Unticking ends the role today and keeps the history; it also takes them off the public website,
-   * because a profile for someone who no longer instructs would be a claim nobody is making.
-   */
-  async set(actor, personId, on) {
-    const home = await one(`select organisation_id from affiliation where person_id = $1 and ends is null
-      order by (role = 'member') desc limit 1`, [personId]);
-    if (!home) throw new NotFound('Person has no current affiliation');
-    await assertRole(actor, home.organisation_id, MANAGE);
-    const club = home.organisation_id;
-    const now = await is_(personId);
-    if (on && !now) {
-      const g = await one('select label, is_dan from person_current_grade where person_id = $1', [personId]);
-      const why = whyNotInstructor(g);
-      if (why) throw new Invalid(why);
-      await pool.query(`insert into affiliation (person_id, organisation_id, role, starts, status)
-        values ($1,$2,'instructor', current_date, 'active')`, [personId, club]);
-    } else if (!on && now) {
-      await pool.query(`update affiliation set ends = current_date, status = 'resigned'
-        where person_id = $1 and role = 'instructor' and ends is null`, [personId]);
-      await pool.query('update instructor_profile set published = false where person_id = $1', [personId]);
-    } else return { changed: false };
-    await pool.query(`insert into audit_log (account_id, organisation_id, action, entity, entity_id, after)
-      values ($1,$2,$3,'person',$4,$5)`, [actor, club, on ? 'instructor_on' : 'instructor_off', personId, JSON.stringify({ instructor: !!on })]);
-    return { changed: true };
-  },
-};
-
-const is_ = (personId) => instructorRole.is(personId);
-
-photos.bytes = async function bytes(actor, personId) {
-  const asset = await one('select photo_asset_id from person where id = $1', [personId]);
-  if (!asset?.photo_asset_id) throw new NotFound('Photograph');
-  let allowed = false;
-  try { await family.assertMayActFor(actor, personId); allowed = true; } catch { /* maybe an official */ }
-  if (!allowed) {
-    const homes = await q('select organisation_id from affiliation where person_id = $1 and ends is null', [personId]);
-    for (const h of homes) if ((await one('select has_role_at($1,$2,$3) as ok', [actor, h.organisation_id, TEACH]))?.ok) { allowed = true; break; }
-  }
-  if (!allowed) throw new Forbidden();
-  const a = await one('select mime from asset where id = $1', [asset.photo_asset_id]);
-  const b = await one('select bytes from asset_blob where asset_id = $1', [asset.photo_asset_id]);
-  if (!b?.bytes) throw new NotFound('Photograph');
-  return { mime: a.mime, bytes: b.bytes };
+  is: (personId) => instructorStore.isInstructor(personId),
+  /** Tick or untick "is an instructor" (see SetInstructor). */
+  set: (actor, personId, on) => speakingForThisLayer(() => setInstructor.execute({ actorId: actor, personId, on })),
 };

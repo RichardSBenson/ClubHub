@@ -335,3 +335,33 @@ export const MEMBER_DOCUMENT_STORE = {
   methods: ['atomically', 'homeOf', 'homesOf', 'todayAt', 'qualificationChoices', 'qualificationAt', 'documentsOf', 'addDocument',
             'documentFile', 'documentToReview', 'addAward', 'markReviewed', 'waitingUnder', 'audit'],
 };
+
+/**
+ * A person's photograph and the few words beside it. `atomically(work)` runs `work(store)` as one unit.
+ *   homeOf(personId) / homesOf(personId)    — their club (member roll first) / every club they are on
+ *   dateOfBirthOf(personId)                 — 'YYYY-MM-DD' | null
+ *   nameOf(personId)                        — 'First Last'
+ *   addPhotoAsset({ organisationId, bytes, identified, filename, altText, consentRef, uploadedBy }) — { id }
+ *   setPhoto(personId, assetId) / clearPhoto(personId) / setAbout(personId, text|null)
+ *   photoAssetIdOf(personId)                — asset id | null
+ *   photoFile(assetId)                      — { mime, bytes } | null
+ *   audit({ actorId, organisationId, action, entityId, after })
+ */
+export const PHOTO_STORE = {
+  name: 'PhotoStore',
+  methods: ['atomically', 'homeOf', 'homesOf', 'dateOfBirthOf', 'nameOf', 'addPhotoAsset', 'setPhoto', 'clearPhoto', 'setAbout',
+            'photoAssetIdOf', 'photoFile', 'audit'],
+};
+
+/**
+ * Who is recorded as an instructor, and the switch that makes them one.
+ *   homeOf(personId)                        — their club (member roll first) or null
+ *   isInstructor(personId)
+ *   currentGrade(personId)                  — { label, is_dan } | null
+ *   appoint({ personId, organisationId }) / resign(personId)  — resigning also unpublishes their website profile
+ *   audit({ actorId, organisationId, action, entityId, after })
+ */
+export const INSTRUCTOR_STORE = {
+  name: 'InstructorStore',
+  methods: ['atomically', 'homeOf', 'isInstructor', 'currentGrade', 'appoint', 'resign', 'audit'],
+};
