@@ -62,16 +62,69 @@ function transactionOn(client) {
         [personId, seal(name), seal(phone)]);
     },
 
-    async addAffiliation({ personId, organisationId, role, starts, paidUntil }) {
-      await client.query(`
+    async addAffiliation({ personId, organisationId, role, starts, paidUntil = null }) {
+      const { rows: [row] } = await client.query(`
         insert into affiliation (person_id, organisation_id, role, starts, status, paid_until)
-        values ($1,$2,$3,coalesce($4::date, current_date),'active',$5)`, [personId, organisationId, role, starts, paidUntil]);
+        values ($1,$2,$3,coalesce($4::date, current_date),'active',$5) returning *`, [personId, organisationId, role, starts, paidUntil]);
+      return row;
     },
 
-    async audit({ actorId, organisationId, action, entity, entityId, after }) {
+    async homeOf(personId) {
+      const { rows: [home] } = await client.query(`
+        select organisation_id from affiliation where person_id = $1 and ends is null and role = 'member'
+        union all
+        select organisation_id from affiliation where person_id = $1 and ends is null
+        limit 1`, [personId]);
+      return home ? { organisationId: home.organisation_id } : null;
+    },
+
+    async currentMembership(personId) {
+      const { rows: [m] } = await client.query(`
+        select id, organisation_id from affiliation where person_id = $1 and ends is null and role = 'member'`, [personId]);
+      return m ? { id: m.id, organisationId: m.organisation_id } : null;
+    },
+
+    async snapshotOf(personId) {
+      const { rows: [was] } = await client.query(`
+        select first_name, last_name, preferred_name, date_of_birth, gender, email, phone from person where id = $1`, [personId]);
+      return was ?? {};
+    },
+
+    async changePerson(personId, changes) {
+      const columns = { firstName: 'first_name', lastName: 'last_name', preferredName: 'preferred_name',
+        dateOfBirth: 'date_of_birth', gender: 'gender', email: 'email', phone: 'phone' };
+      const sets = Object.entries(changes).filter(([k, v]) => columns[k] && v !== undefined);
+      if (!sets.length) return;
+      const cols = sets.map(([k], i) => `${columns[k]} = $${i + 2}`).join(', ');
+      await client.query(
+        `update person set ${cols}, updated_at = now() where id = $1`, /* security-ok: column names come from the fixed map above, values are placeholders */
+        [personId, ...sets.map(([, v]) => (v === '' ? null : v))]);
+    },
+
+    async changeEmergencyContact(personId, { name, phone }) {
+      // A phone number that changed two years ago is worse than none, because it is the one that gets rung.
       await client.query(`
-        insert into audit_log (account_id, organisation_id, action, entity, entity_id, after)
-        values ($1,$2,$3,$4,$5,$6::jsonb)`, [actorId, organisationId, action, entity, entityId, JSON.stringify(after)]);
+        insert into person_private (person_id, emergency_name, emergency_phone) values ($1,$2,$3)
+        on conflict (person_id) do update set
+          emergency_name = coalesce($2, person_private.emergency_name),
+          emergency_phone = coalesce($3, person_private.emergency_phone),
+          updated_at = now()`,
+        [personId, name === undefined ? null : seal(name || null), phone === undefined ? null : seal(phone || null)]);
+    },
+
+    async changeAffiliation(personId, { paidUntil, status }) {
+      await client.query(`
+        update affiliation set paid_until = coalesce($2::date, paid_until), status = coalesce($3, status)
+        where person_id = $1 and ends is null`, [personId, paidUntil || null, status || null]);
+    },
+
+    async endAffiliation(id, on) { await client.query('update affiliation set ends = $2 where id = $1', [id, on]); },
+
+    async audit({ actorId, organisationId, action, entity, entityId, before = null, after }) {
+      await client.query(`
+        insert into audit_log (account_id, organisation_id, action, entity, entity_id, before, after)
+        values ($1,$2,$3,$4,$5,$6::jsonb,$7::jsonb)`,
+        [actorId, organisationId, action, entity, entityId, before === null ? null : JSON.stringify(before), JSON.stringify(after)]);
     },
   };
 }

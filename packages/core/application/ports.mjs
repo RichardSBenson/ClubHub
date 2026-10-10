@@ -217,6 +217,11 @@ export class NotPermitted extends Error {
 }
 
 /** Refusals carry every reason, never just "no". */
+/** The thing asked about does not exist. */
+export class Missing extends Error {
+  constructor(what) { super(what); this.name = 'Missing'; }
+}
+
 export class Refused extends Error {
   constructor(reasons) {
     super(Array.isArray(reasons) ? reasons.join('; ') : reasons);
@@ -235,7 +240,14 @@ export class Refused extends Error {
  *   addPerson(fields)                       — the new person row
  *   addEmergencyContact(personId, name, phone)
  *   addAffiliation({ personId, organisationId, role, starts, paidUntil })
- *   audit({ actorId, organisationId, action, entity, entityId, after })
+ *   audit({ actorId, organisationId, action, entity, entityId, before, after })
+ *   homeOf(personId)                        — { organisationId } of their current membership (or first current role), or null
+ *   currentMembership(personId)             — { id, organisationId } or null
+ *   snapshotOf(personId)                    — the person's editable fields as they are now
+ *   changePerson(personId, changes)         — changes: { firstName?, lastName?, preferredName?, dateOfBirth?, gender?, email?, phone? }
+ *   changeEmergencyContact(personId, { name?, phone? })  — only what is given
+ *   changeAffiliation(personId, { paidUntil?, status? }) — their current affiliations
+ *   endAffiliation(id, on)
  */
 export const PERSON_REGISTER = {
   name: 'PersonRegister',

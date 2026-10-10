@@ -22,7 +22,8 @@ import { clearance } from '../../core/domain/qualification.mjs';
 import { stateOf as declarationState, problemsWithSigning, problemsWithPublishing as problemsWithDeclarationText, needsGuardian } from '../../core/domain/declarations.mjs';
 import { MANAGE, REGISTER, TEACH } from '../../core/domain/access.mjs';
 import { EnrolPerson } from '../../core/application/enrol-person.mjs';
-import { Refused, NotPermitted } from '../../core/application/ports.mjs';
+import { UpdatePerson, TransferMember } from '../../core/application/change-person.mjs';
+import { Refused, NotPermitted, Missing } from '../../core/application/ports.mjs';
 import { PostgresPersonRegister } from '../../infrastructure/postgres/person-register.mjs';
 import { PostgresAuthorisation } from '../../infrastructure/postgres/repositories.mjs';
 import { fees } from './billing.mjs';
@@ -30,9 +31,22 @@ import { webhooks } from './messaging.mjs';
 import { orgs } from './organisations.mjs';
 import { AWARD_SELECT, CATALOGUE_FROM, Forbidden, Invalid, NotFound, PERSON_COLUMNS, assertRole, describeAwards, homesOf, insertAsset, localNow, one, q, qualToday } from './shared.mjs';
 
+/** The use cases speak in their own words; callers of this layer expect Forbidden, Invalid and NotFound. */
+async function speakingForThisLayer(run) {
+  try { return await run(); } catch (e) {
+    if (e instanceof NotPermitted) throw new Forbidden();
+    if (e instanceof Refused) throw new Invalid(e.message);
+    if (e instanceof Missing) throw new NotFound(e.message);
+    throw e;
+  }
+}
+
+const register = new PostgresPersonRegister(pool);
+const auth = new PostgresAuthorisation(pool);
+const updatePerson = new UpdatePerson({ register, auth });
+const transferMember = new TransferMember({ register, auth });
 const enrolPerson = new EnrolPerson({
-  register: new PostgresPersonRegister(pool),
-  auth: new PostgresAuthorisation(pool),
+  register, auth,
   announcer: { announce: (orgId, event, data) => webhooks.emitNow(orgId, event, data) },
 });
 
@@ -161,14 +175,7 @@ export const people = {
    * the same one.
    */
   async enrol(actor, fields) {
-    try {
-      return await enrolPerson.execute({ actorId: actor, ...fields });
-    } catch (e) {
-      // The use case speaks in its own words; callers of this layer expect Forbidden and Invalid.
-      if (e instanceof NotPermitted) throw new Forbidden();
-      if (e instanceof Refused) throw new Invalid(e.message);
-      throw e;
-    }
+    return speakingForThisLayer(() => enrolPerson.execute({ actorId: actor, ...fields }));
   },
 
   /**
@@ -428,134 +435,12 @@ export const people = {
    * through the authority rules, not by someone editing a field.
    */
   async update(actor, personId, fields = {}) {
-    const home = await one(`
-      select organisation_id from affiliation
-      where person_id = $1 and ends is null and role = 'member'
-      union all
-      select organisation_id from affiliation
-      where person_id = $1 and ends is null
-      limit 1`, [personId]);
-    if (!home) throw new NotFound('Person');
-    await assertRole(actor, home.organisation_id, REGISTER);
-
-    const allowed = {
-      first_name: fields.firstName, last_name: fields.lastName,
-      preferred_name: fields.preferredName, date_of_birth: fields.dateOfBirth,
-      gender: fields.gender === undefined ? undefined : (normaliseGender(fields.gender) ?? null),
-      email: fields.email, phone: fields.phone,
-    };
-    const sets = Object.entries(allowed).filter(([, v]) => v !== undefined);
-
-    const touchesPrivate = fields.emergencyName !== undefined
-      || fields.emergencyPhone !== undefined;
-    const touchesAffiliation = fields.paidUntil !== undefined
-      || fields.status !== undefined;
-
-    if (!sets.length && !touchesPrivate && !touchesAffiliation)
-      throw new Invalid('Nothing to change');
-
-    // Checked on the way in, not only on enrolment. A correction is exactly
-    // where a bad date of birth gets typed, and an unvalidated update is a
-    // hole straight through rules the enrolment form enforces.
-    const problems = [
-      ...problemsWithPerson({
-        // Only what is being changed. A field left alone keeps whatever it
-        // has, so demanding a first name here would refuse every edit that
-        // is not also re-sending the name.
-        firstName: fields.firstName ?? 'unchanged',
-        lastName: fields.lastName ?? 'unchanged',
-        dateOfBirth: fields.dateOfBirth,
-        email: fields.email,
-        gender: fields.gender,
-      }),
-      ...problemsWithMembership({ status: fields.status, paidUntil: fields.paidUntil }),
-    ];
-    if (problems.length) throw new Invalid(problems.join('; '));
-
-    // What it said beforehand, so the audit log records a change rather than
-    // just an intention. Read before the transaction opens: it is a snapshot
-    // for the record, not something the write depends on.
-    const was = await one(`
-      select first_name, last_name, preferred_name, date_of_birth, gender,
-             email, phone
-      from person where id = $1`, [personId]);
-
-    const client = await pool.connect();
-    try {
-      await client.query('begin');
-
-      if (sets.length) {
-        const cols = sets.map(([c], i) => `${c} = $${i + 2}`).join(', ');
-        await client.query(
-          `update person set ${cols}, updated_at = now() where id = $1`, /* security-ok: column names come from a fixed whitelist of person fields, values are placeholders */
-          [personId, ...sets.map(([, v]) => (v === '' ? null : v))]);
-      }
-
-      // The emergency contact was not editable at all: it could be set when
-      // somebody enrolled and never corrected afterwards. A phone number that
-      // changed two years ago is worse than no phone number, because it is
-      // the one that gets rung.
-      if (touchesPrivate) {
-        await client.query(`
-          insert into person_private (person_id, emergency_name, emergency_phone)
-          values ($1,$2,$3)
-          on conflict (person_id) do update set
-            emergency_name = coalesce($2, person_private.emergency_name),
-            emergency_phone = coalesce($3, person_private.emergency_phone),
-            updated_at = now()`,
-          [personId,
-           fields.emergencyName === undefined ? null : seal(fields.emergencyName || null),
-           fields.emergencyPhone === undefined ? null : seal(fields.emergencyPhone || null)]);
-      }
-
-      if (touchesAffiliation) {
-        await client.query(`
-          update affiliation
-             set paid_until = coalesce($2::date, paid_until),
-                 status = coalesce($3, status)
-           where person_id = $1 and ends is null`,
-          [personId, fields.paidUntil || null, fields.status || null]);
-      }
-
-      await client.query(`
-        insert into audit_log (account_id, organisation_id, action, entity,
-                               entity_id, before, after)
-        values ($1,$2,'update','person',$3,$4::jsonb,$5::jsonb)`,
-        [actor, home.organisation_id, personId,
-         JSON.stringify(was ?? {}), JSON.stringify(fields)]);
-
-      await client.query('commit');
-    } catch (e) {
-      await client.query('rollback'); throw e;
-    } finally { client.release(); }
+    return speakingForThisLayer(() => updatePerson.execute({ actorId: actor, personId, fields }));
   },
 
-  /**
-   * Move someone to another club. Closes the old affiliation, opens a new one.
-   * The grading history is untouched — it belongs to the person.
-   */
+  /** Move someone to another club. The grading history is untouched: it belongs to the person. */
   async transfer(actor, personId, toOrgId, on = new Date()) {
-    const current = await one(`
-      select id, organisation_id from affiliation
-      where person_id = $1 and ends is null and role = 'member'`, [personId]);
-    if (!current) throw new NotFound('No current membership');
-    await assertRole(actor, current.organisation_id, REGISTER);
-    await assertRole(actor, toOrgId, REGISTER);
-
-    const client = await pool.connect();
-    try {
-      await client.query('begin');
-      await client.query('update affiliation set ends = $2 where id = $1',
-        [current.id, on]);
-      const { rows } = await client.query(`
-        insert into affiliation (person_id, organisation_id, role, starts, status)
-        values ($1,$2,'member',$3,'active') returning *`,
-        [personId, toOrgId, on]);
-      await client.query('commit');
-      return rows[0];
-    } catch (e) {
-      await client.query('rollback'); throw e;
-    } finally { client.release(); }
+    return speakingForThisLayer(() => transferMember.execute({ actorId: actor, personId, toOrganisationId: toOrgId, on }));
   },
 };
 
